@@ -1,0 +1,1 @@
+- [Supabase connector limits](supabase-integration-constraints.md) — the connected Supabase integration exposes authenticated REST/PostgREST access, not direct SQL/DDL execution.
