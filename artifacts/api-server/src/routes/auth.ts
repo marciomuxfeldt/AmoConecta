@@ -5,7 +5,6 @@ import {
   LoginResponse,
 } from "@workspace/api-zod";
 import { createClient } from "@supabase/supabase-js";
-import { supabaseProxy } from "../lib/supabase";
 
 const router: IRouter = Router();
 const SESSION_COOKIE = "amoconecta_session";
