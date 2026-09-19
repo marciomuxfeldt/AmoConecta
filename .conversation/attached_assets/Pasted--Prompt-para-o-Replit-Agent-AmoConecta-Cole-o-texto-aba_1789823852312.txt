@@ -1,0 +1,199 @@
+# Prompt para o Replit Agent — AmoConecta
+
+> Cole o texto abaixo (tudo a partir da linha "Construa uma aplicação web…") no Replit Agent.
+> Use o modo Agent, não o Assistant, e confirme cada fase antes de mandar seguir para a próxima.
+
+---
+
+Construa uma aplicação web chamada **AmoConecta**, uma plataforma interna de envio de e-mail em massa para campanhas de crédito do Amo Ofertas (marketplace de delivery). Ela será usada por **uma única pessoa do time de marketing**. O domínio final será `amoconecta.com.br`.
+
+Responda e escreva toda a interface em **português do Brasil**.
+
+## Contexto do negócio
+
+O Amo Ofertas concede créditos para usuários comprarem no app. Hoje a comunicação é só por push, e quem desinstalou o app não recebe. O AmoConecta resolve isso: o marketing exporta um CSV do dashboard interno com a lista de quem ganhou crédito, sobe no AmoConecta, monta o e-mail e dispara.
+
+A base tem mais de 500 mil usuários. Uma campanha típica vai de 100 a 100.000 destinatários. Cerca de 74% dos endereços são Gmail, então a reputação de envio é o ativo mais crítico do sistema — várias regras abaixo existem só para protegê-la e **não são negociáveis**.
+
+## Stack obrigatória
+
+- **Frontend:** React 18 + TypeScript + Vite + Tailwind CSS
+- **Backend:** Node.js + Express + TypeScript
+- **Banco de dados e Storage:** Supabase (Postgres + Storage), acessado pelo `@supabase/supabase-js` com service role key no backend
+- **Envio de e-mail:** Resend, via API REST (`https://api.resend.com`)
+- **Autenticação:** Supabase Auth, e-mail e senha, com cadastro público desabilitado. Um único usuário, criado manualmente.
+- **Worker de fila:** um script Node separado (`worker/index.ts`) executado por um **Scheduled Deployment do Replit** a cada 1 minuto. Não use `node-cron` nem `setInterval` dentro do servidor web.
+
+Não use nenhum ORM pesado. Use SQL direto ou o query builder do Supabase.
+
+## Variáveis de ambiente (Replit Secrets)
+
+```
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+SUPABASE_ANON_KEY
+RESEND_API_KEY
+RESEND_WEBHOOK_SECRET
+SENDER_NAME            # "Amo Ofertas"
+SENDER_EMAIL           # marketing@news.amo.delivery
+APP_BASE_URL           # URL pública da app
+UNSUBSCRIBE_SECRET     # string aleatória para assinar o token de descadastro
+```
+
+Nunca coloque chave no código. Nunca exponha a service role key no frontend.
+
+## Modelo de dados
+
+Gere as migrações SQL e rode no Supabase.
+
+**`campanha`**
+`id uuid pk`, `nome text`, `assunto text`, `assunto_lembrete text`, `remetente_nome text`, `remetente_email text`, `valor_credito numeric`, `validade_credito date`, `corpo jsonb` (lista ordenada de blocos do editor), `url_deeplink text`, `url_landing text`, `teto_hora int`, `teto_dia int`, `status text` (rascunho | agendada | enviando | pausada | concluida), `agendada_para timestamptz`, `lembrete_ativo bool`, `lembrete_horas int default 48`, `teste_enviado bool default false`, `criado_em timestamptz`
+
+**`destinatario`**
+`id uuid pk`, `campanha_id uuid fk`, `email text`, `nome text`, `user_id text`, `regiao text`, `ultimo_pedido date`, `status text` (pendente | processando | enviado | entregue | aberto | clicado | bounce | erro | suprimido), `is_lembrete bool default false`, `resend_email_id text`, `tentativas int default 0`, `erro text`, `enviado_em timestamptz`, `entregue_em timestamptz`, `aberto_em timestamptz`, `clicado_em timestamptz`
+
+Índices: `unique (campanha_id, email, is_lembrete)`, `(campanha_id, status)`, `(resend_email_id)`, `(status, campanha_id) where status = 'pendente'`
+
+**`evento`**
+`id bigserial pk`, `resend_email_id text`, `tipo text`, `ocorrido_em timestamptz`, `payload jsonb`, `recebido_em timestamptz default now()`
+Índice em `resend_email_id`.
+
+**`supressao`**
+`email text pk`, `motivo text` (descadastro | bounce | reclamacao | desengajamento), `origem text`, `criado_em timestamptz default now()`
+
+**`engajamento`**
+`email text pk`, `campanhas_sem_abrir int default 0`, `ultima_abertura timestamptz`
+
+## Fluxo de importação do CSV
+
+O CSV vem do dashboard interno com este cabeçalho exato, codificado em UTF-8 com BOM:
+
+```
+user_id,user_name,user_email,user_phone,last_order_region,last_order_date
+```
+
+Exemplo de linha:
+```
+66b1832b943d37b76d0eeede,Ana Paula Rocha,silvaanarocha151@gmail.com,49989046618,concordia-sc,"4 outubro, 2024, 22:07"
+```
+
+Requisitos da importação:
+
+1. **O arquivo NÃO sobe pela API do backend.** Um CSV de 500 mil linhas passa de 40 MB. O navegador envia direto para o Supabase Storage usando URL assinada, e depois chama o backend só com o caminho do arquivo.
+2. O backend processa em streaming, em blocos de 5.000 linhas, gravando progresso numa tabela para a tela mostrar barra de andamento.
+3. Remova o BOM do cabeçalho. Reconheça as colunas pelo nome, ignore colunas extras, não dependa da ordem.
+4. Faça o parse de `last_order_date` no formato `"4 outubro, 2024, 22:07"` — mês por extenso em português, com vírgulas dentro de aspas.
+5. Normalize `user_name`: converta para capitalização de nome próprio (muitos vêm todo em minúsculo), mantenha preposições em minúsculo (`de`, `da`, `dos`), e se o nome estiver vazio ou contiver dígitos use o fallback "tudo bem".
+6. Valide o formato do e-mail e normalize para minúsculas.
+7. Descarte quem está em `supressao`.
+8. Deduplicação por e-mail sempre; deduplicação por telefone como opção marcável pelo operador.
+9. Ao final, mostre um **resumo de validação antes de qualquer envio**: total importado, removidos por descadastro, por bounce anterior, por duplicidade, por e-mail inválido, e a distribuição por faixa de recência calculada a partir de `last_order_date` (0–30d, 31–60d, 61–90d, 91–180d, 181–365d, mais de 365d).
+
+## Worker de envio
+
+Roda a cada minuto pelo Scheduled Deployment. Cada execução:
+
+1. Busca campanhas com status `enviando` cuja janela de agendamento já chegou.
+2. Verifica o teto horário e diário da campanha contra o que já foi enviado. Se a cota acabou, encerra sem enviar.
+3. Reserva um lote de até 500 destinatários pendentes **numa transação**, marcando `status = 'processando'`, com `FOR UPDATE SKIP LOCKED`, para que execuções simultâneas nunca peguem a mesma linha.
+4. **Ordena por `ultimo_pedido` decrescente** — os mais recentes primeiro. Isso é regra de aquecimento de reputação, não detalhe.
+5. Divide em chamadas de até 100 e envia para `POST /emails/batch` do Resend.
+6. Cada envio carrega:
+   - Header `Idempotency-Key` derivado de `campanha_id + email + is_lembrete`
+   - Header `List-Unsubscribe: <{APP_BASE_URL}/descadastro?t={token}>`
+   - Header `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
+   - `tags` com `campanha_id` e `is_lembrete`
+7. Grava o `id` devolvido pelo Resend em `resend_email_id` e muda o status para `enviado`.
+8. Em erro `429`, devolve a linha para `pendente` com espera progressiva. Após 3 tentativas, marca `erro`.
+9. Termina rápido e retorna. Nunca segure a execução esperando.
+
+O token de descadastro é um HMAC-SHA256 do e-mail com `UNSUBSCRIBE_SECRET`, codificado em base64url. Assim a página de descadastro não precisa consultar o banco para validar e ninguém consegue forjar ou enumerar endereços.
+
+## Webhooks do Resend
+
+Endpoint `POST /webhooks/resend`, com **verificação obrigatória da assinatura** (o Resend usa Svix — valide com a biblioteca `svix`).
+
+Eventos a tratar: `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounced`, `email.complained`, `email.opened`, `email.clicked`.
+
+Regras:
+
+- Insira sempre em `evento`, sem exceção.
+- Atualize o status consolidado em `destinatario` pelo `resend_email_id`.
+- **Os eventos chegam fora de ordem.** Um `opened` pode chegar antes do `delivered` do mesmo e-mail. Toda comparação de tempo usa o `created_at` do payload, nunca a hora de chegada. Nunca regrida um status: quem já está `clicado` não volta para `entregue`.
+- `email.bounced` → insere em `supressao` com motivo `bounce`, imediatamente.
+- `email.complained` → insere em `supressao` com motivo `reclamacao`, imediatamente.
+- `email.delivery_delayed` **não** suprime nada — o Resend já reenvia sozinho.
+
+## Telas
+
+**Login.** Simples, Supabase Auth.
+
+**Lista de campanhas.** Nome, status, enviados, entregues, taxa de abertura, taxa de clique, data. Botão de **duplicar campanha** (importante: a próxima campanha costuma ser a anterior com outro texto).
+
+**Nova campanha.** Formulário de uma tela só com os campos da tabela `campanha`.
+
+**Importação.** Área de arrastar arquivo, barra de progresso, e a tela de resumo de validação descrita acima.
+
+**Editor do e-mail.** Blocos livres que o operador adiciona, remove e reordena por arrastar: texto (com negrito, itálico, link), imagem (upload direto para o Supabase Storage, virando URL pública), botão (rótulo + destino), e divisor. Sem limite de quantidade nem ordem fixa.
+- Variável `{{nome}}` disponível no texto e no assunto, com fallback.
+- Pré-visualização ao lado, em largura de desktop e de celular.
+- Botão "enviar teste para mim".
+- O rodapé é **fixo e não editável**: contém o link de descadastro e a frase explicando por que a pessoa está recebendo.
+- O HTML gerado deve ser compatível com Outlook: layout em tabelas, largura máxima 600px, CSS inline, sem flexbox e sem grid.
+
+**Acompanhamento.** Barra de progresso do envio, contadores ao vivo (enviados, entregues, abertos, clicados, bounces, reclamações), e **em destaque a taxa de bounce e a taxa de reclamação**, coloridas por faixa. Botão de pausar sempre visível. Botão de exportar.
+
+**Descadastro.** Página pública, sem login, resolve em um clique e confirma. Aceita `GET` e `POST` (o `POST` é o que o Gmail usa no botão nativo).
+
+## Regras invioláveis
+
+Estas regras protegem a reputação de envio. Implemente todas; nenhuma é opcional.
+
+1. **Consulta a `supressao` antes de todo envio**, inclusive no lembrete. Nada sai para quem está lá.
+2. **Pausa automática**: se a taxa de reclamação de uma campanha passar de 0,2% ou a de bounce passar de 2% (calculadas sobre o que já foi enviado, com mínimo de 1.000 enviados para evitar falso positivo), mude o status para `pausada` e registre o motivo. Ninguém fica olhando o painel de madrugada.
+3. **Teste obrigatório**: não permita agendar campanha com `teste_enviado = false`.
+4. **Confirmação por digitação**: acima de 5.000 destinatários, o operador precisa digitar o número total para liberar o disparo.
+5. **Lembrete**: opcional por campanha, dispara entre 48 e 72 horas depois, **somente para quem não abriu e não clicou**, no máximo uma vez, com `assunto_lembrete` obrigatoriamente diferente do assunto original, e sempre reconsultando a supressão.
+6. **Desengajamento crônico**: ao encerrar uma campanha, incremente `campanhas_sem_abrir` de quem não abriu e zere de quem abriu. Ao chegar a 3, insira em `supressao` com motivo `desengajamento`.
+
+## Exportação para BI
+
+Botão que gera um CSV com **uma linha por destinatário por campanha**, nestas colunas:
+
+```
+email, user_id, campanha, data_envio, is_lembrete, entregue, data_entrega,
+abriu, data_abertura, clicou, data_clique, bounce, descadastrou, reclamou,
+regiao, ultimo_pedido
+```
+
+A geração é um **trabalho em segundo plano** — 500 mil linhas não saem numa requisição HTTP. Grave o arquivo no Supabase Storage e devolva um link assinado quando terminar, com aviso no painel.
+
+## Construa nesta ordem
+
+Pare ao fim de cada fase e me mostre o que ficou pronto antes de seguir.
+
+1. **Fase 1 — Fundação.** Projeto, stack, migrações SQL no Supabase, login, layout base, lista de campanhas vazia.
+2. **Fase 2 — Campanha e importação.** CRUD de campanha, upload direto para Storage, parser do CSV com as regras acima, tela de resumo de validação.
+3. **Fase 3 — Editor.** Blocos livres, preview, HTML compatível com Outlook, envio de teste.
+4. **Fase 4 — Worker e envio.** Script do worker, integração com o Resend, travas e tetos, pausa automática. Configure o Scheduled Deployment.
+5. **Fase 5 — Webhooks e painel.** Endpoint com validação de assinatura, atualização de status, tela de acompanhamento ao vivo.
+6. **Fase 6 — Lembrete, supressão e exportação.** Régua do lembrete, desengajamento crônico, página de descadastro, exportação em segundo plano.
+
+## Critérios de aceite
+
+- Importar um CSV de 20 mil linhas e ver o resumo de validação correto, com a distribuição por recência.
+- Enviar um teste e receber o e-mail formatado, com o nome personalizado e o rodapé de descadastro.
+- Disparar uma campanha respeitando o teto horário, verificável na tabela `destinatario`.
+- Rodar o worker duas vezes em paralelo e confirmar que nenhum e-mail é duplicado.
+- Receber um webhook e ver o status mudar na tela de acompanhamento.
+- Clicar no descadastro e confirmar que o e-mail entra em `supressao` e é bloqueado na campanha seguinte.
+- Exportar o CSV e abrir com todas as colunas preenchidas.
+
+## O que NÃO fazer
+
+- Não use a API de Broadcasts nem Audiences do Resend. A conta tem limite de 25.000 contatos de marketing e já usa 7.180 — não cabe nem uma cidade.
+- Não envie o CSV pelo corpo de uma requisição HTTP.
+- Não use `setInterval` ou `node-cron` no processo web para a fila.
+- Não permita editar ou remover o rodapé de descadastro.
+- Não crie multiusuário, permissões, aprovação de campanha, teste A/B ou segmentação dentro do painel. Tudo isso é v2.
+- Não deixe a tela de envio disparar direto: tudo passa pela fila.
