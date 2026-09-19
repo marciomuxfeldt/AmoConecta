@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: API do AmoConecta
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Sessão da equipe de marketing
+  - name: campaigns
+    description: Campanhas de e-mail
 paths:
   /healthz:
     get:
@@ -24,7 +28,78 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/session:
+    get:
+      operationId: getAuthSession
+      tags: [auth]
+      summary: Retorna a sessão atual
+      responses:
+        "200":
+          description: Sessão atual ou ausência de sessão
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Autentica o usuário do marketing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Sessão autenticada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "401":
+          description: Credenciais inválidas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Encerra a sessão atual
+      responses:
+        "204":
+          description: Sessão encerrada
+  /campaigns:
+    get:
+      operationId: listCampaigns
+      tags: [campaigns]
+      summary: Lista campanhas da conta autenticada
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Lista de campanhas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CampaignListItem"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: amoconecta_session
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +108,81 @@ components:
           type: string
       required:
         - status
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+    LoginInput:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+      required:
+        - email
+        - password
+    AuthUser:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+      required:
+        - id
+        - email
+    AuthSession:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        user:
+          anyOf:
+            - $ref: "#/components/schemas/AuthUser"
+            - type: "null"
+      required:
+        - authenticated
+        - user
+    CampaignListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        status:
+          type: string
+          enum: [rascunho, agendada, enviando, pausada, concluida]
+        enviados:
+          type: integer
+        entregues:
+          type: integer
+        abertos:
+          type: integer
+        clicados:
+          type: integer
+        agendada_para:
+          type: ["string", "null"]
+          format: date-time
+        criado_em:
+          type: string
+          format: date-time
+      required:
+        - id
+        - nome
+        - status
+        - enviados
+        - entregues
+        - abertos
+        - clicados
+        - agendada_para
+        - criado_em
 

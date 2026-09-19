@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "AmoConecta"
+description = "Plataforma interna do Amo Ofertas para autenticação da equipe de marketing e acompanhamento de campanhas de e-mail. Nesta primeira fase, entrega a fundação segura com login, layout base e uma lista vazia de campanhas."
+version = "1.0.0"
+id = "artifacts/amoconecta"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22944
+
+[services.development]
+run = "pnpm --filter @workspace/amoconecta run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/amoconecta", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/amoconecta/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22944"
+BASE_PATH = "/"
