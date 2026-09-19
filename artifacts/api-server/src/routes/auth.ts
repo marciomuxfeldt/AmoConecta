@@ -4,11 +4,30 @@ import {
   LoginBody,
   LoginResponse,
 } from "@workspace/api-zod";
+import { createClient } from "@supabase/supabase-js";
 import { supabaseProxy } from "../lib/supabase";
 
 const router: IRouter = Router();
 const SESSION_COOKIE = "amoconecta_session";
 const SESSION_MAX_AGE = 1000 * 60 * 60 * 24 * 7;
+
+function supabaseAuthClient() {
+  const url = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error(
+      "SUPABASE_URL e SUPABASE_ANON_KEY são obrigatórias para o login.",
+    );
+  }
+
+  return createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
 
 type SupabaseUser = {
   id: string;
@@ -44,22 +63,16 @@ export async function getSupabaseUser(
   const token = sessionToken(req);
   if (!token) return null;
 
-  const response = await supabaseProxy("/auth/v1/user", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!response.ok) {
+  const { data, error } = await supabaseAuthClient().auth.getUser(token);
+  if (error || !data.user) {
     clearSession(res);
     return null;
   }
 
-  const user = (await response.json()) as SupabaseUser;
-  if (!user.id) {
-    clearSession(res);
-    return null;
-  }
-
-  return { token, user };
+  return {
+    token,
+    user: { id: data.user.id, email: data.user.email ?? null },
+  };
 }
 
 router.get("/auth/session", async (req, res) => {
@@ -75,24 +88,16 @@ router.get("/auth/session", async (req, res) => {
 
 router.post("/auth/login", async (req, res) => {
   const credentials = LoginBody.parse(req.body);
-  const response = await supabaseProxy("/auth/v1/token?grant_type=password", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(credentials),
-  });
+  const { data: authData, error } =
+    await supabaseAuthClient().auth.signInWithPassword(
+    credentials,
+  );
 
-  if (!response.ok) {
-    const originalError = await response.text();
-    let supabaseError: unknown = originalError;
-    try {
-      supabaseError = JSON.parse(originalError);
-    } catch {
-      // Preserve the exact text when Supabase does not return JSON.
-    }
+  if (error) {
     req.log.error(
       {
-        supabaseStatus: response.status,
-        supabaseError,
+        supabaseStatus: error.status,
+        supabaseError: error,
       },
       "Supabase Auth login failed",
     );
@@ -100,22 +105,17 @@ router.post("/auth/login", async (req, res) => {
     return;
   }
 
-  const payload = (await response.json()) as {
-    access_token?: string;
-    user?: SupabaseUser;
-  };
-
-  if (!payload.access_token || !payload.user?.id) {
+  if (!authData.session?.access_token || !authData.user?.id) {
     res.status(401).json({ error: "Não foi possível iniciar sua sessão." });
     return;
   }
 
-  setSession(res, payload.access_token);
+  setSession(res, authData.session.access_token);
   const data = LoginResponse.parse({
     authenticated: true,
     user: {
-      id: payload.user.id,
-      email: payload.user.email ?? credentials.email,
+      id: authData.user.id,
+      email: authData.user.email ?? credentials.email,
     },
   });
   res.json(data);
