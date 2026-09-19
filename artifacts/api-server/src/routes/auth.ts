@@ -82,6 +82,20 @@ router.post("/auth/login", async (req, res) => {
   });
 
   if (!response.ok) {
+    const originalError = await response.text();
+    let supabaseError: unknown = originalError;
+    try {
+      supabaseError = JSON.parse(originalError);
+    } catch {
+      // Preserve the exact text when Supabase does not return JSON.
+    }
+    req.log.error(
+      {
+        supabaseStatus: response.status,
+        supabaseError,
+      },
+      "Supabase Auth login failed",
+    );
     res.status(401).json({ error: "E-mail ou senha inválidos." });
     return;
   }
