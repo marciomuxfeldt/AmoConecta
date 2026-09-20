@@ -19,7 +19,7 @@ create table if not exists public.destinatario (
   id uuid primary key default gen_random_uuid(),
   campanha_id uuid not null references public.campanha(id) on delete cascade,
   id_usuario text,
-  nome text not null,
+  nome text,
   email text not null,
   telefone text,
   regiao text,
@@ -33,6 +33,9 @@ alter table public.destinatario
 
 alter table public.destinatario
   add column if not exists regiao text;
+
+alter table public.destinatario
+  alter column nome drop not null;
 
 create unique index if not exists destinatario_campanha_email_lembrete_uidx
   on public.destinatario (campanha_id, email, is_lembrete);

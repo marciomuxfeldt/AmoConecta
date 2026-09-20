@@ -29,7 +29,7 @@ const RECENCY_BUCKETS = [
 
 type ImportRow = {
   id_usuario: string | null;
-  nome: string;
+  nome: string | null;
   email: string;
   telefone: string | null;
   regiao: string | null;
@@ -106,10 +106,16 @@ function normalizeEmail(value: string): string {
   return value.trim().replace(/\s+/g, "").toLocaleLowerCase("pt-BR");
 }
 
-function fallbackName(email: string): string {
+function fallbackName(email: string): string | null {
   const localPart = email.split("@", 1)[0] ?? "";
-  const name = normalizeName(localPart.replace(/[.+_-]+/gu, " "));
-  return name || "Contato";
+  const parts = localPart.split(/[._-]/u);
+  if (
+    parts.length < 2 ||
+    parts.some((part) => !/^\p{L}{2,}$/u.test(part))
+  ) {
+    return null;
+  }
+  return normalizeName(parts.join(" ")) || null;
 }
 
 function normalizePhone(value: string): string | null {
