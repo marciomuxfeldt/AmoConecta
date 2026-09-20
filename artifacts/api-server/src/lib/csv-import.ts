@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const BLOCK_SIZE = 5_000;
+const EXISTING_EMAIL_PAGE_SIZE = 1_000;
 const MAX_ERROR_SAMPLES = 20;
 
 const MONTHS: Record<string, number> = {
@@ -54,6 +55,9 @@ export type ImportSummary = {
   total_linhas: number;
   validos: number;
   invalidos: number;
+  novos: number;
+  atualizados: number;
+  duplicados_no_arquivo: number;
   duplicados_email: number;
   duplicados_telefone: number;
   suprimidos: number;
@@ -304,12 +308,38 @@ async function loadSuppression(
   };
 }
 
+async function loadExistingCampaignEmails(
+  client: SupabaseClient,
+  campaignId: string,
+): Promise<Set<string>> {
+  const emails = new Set<string>();
+  for (let offset = 0; ; offset += EXISTING_EMAIL_PAGE_SIZE) {
+    const { data, error } = await client
+      .from("destinatario")
+      .select("email")
+      .eq("campanha_id", campaignId)
+      .eq("is_lembrete", false)
+      .range(offset, offset + EXISTING_EMAIL_PAGE_SIZE - 1);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (typeof row.email === "string") {
+        emails.add(normalizeEmail(row.email));
+      }
+    }
+    if (!data || data.length < EXISTING_EMAIL_PAGE_SIZE) break;
+  }
+  return emails;
+}
+
 function buildSummary(storagePath: string): ImportSummary {
   return {
     storage_path: storagePath,
     total_linhas: 0,
     validos: 0,
     invalidos: 0,
+    novos: 0,
+    atualizados: 0,
+    duplicados_no_arquivo: 0,
     duplicados_email: 0,
     duplicados_telefone: 0,
     suprimidos: 0,
@@ -340,6 +370,7 @@ export async function validateAndImportCsv({
 }): Promise<ImportSummary> {
   const summary = buildSummary(storagePath);
   const suppression = await loadSuppression(client);
+  const existingEmails = await loadExistingCampaignEmails(client, campaignId);
   const seenEmails = new Set<string>();
   const seenPhones = new Set<string>();
   const iterator = recordsFromStream(stream);
@@ -399,15 +430,20 @@ export async function validateAndImportCsv({
   }
 
   let block: ImportRow[] = [];
+  let blockNewCount = 0;
+  let blockUpdatedCount = 0;
   const flush = async () => {
     if (block.length === 0) return;
     const { error } = await client.from("destinatario").upsert(block, {
       onConflict: "campanha_id,email,is_lembrete",
-      ignoreDuplicates: true,
     });
     if (error) throw error;
-    summary.destinatarios_salvos += block.length;
+    summary.novos += blockNewCount;
+    summary.atualizados += blockUpdatedCount;
+    summary.destinatarios_salvos = summary.novos;
     block = [];
+    blockNewCount = 0;
+    blockUpdatedCount = 0;
   };
 
   for await (const record of iterator) {
@@ -451,6 +487,7 @@ export async function validateAndImportCsv({
       continue;
     }
     if (seenEmails.has(email)) {
+      summary.duplicados_no_arquivo += 1;
       summary.duplicados_email += 1;
       summary.invalidos += 1;
       addError(summary, record.line, "e-mail duplicado no arquivo");
@@ -480,6 +517,11 @@ export async function validateAndImportCsv({
       regiao,
       data_ultima_compra: parsedDate.date,
     });
+    if (existingEmails.has(email)) {
+      blockUpdatedCount += 1;
+    } else {
+      blockNewCount += 1;
+    }
     if (block.length >= BLOCK_SIZE) {
       await flush();
     }

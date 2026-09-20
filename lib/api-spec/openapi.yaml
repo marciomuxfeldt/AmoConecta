@@ -761,6 +761,12 @@ components:
           type: integer
         invalidos:
           type: integer
+        novos:
+          type: integer
+        atualizados:
+          type: integer
+        duplicados_no_arquivo:
+          type: integer
         duplicados_email:
           type: integer
         duplicados_telefone:
@@ -790,6 +796,9 @@ components:
         - total_linhas
         - validos
         - invalidos
+        - novos
+        - atualizados
+        - duplicados_no_arquivo
         - duplicados_email
         - duplicados_telefone
         - suprimidos
