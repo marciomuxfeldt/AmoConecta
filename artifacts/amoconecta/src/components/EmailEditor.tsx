@@ -143,9 +143,8 @@ async function compressImageForUpload(file: File) {
     }
   }
 
-  const canUseWebp = canvas.toDataURL("image/webp", 0.8).startsWith("data:image/webp");
-  const mimeType = hasTransparency ? "image/png" : canUseWebp ? "image/webp" : "image/jpeg";
-  const extension = mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
+  const mimeType = hasTransparency ? "image/png" : "image/jpeg";
+  const extension = hasTransparency ? "png" : "jpg";
   const blob = await canvasToBlob(canvas, mimeType, mimeType === "image/png" ? undefined : 0.8);
   if (blob.size > MAX_EMAIL_IMAGE_BYTES) {
     throw new Error("A imagem ainda ficou maior que 5 MB após a compressão.");
