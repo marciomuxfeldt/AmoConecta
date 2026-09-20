@@ -1,0 +1,145 @@
+# Fase 4 — Envio e worker (AmoConecta)
+
+Fases 1, 2 e 3 estão concluídas e validadas. Siga para a **Fase 4 — Worker e envio**.
+
+Esta é a fase mais sensível do projeto: é a primeira que produz efeito irreversível no mundo real. Um erro aqui não aparece na tela — aparece na caixa de entrada de milhares de pessoas, e não tem desfazer.
+
+## Regra número zero: modo de segurança
+
+Antes de qualquer outra coisa, implemente o modo de segurança e deixe-o **ligado por padrão**.
+
+Crie o Secret `ENVIO_LIBERADO` (valor `false`) e `ENVIO_ALLOWLIST` (lista de e-mails separados por vírgula).
+
+Enquanto `ENVIO_LIBERADO` for `false`:
+
+- O worker só envia para endereços presentes em `ENVIO_ALLOWLIST`.
+- Todos os demais destinatários são marcados com status `bloqueado_modo_teste` e **nunca** recebem e-mail.
+- O painel exibe um aviso permanente e visível: "Modo de segurança ativo — envios restritos à lista de teste".
+
+Isso vale inclusive para campanhas agendadas e para o lembrete. Não há caminho que contorne essa checagem. Ela existe porque durante o desenvolvimento desta fase um engano custa 19 mil e-mails enviados por acidente, sem volta.
+
+## Migração
+
+Me entregue o SQL em bloco de código para eu aplicar à mão — você não tem acesso a DDL. **Não crie política de RLS**: as tabelas ficam com RLS habilitado e nenhuma política, porque o backend usa a service role.
+
+Faltam em `destinatario`:
+
+```
+status                text    not null default 'pendente'
+                      check (status in ('pendente','processando','enviado','entregue',
+                                        'aberto','clicado','bounce','erro','suprimido',
+                                        'bloqueado_modo_teste'))
+resend_email_id       text
+tentativas            integer not null default 0
+erro                  text
+enviado_em            timestamptz
+entregue_em           timestamptz
+aberto_em             timestamptz
+clicado_em            timestamptz
+```
+
+Índices necessários:
+
+```
+(campanha_id, status)
+(resend_email_id)
+(status) where status = 'pendente'
+```
+
+Falta em `supressao`:
+
+```
+origem text
+```
+
+`origem` registra de onde veio a supressão — qual campanha, qual evento. É o que responde quando alguém reclamar que recebeu e-mail depois de ter se descadastrado.
+
+Adicione também em `campanha` o campo `reply_to text`.
+
+## Secrets
+
+```
+RESEND_API_KEY
+SENDER_NAME         = Amo Ofertas
+SENDER_EMAIL        = noreply@marketing.amo.delivery
+REPLY_TO_EMAIL      = (a definir — deixe configurável por campanha, com este como padrão)
+UNSUBSCRIBE_SECRET  = (string aleatória longa)
+APP_BASE_URL
+ENVIO_LIBERADO      = false
+ENVIO_ALLOWLIST
+```
+
+O domínio `marketing.amo.delivery` já está verificado no Resend. O remetente precisa obrigatoriamente pertencer a ele.
+
+## O worker
+
+**O worker roda em um Scheduled Deployment do Replit, em processo separado, a cada 1 minuto.** Não use `setInterval`, `node-cron`, nem execute o job dentro do processo web.
+
+Esta exigência não é preferência de estilo. Se o worker viver no processo web, um reinício no meio de uma campanha deixa milhares de destinatários travados em `processando` para sempre — ninguém envia, ninguém percebe, e a campanha morre pela metade sem erro visível. Na importação isso era tolerável; aqui não é.
+
+Cada execução:
+
+1. Busca campanhas com status `enviando` cuja janela de agendamento já chegou.
+2. Verifica `teto_hora` e `teto_dia` contra o que já foi enviado nessa janela. Cota esgotada encerra a execução sem enviar.
+3. Reserva um lote de até 500 destinatários `pendente` **numa transação**, com `FOR UPDATE SKIP LOCKED`, marcando-os como `processando`. Duas execuções simultâneas nunca podem pegar a mesma linha.
+4. **Ordena por `data_ultima_compra` decrescente** — os mais recentes primeiro. Isso é a regra de aquecimento de reputação, não um detalhe de ordenação.
+5. Consulta a tabela `supressao` para o lote inteiro em uma única query. Quem estiver lá vira `suprimido` e não é enviado. Esta checagem acontece **sempre**, inclusive no lembrete e em reenvios.
+6. Aplica o modo de segurança descrito acima.
+7. Envia em chamadas de até 100 destinatários ao endpoint de lote do Resend.
+8. Grava `resend_email_id`, `enviado_em` e muda o status para `enviado`.
+9. Encerra rápido. O estado vive na fila, nunca em memória entre execuções.
+
+Em `429` do Resend, devolve a linha para `pendente` com espera progressiva. Após 3 tentativas, status `erro` com a causa técnica completa em `erro`.
+
+O limite da conta é de 10 requisições por segundo, compartilhado por todas as chaves do time. Respeite com folga.
+
+## Integração com o Resend
+
+Cada e-mail enviado carrega:
+
+- **Header `Idempotency-Key`** derivado de `campanha_id + email + is_lembrete`. É o que impede duplicação em retentativa.
+- **Header `List-Unsubscribe`**: `<{APP_BASE_URL}/descadastro?t={token}>`
+- **Header `List-Unsubscribe-Post`**: `List-Unsubscribe=One-Click`
+- **`reply_to`** com o valor da campanha ou o padrão do Secret.
+- **`tags`** com `campanha_id` e `is_lembrete`, para cruzamento posterior.
+
+Os dois headers de descadastro não são opcionais: sem eles o Gmail rejeita o remetente como envio em massa. Como estamos usando a API transacional, eles precisam ser montados manualmente em cada envio.
+
+## Descadastro
+
+O token é um HMAC-SHA256 do e-mail com `UNSUBSCRIBE_SECRET`, codificado em base64url. Assim a página valida sem consultar o banco e ninguém consegue forjar ou enumerar endereços.
+
+A página `/descadastro` é pública, sem login, aceita **GET e POST** (o POST é o que o Gmail usa no botão nativo), resolve em um clique e confirma na tela. Ao descadastrar, grava em `supressao` com `motivo = 'descadastro'` e `origem` identificando a campanha.
+
+## Envio de teste
+
+Habilite o botão "Enviar teste para mim". Ele envia o e-mail montado para o endereço do usuário logado, ignorando a fila, com um marcador `[TESTE]` no assunto. O envio de teste **também** respeita o modo de segurança.
+
+Marque `teste_enviado = true` na campanha. Sem isso, o agendamento continua bloqueado.
+
+## Travas obrigatórias
+
+1. **Consulta à supressão antes de todo envio**, sem exceção e sem atalho.
+2. **Teste obrigatório**: não permitir agendar campanha com `teste_enviado = false`.
+3. **Confirmação por digitação**: acima de 5.000 destinatários, o operador digita o número total para liberar.
+4. **Mecanismo de pausa**: implemente a função que avalia taxa de reclamação (limite 0,2%) e de bounce (limite 2%), com mínimo de 1.000 enviados para evitar falso positivo, e muda o status para `pausada` registrando o motivo. Os eventos que alimentam essas taxas chegam na Fase 5 — aqui construa o mecanismo e o botão de pausar manual.
+5. **Nunca mascarar erro**: a coluna `erro` e os logs recebem sempre a causa técnica completa. O texto amigável existe apenas na resposta ao navegador.
+
+## O que NÃO fazer
+
+- Não implemente webhooks, lembrete nem exportação. São as Fases 5 e 6.
+- Não use a API de Broadcasts nem Audiences do Resend.
+- Não rode o worker dentro do processo web.
+- Não crie política de RLS nas tabelas.
+- Não mude `ENVIO_LIBERADO` para `true` — essa decisão é minha, depois dos testes.
+
+## Critérios de aceite
+
+- Enviar um teste e receber o e-mail formatado, com nome personalizado, rodapé de descadastro e Reply-To correto.
+- Com `ENVIO_LIBERADO=false`, disparar uma campanha e confirmar que apenas os endereços da allowlist receberam, e que os demais ficaram como `bloqueado_modo_teste`.
+- **Rodar o worker duas vezes em paralelo e confirmar que nenhum destinatário é processado duas vezes.** Este é o teste mais importante da fase.
+- Confirmar que o teto horário é respeitado, verificável na tabela `destinatario`.
+- Clicar no descadastro e confirmar que o e-mail entra em `supressao` com `origem` preenchida, e que fica bloqueado no envio seguinte.
+- Confirmar que os headers `List-Unsubscribe` e `List-Unsubscribe-Post` chegam no e-mail recebido.
+
+Ao final, me entregue o SQL da migração e me diga se algo precisa ser configurado manualmente no Supabase, no Resend ou no Replit.
