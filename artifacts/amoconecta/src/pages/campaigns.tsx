@@ -45,6 +45,8 @@ import {
   useValidateCampaignImport,
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
+import { type EmailBlock, normalizeEmailBlocks } from '@workspace/email-template';
+import { EmailEditor } from '../components/EmailEditor';
 
 type SessionUser = { email: string } | null;
 
@@ -108,6 +110,24 @@ function toServerDate(value: string) {
   if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+}
+
+function isHttpUrl(value: string) {
+  return /^https?:\/\/[^\s]+$/iu.test(value.trim());
+}
+
+function validateEmailBlocks(blocks: EmailBlock[]) {
+  for (const block of blocks) {
+    if (block.type === 'image') {
+      if (!block.src || !isHttpUrl(block.src)) return 'Envie uma imagem antes de salvar o bloco de imagem.';
+      if (block.href?.trim() && !isHttpUrl(block.href)) return 'O link opcional da imagem precisa começar com https:// ou http://.';
+    }
+    if (block.type === 'button') {
+      if (!block.label.trim()) return 'Informe o rótulo de todos os botões.';
+      if (!isHttpUrl(block.href)) return 'Informe um destino válido para todos os botões.';
+    }
+  }
+  return null;
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -343,6 +363,7 @@ type CampaignFormValues = {
   lembrete_ativo: boolean;
   lembrete_horas: string;
   teste_enviado: boolean;
+  corpo: EmailBlock[];
 };
 
 const blankCampaign: CampaignFormValues = {
@@ -362,6 +383,7 @@ const blankCampaign: CampaignFormValues = {
   lembrete_ativo: false,
   lembrete_horas: '24',
   teste_enviado: false,
+  corpo: [],
 };
 
 function campaignToForm(campaign?: Campaign): CampaignFormValues {
@@ -383,6 +405,7 @@ function campaignToForm(campaign?: Campaign): CampaignFormValues {
     lembrete_ativo: campaign.lembrete_ativo,
     lembrete_horas: String(campaign.lembrete_horas ?? 24),
     teste_enviado: campaign.teste_enviado,
+    corpo: normalizeEmailBlocks(campaign.corpo),
   };
 }
 
@@ -395,6 +418,8 @@ function CampaignForm({ campaign, onSaved }: { campaign?: Campaign; onSaved: (ca
   const update = useUpdateCampaign();
   const form = useForm<CampaignFormValues>({ defaultValues: campaignToForm(campaign) });
   const isEditing = Boolean(campaign);
+  const emailBlocks = form.watch('corpo');
+  const emailSubject = form.watch('assunto');
 
   useEffect(() => {
     form.reset(campaignToForm(campaign));
@@ -405,6 +430,16 @@ function CampaignForm({ campaign, onSaved }: { campaign?: Campaign; onSaved: (ca
       form.setError('nome', { message: 'Preencha os campos obrigatórios antes de salvar.' });
       return;
     }
+    const contentError = validateEmailBlocks(values.corpo);
+    if (contentError) {
+      form.setError('corpo', { type: 'validate', message: contentError });
+      return;
+    }
+    const corpo = values.corpo.map((block) => (
+      block.type === 'image' && !block.href?.trim()
+        ? { ...block, href: undefined }
+        : block
+    ));
     const payload = {
       nome: values.nome.trim(),
       assunto: values.assunto.trim(),
@@ -422,6 +457,7 @@ function CampaignForm({ campaign, onSaved }: { campaign?: Campaign; onSaved: (ca
       lembrete_ativo: values.lembrete_ativo,
       lembrete_horas: Math.max(1, Number(values.lembrete_horas) || 24),
       teste_enviado: values.teste_enviado,
+      corpo,
     };
     if (campaign) {
       update.mutate({ campaignId: campaign.id, data: payload as UpdateCampaignInput }, { onSuccess: onSaved });
@@ -435,7 +471,7 @@ function CampaignForm({ campaign, onSaved }: { campaign?: Campaign; onSaved: (ca
 
   return (
     <form onSubmit={form.handleSubmit(submit)} className="space-y-5" noValidate data-testid="form-campaign">
-      <section className="panel p-5 sm:p-7">
+       <section className="panel p-5 sm:p-7">
         <div className="mb-6 flex items-start justify-between gap-4"><div><p className="section-kicker">01 · Identidade</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Como esta campanha será reconhecida?</h2></div><span className="font-mono text-[9px] uppercase tracking-[.12em] text-[#aaa3a1]">Obrigatório</span></div>
         <div className="grid gap-5 md:grid-cols-2">
           <Field label="Nome interno"><input {...form.register('nome')} className="field-control" placeholder="Ex.: Ofertas de sexta — eletrônicos" data-testid="input-campaign-name" /></Field>
@@ -465,8 +501,16 @@ function CampaignForm({ campaign, onSaved }: { campaign?: Campaign; onSaved: (ca
         </div>
       </section>
 
+      <EmailEditor
+        blocks={emailBlocks}
+        onChange={(blocks) => form.setValue('corpo', blocks, { shouldDirty: true })}
+        campaignId={campaign?.id}
+        subject={emailSubject}
+      />
+      {form.formState.errors.corpo?.message && <p className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" data-testid="error-email-content">{form.formState.errors.corpo.message}</p>}
+
       <section className="panel p-5 sm:p-7">
-        <div className="mb-6"><p className="section-kicker">04 · Operação</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Quando e em que estado ela está?</h2></div>
+        <div className="mb-6"><p className="section-kicker">05 · Operação</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Quando e em que estado ela está?</h2></div>
         <div className="grid gap-5 md:grid-cols-3">
           <Field label="Status"><select {...form.register('status')} className="field-control" data-testid="select-campaign-status">{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
           <Field label="Agendamento"><input {...form.register('agendada_para')} type="datetime-local" className="field-control" data-testid="input-scheduled-at" /></Field>
@@ -662,7 +706,7 @@ export function NewCampaignPage({ user }: { user: SessionUser }) {
     <Shell user={user} title="Nova campanha" eyebrow="Campanhas / Criar" mobileNavOpen={mobileNavOpen} setMobileNavOpen={setMobileNavOpen}>
       <div className="mx-auto max-w-4xl animate-rise-in-delay">
         <div className="mb-7 flex items-center gap-3"><Link href="/" className="action-button action-button-secondary !px-3" data-testid="link-back-campaigns"><ArrowLeft size={15} /></Link><div><p className="text-sm font-bold text-[#263044]">Voltar para a lista</p><p className="mt-1 text-xs text-[#85858b]">Preencha os metadados essenciais antes da importação.</p></div></div>
-        <CampaignForm onSaved={(campaign) => { queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() }); setLocation(`/campaigns/${campaign.id}`); }} />
+         <CampaignForm onSaved={(campaign) => { queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() }); setLocation(`/campaigns/${campaign.id}`); }} />
       </div>
     </Shell>
   );
@@ -701,7 +745,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
           <div className="relative"><button onClick={() => setConfirmDelete((open) => !open)} className="action-button action-button-danger" data-testid="button-delete-campaign"><Trash2 size={15} /> Excluir campanha</button>{confirmDelete && <div className="absolute right-0 top-12 z-10 w-72 rounded-xl border border-[#efc9ba] bg-[#fffaf6] p-4 text-left shadow-[0_18px_45px_rgba(38,48,68,.14)]"><p className="text-sm font-extrabold text-[#263044]">Excluir esta campanha?</p><p className="mt-1 text-xs leading-5 text-[#7d6c6c]">Esta ação remove os metadados da campanha.</p><div className="mt-4 flex justify-end gap-2"><button onClick={() => setConfirmDelete(false)} className="action-button action-button-secondary !px-3" data-testid="button-cancel-delete">Cancelar</button><button onClick={deleteCurrent} disabled={deleteCampaign.isPending} className="action-button action-button-danger !px-3" data-testid="button-confirm-delete">{deleteCampaign.isPending ? <LoaderCircle size={14} className="animate-spin" /> : 'Excluir'}</button></div></div>}</div>
         </div>
         {deleteCampaign.isError && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm text-[#a64220]" data-testid="status-delete-error">Não foi possível excluir a campanha. Tente novamente.</div>}
-        <CampaignForm campaign={campaign} onSaved={(updated) => { queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated); queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() }); }} />
+         <CampaignForm campaign={campaign} onSaved={(updated) => { queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated); queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() }); }} />
         <ImportPanel campaignId={campaignId} />
       </div>
     </Shell>

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CampaignStatus } from './campaignStatus';
+import type { EmailBlock } from './emailBlock';
 
 export interface CreateCampaignInput {
   /** @minLength 1 */
@@ -42,4 +43,5 @@ export interface CreateCampaignInput {
   /** @minimum 1 */
   lembrete_horas?: number;
   teste_enviado?: boolean;
+  corpo?: EmailBlock[];
 }

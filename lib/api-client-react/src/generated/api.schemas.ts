@@ -64,6 +64,72 @@ export const CampaignStatus = {
   concluida: 'concluida',
 } as const;
 
+export type EmailTextBlockType = typeof EmailTextBlockType[keyof typeof EmailTextBlockType];
+
+
+export const EmailTextBlockType = {
+  text: 'text',
+} as const;
+
+export interface EmailTextBlock {
+  /** @minLength 1 */
+  id: string;
+  type: EmailTextBlockType;
+  html: string;
+}
+
+export type EmailImageBlockType = typeof EmailImageBlockType[keyof typeof EmailImageBlockType];
+
+
+export const EmailImageBlockType = {
+  image: 'image',
+} as const;
+
+export interface EmailImageBlock {
+  /** @minLength 1 */
+  id: string;
+  type: EmailImageBlockType;
+  src: string;
+  /** @maxLength 160 */
+  alt: string;
+  /** @nullable */
+  href?: string | null;
+}
+
+export type EmailButtonBlockType = typeof EmailButtonBlockType[keyof typeof EmailButtonBlockType];
+
+
+export const EmailButtonBlockType = {
+  button: 'button',
+} as const;
+
+export interface EmailButtonBlock {
+  /** @minLength 1 */
+  id: string;
+  type: EmailButtonBlockType;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  label: string;
+  href: string;
+}
+
+export type EmailDividerBlockType = typeof EmailDividerBlockType[keyof typeof EmailDividerBlockType];
+
+
+export const EmailDividerBlockType = {
+  divider: 'divider',
+} as const;
+
+export interface EmailDividerBlock {
+  /** @minLength 1 */
+  id: string;
+  type: EmailDividerBlockType;
+}
+
+export type EmailBlock = EmailTextBlock | EmailImageBlock | EmailButtonBlock | EmailDividerBlock;
+
 export interface Campaign {
   id: string;
   nome: string;
@@ -97,7 +163,7 @@ export interface Campaign {
   /** @minimum 1 */
   lembrete_horas: number;
   teste_enviado: boolean;
-  corpo: unknown[];
+  corpo: EmailBlock[];
   criado_em: string;
 }
 
@@ -136,6 +202,7 @@ export interface CreateCampaignInput {
   /** @minimum 1 */
   lembrete_horas?: number;
   teste_enviado?: boolean;
+  corpo?: EmailBlock[];
 }
 
 /**
@@ -176,6 +243,33 @@ export interface UpdateCampaignInput {
   /** @minimum 1 */
   lembrete_horas?: number;
   teste_enviado?: boolean;
+  corpo?: EmailBlock[];
+}
+
+export type RequestEmailImageUploadInputMimeType = typeof RequestEmailImageUploadInputMimeType[keyof typeof RequestEmailImageUploadInputMimeType];
+
+
+export const RequestEmailImageUploadInputMimeType = {
+  'image/jpeg': 'image/jpeg',
+  'image/png': 'image/png',
+  'image/gif': 'image/gif',
+  'image/webp': 'image/webp',
+} as const;
+
+export interface RequestEmailImageUploadInput {
+  /** @minLength 1 */
+  nome_arquivo: string;
+  /** @minimum 1 */
+  tamanho: number;
+  mime_type: RequestEmailImageUploadInputMimeType;
+}
+
+export interface EmailImageUploadUrl {
+  bucket: string;
+  path: string;
+  signed_url: string;
+  public_url: string;
+  expires_in: number;
 }
 
 export interface RequestImportUploadInput {

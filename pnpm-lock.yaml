@@ -288,6 +288,9 @@ importers:
       '@workspace/api-client-react':
         specifier: workspace:*
         version: link:../../lib/api-client-react
+      '@workspace/email-template':
+        specifier: workspace:*
+        version: link:../../lib/email-template
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -375,6 +378,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
+      '@workspace/email-template':
+        specifier: workspace:*
+        version: link:../../lib/email-template
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
@@ -644,6 +650,8 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
+
+  lib/email-template: {}
 
   scripts:
     devDependencies:

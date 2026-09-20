@@ -85,6 +85,14 @@ export const createCampaignBodyTetoDiaMin = 0;
 
 
 
+export const createCampaignBodyCorpoItemTwoAltMax = 160;
+
+
+export const createCampaignBodyCorpoItemThreeLabelMax = 120;
+
+
+
+
 export const CreateCampaignBody = zod.object({
   "nome": zod.string().min(1),
   "assunto": zod.string().min(1),
@@ -101,12 +109,39 @@ export const CreateCampaignBody = zod.object({
   "agendada_para": zod.coerce.date().nullish(),
   "lembrete_ativo": zod.boolean().optional(),
   "lembrete_horas": zod.number().int().min(1).optional(),
-  "teste_enviado": zod.boolean().optional()
+  "teste_enviado": zod.boolean().optional(),
+  "corpo": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url(),
+  "alt": zod.string().max(createCampaignBodyCorpoItemTwoAltMax),
+  "href": zod.string().url().nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(createCampaignBodyCorpoItemThreeLabelMax),
+  "href": zod.string().url()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).optional()
 })
 
 export const createCampaignResponseTetoHoraMin = 0;
 
 export const createCampaignResponseTetoDiaMin = 0;
+
+
+
+
+export const createCampaignResponseCorpoItemTwoAltMax = 160;
+
+
+export const createCampaignResponseCorpoItemThreeLabelMax = 120;
 
 
 
@@ -129,7 +164,25 @@ export const CreateCampaignResponse = zod.object({
   "lembrete_ativo": zod.boolean(),
   "lembrete_horas": zod.number().int().min(1),
   "teste_enviado": zod.boolean(),
-  "corpo": zod.array(zod.unknown()),
+  "corpo": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url(),
+  "alt": zod.string().max(createCampaignResponseCorpoItemTwoAltMax),
+  "href": zod.string().url().nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(createCampaignResponseCorpoItemThreeLabelMax),
+  "href": zod.string().url()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])),
   "criado_em": zod.coerce.date()
 })
 
@@ -144,6 +197,14 @@ export const GetCampaignParams = zod.object({
 export const getCampaignResponseTetoHoraMin = 0;
 
 export const getCampaignResponseTetoDiaMin = 0;
+
+
+
+
+export const getCampaignResponseCorpoItemTwoAltMax = 160;
+
+
+export const getCampaignResponseCorpoItemThreeLabelMax = 120;
 
 
 
@@ -166,7 +227,25 @@ export const GetCampaignResponse = zod.object({
   "lembrete_ativo": zod.boolean(),
   "lembrete_horas": zod.number().int().min(1),
   "teste_enviado": zod.boolean(),
-  "corpo": zod.array(zod.unknown()),
+  "corpo": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url(),
+  "alt": zod.string().max(getCampaignResponseCorpoItemTwoAltMax),
+  "href": zod.string().url().nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(getCampaignResponseCorpoItemThreeLabelMax),
+  "href": zod.string().url()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])),
   "criado_em": zod.coerce.date()
 })
 
@@ -188,6 +267,14 @@ export const updateCampaignBodyTetoDiaMin = 0;
 
 
 
+export const updateCampaignBodyCorpoItemTwoAltMax = 160;
+
+
+export const updateCampaignBodyCorpoItemThreeLabelMax = 120;
+
+
+
+
 export const UpdateCampaignBody = zod.object({
   "nome": zod.string().min(1).optional(),
   "assunto": zod.string().min(1).optional(),
@@ -204,12 +291,39 @@ export const UpdateCampaignBody = zod.object({
   "agendada_para": zod.coerce.date().nullish(),
   "lembrete_ativo": zod.boolean().optional(),
   "lembrete_horas": zod.number().int().min(1).optional(),
-  "teste_enviado": zod.boolean().optional()
+  "teste_enviado": zod.boolean().optional(),
+  "corpo": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url(),
+  "alt": zod.string().max(updateCampaignBodyCorpoItemTwoAltMax),
+  "href": zod.string().url().nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(updateCampaignBodyCorpoItemThreeLabelMax),
+  "href": zod.string().url()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).optional()
 }).describe('Campos enviados parcialmente; campos omitidos permanecem iguais.')
 
 export const updateCampaignResponseTetoHoraMin = 0;
 
 export const updateCampaignResponseTetoDiaMin = 0;
+
+
+
+
+export const updateCampaignResponseCorpoItemTwoAltMax = 160;
+
+
+export const updateCampaignResponseCorpoItemThreeLabelMax = 120;
 
 
 
@@ -232,7 +346,25 @@ export const UpdateCampaignResponse = zod.object({
   "lembrete_ativo": zod.boolean(),
   "lembrete_horas": zod.number().int().min(1),
   "teste_enviado": zod.boolean(),
-  "corpo": zod.array(zod.unknown()),
+  "corpo": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url(),
+  "alt": zod.string().max(updateCampaignResponseCorpoItemTwoAltMax),
+  "href": zod.string().url().nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(updateCampaignResponseCorpoItemThreeLabelMax),
+  "href": zod.string().url()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])),
   "criado_em": zod.coerce.date()
 })
 
@@ -245,6 +377,32 @@ export const DeleteCampaignParams = zod.object({
 })
 
 export const DeleteCampaignResponse = zod.void()
+
+
+/**
+ * @summary Gera URL assinada para upload de imagem do e-mail
+ */
+export const RequestCampaignAssetUploadUrlParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+
+
+
+
+export const RequestCampaignAssetUploadUrlBody = zod.object({
+  "nome_arquivo": zod.string().min(1),
+  "tamanho": zod.number().int().min(1),
+  "mime_type": zod.enum(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+})
+
+export const RequestCampaignAssetUploadUrlResponse = zod.object({
+  "bucket": zod.string(),
+  "path": zod.string(),
+  "signed_url": zod.string().url(),
+  "public_url": zod.string().url(),
+  "expires_in": zod.number().int()
+})
 
 
 /**

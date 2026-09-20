@@ -5,16 +5,24 @@ import {
   GetCampaignParams,
   GetCampaignResponse,
   ListCampaignsResponse,
+  RequestCampaignAssetUploadUrlBody,
+  RequestCampaignAssetUploadUrlResponse,
   UpdateCampaignBody,
   UpdateCampaignResponse,
 } from "@workspace/api-zod";
 import { getSupabaseUser } from "./auth";
 import { supabaseAdminClient } from "../lib/supabase";
 import { getTechnicalError } from "../lib/technical-error";
+import { normalizeEmailBlocks } from "@workspace/email-template";
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
   "id,nome,assunto,assunto_lembrete,remetente_nome,remetente_email,valor_credito,validade_credito,url_deeplink,url_landing,teto_hora,teto_dia,status,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo,criado_em";
+// Public by design: this bucket contains only e-mail image assets.
+// Never reuse the private CSV bucket from routes/imports.ts here.
+const EMAIL_ASSET_BUCKET = "amoconecta-assets";
+const MAX_EMAIL_IMAGE_BYTES = 5 * 1024 * 1024;
+const EMAIL_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
 
 function logSupabaseError(
   req: Request,
@@ -80,7 +88,46 @@ function campaignPayload(input: Record<string, unknown>, partial = false) {
   if (!partial || "teste_enviado" in input) {
     payload.teste_enviado = input.teste_enviado ?? false;
   }
+  if (!partial || "corpo" in input) {
+    payload.corpo = normalizeEmailBlocks(input.corpo);
+  }
   return payload;
+}
+
+function safeAssetFileName(fileName: string, mimeType: string): string {
+  const base = fileName
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-zA-Z0-9._-]/gu, "-")
+    .replace(/-+/g, "-")
+    .replace(/^\.+/u, "")
+    .toLocaleLowerCase("pt-BR");
+  const extension = mimeType.split("/")[1] === "jpeg" ? "jpg" : mimeType.split("/")[1];
+  const withoutExtension = base.replace(/\.[a-z0-9]+$/iu, "") || "imagem";
+  return `${withoutExtension}.${extension}`;
+}
+
+async function ensurePublicAssetBucket() {
+  const client = supabaseAdminClient();
+  const { data: buckets, error: listError } = await client.storage.listBuckets();
+  if (listError) throw listError;
+  const bucket = buckets?.find((item) => item.name === EMAIL_ASSET_BUCKET);
+  if (!bucket) {
+    const { error } = await client.storage.createBucket(EMAIL_ASSET_BUCKET, {
+      public: true,
+      fileSizeLimit: `${MAX_EMAIL_IMAGE_BYTES}B`,
+      allowedMimeTypes: [...EMAIL_IMAGE_TYPES],
+    });
+    if (error && !/already exists|duplicate/iu.test(error.message ?? "")) throw error;
+  } else if (!bucket.public) {
+    const { error } = await client.storage.updateBucket(EMAIL_ASSET_BUCKET, {
+      public: true,
+      fileSizeLimit: `${MAX_EMAIL_IMAGE_BYTES}B`,
+      allowedMimeTypes: [...EMAIL_IMAGE_TYPES],
+    });
+    if (error) throw error;
+  }
+  return client;
 }
 
 function campaignParams(campaignId: string) {
@@ -192,6 +239,53 @@ router.get("/campaigns/:campaignId", async (req, res) => {
   } catch (error) {
     logSupabaseError(req, "Campaign lookup failed", error);
     res.status(502).json({ error: "Não foi possível consultar a campanha." });
+  }
+});
+
+router.post("/campaigns/:campaignId/assets/upload-url", async (req, res) => {
+  const body = RequestCampaignAssetUploadUrlBody.safeParse(req.body);
+  if (!body.success || !req.params.campaignId) {
+    res.status(422).json({ error: "Informe uma imagem válida." });
+    return;
+  }
+  if (body.data.tamanho > MAX_EMAIL_IMAGE_BYTES) {
+    res.status(422).json({ error: "A imagem deve ter até 5 MB." });
+    return;
+  }
+  try {
+    const session = await getSupabaseUser(req, res);
+    if (!session) {
+      res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+    const campaign = await findCampaign(req.params.campaignId);
+    if (!campaign) {
+      res.status(404).json({ error: "Campanha não encontrada." });
+      return;
+    }
+    const client = await ensurePublicAssetBucket();
+    const path = `${req.params.campaignId}/${crypto.randomUUID()}-${safeAssetFileName(body.data.nome_arquivo, body.data.mime_type)}`;
+    const { data, error } = await client.storage
+      .from(EMAIL_ASSET_BUCKET)
+      .createSignedUploadUrl(path);
+    if (error) {
+      logSupabaseError(req, "Supabase email asset signed upload URL creation failed", error);
+      res.status(502).json({ error: "Não foi possível preparar o upload da imagem." });
+      return;
+    }
+    const publicUrl = client.storage.from(EMAIL_ASSET_BUCKET).getPublicUrl(path).data.publicUrl;
+    res.json(
+      RequestCampaignAssetUploadUrlResponse.parse({
+        bucket: EMAIL_ASSET_BUCKET,
+        path,
+        signed_url: data.signedUrl,
+        public_url: publicUrl,
+        expires_in: 7200,
+      }),
+    );
+  } catch (error) {
+    logSupabaseError(req, "Campaign email asset upload URL request failed", error);
+    res.status(502).json({ error: "Não foi possível preparar o upload da imagem." });
   }
 });
 

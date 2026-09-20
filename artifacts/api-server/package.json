@@ -13,6 +13,7 @@
     "@replit/connectors-sdk": "^0.4.3",
     "@supabase/supabase-js": "^2.57.4",
     "@workspace/api-zod": "workspace:*",
+    "@workspace/email-template": "workspace:*",
     "@workspace/db": "workspace:*",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",

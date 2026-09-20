@@ -46,13 +46,23 @@ async function ensurePrivateBucket() {
   const client = supabaseAdminClient();
   const { data: buckets, error: listError } = await client.storage.listBuckets();
   if (listError) throw listError;
-  if (!buckets?.some((bucket) => bucket.name === IMPORT_BUCKET)) {
+  const bucket = buckets?.find((item) => item.name === IMPORT_BUCKET);
+  if (!bucket) {
     const { error } = await client.storage.createBucket(IMPORT_BUCKET, {
       public: false,
       fileSizeLimit: `${MAX_IMPORT_BYTES}B`,
       allowedMimeTypes: ["text/csv", "application/csv", "text/plain"],
     });
     if (error && !/already exists|duplicate/iu.test(error.message ?? "")) throw error;
+  } else if (bucket.public) {
+    // Customer CSVs must never be exposed, even if a bucket was configured
+    // incorrectly outside this application.
+    const { error } = await client.storage.updateBucket(IMPORT_BUCKET, {
+      public: false,
+      fileSizeLimit: `${MAX_IMPORT_BYTES}B`,
+      allowedMimeTypes: ["text/csv", "application/csv", "text/plain"],
+    });
+    if (error) throw error;
   }
   return client;
 }

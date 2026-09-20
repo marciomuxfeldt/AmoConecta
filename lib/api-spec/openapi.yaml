@@ -240,6 +240,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/assets/upload-url:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: requestCampaignAssetUploadUrl
+      tags: [campaigns]
+      summary: Gera URL assinada para upload de imagem do e-mail
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestEmailImageUploadInput"
+      responses:
+        "200":
+          description: URL assinada e URL pública da imagem
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailImageUploadUrl"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Imagem inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao preparar o upload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /campaigns/{campaignId}/imports/upload-url:
     parameters:
       - name: campaignId
@@ -523,7 +574,8 @@ components:
           type: boolean
         corpo:
           type: array
-          items: {}
+          items:
+            $ref: "#/components/schemas/EmailBlock"
         criado_em:
           type: string
           format: date-time
@@ -593,6 +645,10 @@ components:
           minimum: 1
         teste_enviado:
           type: boolean
+        corpo:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmailBlock"
       required:
         - nome
         - assunto
@@ -645,6 +701,103 @@ components:
           minimum: 1
         teste_enviado:
           type: boolean
+        corpo:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmailBlock"
+    EmailBlock:
+      oneOf:
+        - $ref: "#/components/schemas/EmailTextBlock"
+        - $ref: "#/components/schemas/EmailImageBlock"
+        - $ref: "#/components/schemas/EmailButtonBlock"
+        - $ref: "#/components/schemas/EmailDividerBlock"
+    EmailTextBlock:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum: [text]
+        html:
+          type: string
+      required: [id, type, html]
+    EmailImageBlock:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum: [image]
+        src:
+          type: string
+          format: uri
+        alt:
+          type: string
+          maxLength: 160
+        href:
+          type: ["string", "null"]
+          format: uri
+      required: [id, type, src, alt]
+    EmailButtonBlock:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum: [button]
+        label:
+          type: string
+          minLength: 1
+          maxLength: 120
+        href:
+          type: string
+          format: uri
+      required: [id, type, label, href]
+    EmailDividerBlock:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum: [divider]
+      required: [id, type]
+    RequestEmailImageUploadInput:
+      type: object
+      properties:
+        nome_arquivo:
+          type: string
+          minLength: 1
+        tamanho:
+          type: integer
+          minimum: 1
+        mime_type:
+          type: string
+          enum: [image/jpeg, image/png, image/gif, image/webp]
+      required: [nome_arquivo, tamanho, mime_type]
+    EmailImageUploadUrl:
+      type: object
+      properties:
+        bucket:
+          type: string
+        path:
+          type: string
+        signed_url:
+          type: string
+          format: uri
+        public_url:
+          type: string
+          format: uri
+        expires_in:
+          type: integer
+      required: [bucket, path, signed_url, public_url, expires_in]
     RequestImportUploadInput:
       type: object
       properties:

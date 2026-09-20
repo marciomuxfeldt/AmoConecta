@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CampaignStatus } from './campaignStatus';
+import type { EmailBlock } from './emailBlock';
 
 /**
  * Campos enviados parcialmente; campos omitidos permanecem iguais.
@@ -45,4 +46,5 @@ export interface UpdateCampaignInput {
   /** @minimum 1 */
   lembrete_horas?: number;
   teste_enviado?: boolean;
+  corpo?: EmailBlock[];
 }
