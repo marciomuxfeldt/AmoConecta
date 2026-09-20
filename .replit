@@ -22,3 +22,11 @@ timeoutMs = 20000
 [nix]
 channel = "stable-25_05"
 
+[userenv]
+
+[userenv.shared]
+APP_BASE_URL = "https://e7ca3411-5cbd-43e8-9eea-6b66a6f25bb3-00-k7dlt3zf4d33.janeway.replit.dev"
+SENDER_NAME = "Amo Ofertas"
+SENDER_EMAIL = "noreply@marketing.amo.delivery"
+REPLY_TO_EMAIL = "marcio@amo.delivery"
+
