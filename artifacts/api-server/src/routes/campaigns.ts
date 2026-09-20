@@ -15,6 +15,7 @@ import { supabaseAdminClient } from "../lib/supabase";
 import { getTechnicalError } from "../lib/technical-error";
 import { normalizeEmailBlocks } from "@workspace/email-template";
 import { getSafetyMode, getSafetyModeMessage } from "../lib/safety-mode";
+import { sendTestEmail } from "../lib/worker";
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
@@ -256,6 +257,33 @@ router.get("/campaigns/:campaignId", async (req, res) => {
   } catch (error) {
     logSupabaseError(req, "Campaign lookup failed", error);
     res.status(502).json({ error: "Não foi possível consultar a campanha." });
+  }
+});
+
+router.post("/campaigns/:campaignId/test", async (req, res) => {
+  const params = GetCampaignParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(422).json({ error: "Identificador de campanha inválido." });
+    return;
+  }
+  try {
+    const session = await getSupabaseUser(req, res);
+    if (!session?.user.email) {
+      res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+    const resendEmailId = await sendTestEmail(
+      params.data.campaignId,
+      session.user.email,
+    );
+    res.json({ sent: true, resend_email_id: resendEmailId });
+  } catch (error) {
+    logSupabaseError(req, "Campaign test send failed", error);
+    const message =
+      error instanceof Error && /modo de segurança|suprimido|não encontrada/iu.test(error.message)
+        ? error.message
+        : "Não foi possível enviar o teste.";
+    res.status(422).json({ error: message });
   }
 });
 
