@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bold,
   ExternalLink,
@@ -11,6 +11,7 @@ import {
   Monitor,
   MousePointer2,
   Plus,
+  RefreshCw,
   Smartphone,
   Trash2,
   Type,
@@ -32,6 +33,7 @@ type EmailEditorProps = {
   onChange: (blocks: EmailBlock[]) => void;
   campaignId?: string;
   subject: string;
+  onUploadingChange?: (blockId: string, uploading: boolean) => void;
 };
 
 const blockLabels: Record<EmailBlock["type"], string> = {
@@ -67,6 +69,124 @@ function updateBlock(
   updater: (block: EmailBlock) => EmailBlock,
 ) {
   return blocks.map((block) => (block.id === id ? updater(block) : block));
+}
+
+const MAX_ORIGINAL_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_EMAIL_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_WIDTH = 1200;
+
+type ImageUploadState = {
+  phase: "idle" | "processing" | "uploading" | "error";
+  progress: number | null;
+  previewUrl: string | null;
+  warning: string | null;
+  error: string | null;
+};
+
+const idleImageUploadState: ImageUploadState = {
+  phase: "idle",
+  progress: null,
+  previewUrl: null,
+  warning: null,
+  error: null,
+};
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("O navegador não conseguiu preparar a imagem."));
+      }
+    }, type, quality);
+  });
+}
+
+function loadImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const sourceUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(sourceUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(sourceUrl);
+      reject(new Error("Não foi possível ler esta imagem."));
+    };
+    image.src = sourceUrl;
+  });
+}
+
+async function compressImageForUpload(file: File) {
+  const image = await loadImage(file);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const width = Math.max(1, Math.min(sourceWidth, MAX_IMAGE_WIDTH));
+  const height = Math.max(1, Math.round(sourceHeight * (width / sourceWidth)));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("O navegador não conseguiu preparar a imagem.");
+  context.drawImage(image, 0, 0, width, height);
+
+  let hasTransparency = false;
+  if (["image/png", "image/webp", "image/gif"].includes(file.type)) {
+    const pixels = context.getImageData(0, 0, width, height).data;
+    for (let index = 3; index < pixels.length; index += 4) {
+      if (pixels[index] < 255) {
+        hasTransparency = true;
+        break;
+      }
+    }
+  }
+
+  const canUseWebp = canvas.toDataURL("image/webp", 0.8).startsWith("data:image/webp");
+  const mimeType = hasTransparency ? "image/png" : canUseWebp ? "image/webp" : "image/jpeg";
+  const extension = mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
+  const blob = await canvasToBlob(canvas, mimeType, mimeType === "image/png" ? undefined : 0.8);
+  if (blob.size > MAX_EMAIL_IMAGE_BYTES) {
+    throw new Error("A imagem ainda ficou maior que 5 MB após a compressão.");
+  }
+  const baseName = file.name.replace(/\.[^/.]+$/u, "") || "imagem";
+  return new File([blob], `${baseName}.${extension}`, { type: mimeType, lastModified: Date.now() });
+}
+
+function uploadSignedImage(
+  signedUrl: string,
+  body: FormData,
+  onProgress: (progress: number) => void,
+  xhrRef: { current: XMLHttpRequest | null },
+) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhrRef.current = xhr;
+    xhr.open("PUT", signedUrl);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      xhrRef.current = null;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`Upload recusado (${xhr.status}).`));
+      }
+    };
+    xhr.onerror = () => {
+      xhrRef.current = null;
+      reject(new Error("Não foi possível enviar a imagem."));
+    };
+    xhr.onabort = () => {
+      xhrRef.current = null;
+      reject(new Error("O upload foi interrompido."));
+    };
+    xhr.send(body);
+  });
 }
 
 function insertLink() {
@@ -145,6 +265,7 @@ function BlockCard({
   dragging,
   campaignId,
   resetKey,
+  onUploadingChange,
 }: {
   block: EmailBlock;
   index: number;
@@ -157,13 +278,29 @@ function BlockCard({
   dragging: boolean;
   campaignId?: string;
   resetKey: string;
+  onUploadingChange?: (blockId: string, uploading: boolean) => void;
 }) {
   const upload = useRequestCampaignAssetUploadUrl();
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [imageUpload, setImageUpload] = useState<ImageUploadState>(idleImageUploadState);
+  const retryFileRef = useRef<File | null>(null);
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
   const blocksRef = useRef(blocks);
   const onChangeRef = useRef(onChange);
   blocksRef.current = blocks;
   onChangeRef.current = onChange;
+
+  useEffect(() => {
+    return () => {
+      xhrRef.current?.abort();
+      onUploadingChange?.(block.id, false);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (imageUpload.previewUrl) URL.revokeObjectURL(imageUpload.previewUrl);
+    };
+  }, [imageUpload.previewUrl]);
 
   const update = (next: EmailBlock) => onChange(updateBlock(blocks, block.id, () => next));
   const updateText = useMemo(
@@ -176,35 +313,63 @@ function BlockCard({
     },
     [block.id],
   );
-  const uploadImage = async (file?: File) => {
+  const uploadImage = async (selectedFile?: File) => {
+    const file = selectedFile ?? retryFileRef.current;
     if (!file || block.type !== "image") return;
     if (!campaignId) {
-      setUploadError("Salve a campanha antes de enviar uma imagem.");
+      setImageUpload({ ...idleImageUploadState, phase: "error", error: "Salve a campanha antes de enviar uma imagem." });
       return;
     }
     const allowed = Object.values(RequestEmailImageUploadInputMimeType) as string[];
     if (!allowed.includes(file.type)) {
-      setUploadError("Use uma imagem JPG, PNG, GIF ou WEBP.");
+      setImageUpload({ ...idleImageUploadState, phase: "error", error: "Use uma imagem JPG, PNG, GIF ou WEBP." });
       return;
     }
-    setUploadError(null);
+    const previewUrl = URL.createObjectURL(file);
+    retryFileRef.current = file;
+    const warning = file.size > MAX_ORIGINAL_IMAGE_BYTES
+      ? "O arquivo original passa de 10 MB; vamos reduzi-lo antes do envio."
+      : null;
+    setImageUpload({ phase: "processing", progress: null, previewUrl, warning, error: null });
+    onUploadingChange?.(block.id, true);
     try {
+      const compressedFile = await compressImageForUpload(file);
+      setImageUpload((current) => ({ ...current, phase: "uploading", progress: 0 }));
       const signed = await upload.mutateAsync({
         campaignId,
         data: {
-          nome_arquivo: file.name,
-          tamanho: file.size,
-          mime_type: file.type as RequestEmailImageUploadInputMimeType,
+          nome_arquivo: compressedFile.name,
+          tamanho: compressedFile.size,
+          mime_type: compressedFile.type as RequestEmailImageUploadInputMimeType,
         },
       });
       const body = new FormData();
       body.append("cacheControl", "31536000");
-      body.append("", file);
-      const response = await fetch(signed.signed_url, { method: "PUT", body });
-      if (!response.ok) throw new Error(`Upload recusado (${response.status}).`);
-      update({ ...block, src: signed.public_url, alt: block.alt || file.name.replace(/\.[^/.]+$/u, "") });
+      body.append("", compressedFile);
+      await uploadSignedImage(
+        signed.signed_url,
+        body,
+        (progress) => setImageUpload((current) => ({ ...current, progress })),
+        xhrRef,
+      );
+      const currentBlock = blocksRef.current.find((candidate) => candidate.id === block.id);
+      if (currentBlock?.type === "image") {
+        onChangeRef.current(updateBlock(blocksRef.current, block.id, (candidate) => (
+          candidate.type === "image"
+            ? { ...candidate, src: signed.public_url, alt: candidate.alt || file.name.replace(/\.[^/.]+$/u, "") }
+            : candidate
+        )));
+      }
+      setImageUpload(idleImageUploadState);
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : "Não foi possível enviar a imagem.");
+      setImageUpload((current) => ({
+        ...current,
+        phase: "error",
+        progress: null,
+        error: error instanceof Error ? error.message : "Não foi possível enviar a imagem.",
+      }));
+    } finally {
+      onUploadingChange?.(block.id, false);
     }
   };
 
@@ -232,14 +397,24 @@ function BlockCard({
 
       {block.type === "image" && (
         <div className="space-y-3">
-          {block.src ? <div className="relative overflow-hidden rounded-xl border border-[#e5ddd0] bg-white"><img src={block.src} alt={block.alt} className="max-h-56 w-full object-contain" /><span className="absolute bottom-2 left-2 rounded-full bg-[#263044]/85 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[.08em] text-[#fbf9f5]">Imagem pronta</span></div> : <div className="rounded-xl border border-dashed border-[#d8cdbd] bg-[#f8f3ec] px-4 py-9 text-center"><ImagePlus size={20} className="mx-auto mb-2 text-[#c3b6a7]" /><p className="text-xs font-bold text-[#6d7180]">Nenhuma imagem adicionada</p><p className="mt-1 text-[10px] text-[#99959a]">JPG, PNG, GIF ou WEBP</p></div>}
+          {imageUpload.phase !== "idle" && imageUpload.previewUrl ? (
+            <div className="relative overflow-hidden rounded-xl border border-[#d4e5df] bg-[#f1f7f5]">
+              <img src={imageUpload.previewUrl} alt={block.alt || "Imagem sendo enviada"} className="max-h-56 w-full object-contain opacity-80" />
+              <div className="absolute inset-x-0 bottom-0 bg-[#263044]/90 px-3 py-2.5 text-[#fbf9f5]">
+                <div className="flex items-center gap-2 text-xs font-bold"><LoaderCircle size={14} className="animate-spin text-[#d7ef56]" /> {imageUpload.phase === "error" ? "Falha no envio" : "Enviando imagem…"}</div>
+                {imageUpload.phase === "processing" && <p className="mt-1 pl-5 text-[10px] text-[#d3d8dd]">Reduzindo para até 1200 px…</p>}
+                {imageUpload.phase === "uploading" && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/20" role="progressbar" aria-label="Progresso do upload da imagem" aria-valuemin={0} aria-valuemax={100} aria-valuenow={imageUpload.progress ?? 0}><div className="h-full rounded-full bg-[#d7ef56] transition-[width] duration-150" style={{ width: `${imageUpload.progress ?? 0}%` }} /></div>}
+              </div>
+            </div>
+          ) : block.src ? <div className="relative overflow-hidden rounded-xl border border-[#e5ddd0] bg-white"><img src={block.src} alt={block.alt} className="max-h-56 w-full object-contain" /><span className="absolute bottom-2 left-2 rounded-full bg-[#263044]/85 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[.08em] text-[#fbf9f5]">Imagem pronta</span></div> : <div className="rounded-xl border border-dashed border-[#d8cdbd] bg-[#f8f3ec] px-4 py-9 text-center"><ImagePlus size={20} className="mx-auto mb-2 text-[#c3b6a7]" /><p className="text-xs font-bold text-[#6d7180]">Nenhuma imagem adicionada</p><p className="mt-1 text-[10px] text-[#99959a]">JPG, PNG, GIF ou WEBP</p></div>}
+          {imageUpload.warning && <p className="rounded-lg border border-[#f1dfb8] bg-[#fff9e9] px-3 py-2 text-xs text-[#8b671c]" role="status">{imageUpload.warning}</p>}
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="action-button action-button-secondary focus-within:ring-2 focus-within:ring-[#d7ef56] focus-within:ring-offset-2 cursor-pointer text-center"><ImagePlus size={14} /> {upload.isPending ? "Enviando..." : "Escolher imagem"}<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="sr-only" disabled={upload.isPending} onChange={(event) => { void uploadImage(event.target.files?.[0]); event.currentTarget.value = ""; }} data-testid={`input-image-upload-${block.id}`} /></label>
+             <label className="action-button action-button-secondary focus-within:ring-2 focus-within:ring-[#d7ef56] focus-within:ring-offset-2 cursor-pointer text-center"><ImagePlus size={14} /> {imageUpload.phase === "error" ? "Escolher outra imagem" : "Escolher imagem"}<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="sr-only" disabled={imageUpload.phase === "processing" || imageUpload.phase === "uploading" || upload.isPending} onChange={(event) => { void uploadImage(event.target.files?.[0]); event.currentTarget.value = ""; }} data-testid={`input-image-upload-${block.id}`} /></label>
+             {imageUpload.phase === "error" ? <button type="button" onClick={() => { void uploadImage(); }} className="action-button action-button-secondary !border-[#efc9ba] !text-[#a64220]" data-testid={`button-retry-image-upload-${block.id}`}><RefreshCw size={14} /> Tentar novamente</button> : <div />}
             <div><label htmlFor={`image-alt-${block.id}`} className="field-label">Texto alternativo</label><input id={`image-alt-${block.id}`} value={block.alt} onChange={(event) => update({ ...block, alt: event.target.value.slice(0, 160) })} className="field-control" placeholder="Descreva a imagem" aria-label="Texto alternativo da imagem" data-testid={`input-image-alt-${block.id}`} /></div>
           </div>
           <div><label htmlFor={`image-href-${block.id}`} className="field-label">Link da imagem <span className="font-normal text-[#99959a]">· opcional</span></label><input id={`image-href-${block.id}`} value={block.href ?? ""} onChange={(event) => update({ ...block, href: event.target.value })} className="field-control" placeholder="https://..." aria-label="Link opcional da imagem" data-testid={`input-image-link-${block.id}`} /></div>
-          {upload.isPending && <p className="flex items-center gap-2 rounded-lg bg-[#f1f7f5] px-3 py-2 text-xs text-[#247b79]" role="status"><LoaderCircle size={14} className="animate-spin" /> Enviando diretamente para o Storage...</p>}
-          {uploadError && <p className="rounded-lg border border-[#efc9ba] bg-[#fff0e9] px-3 py-2 text-xs text-[#a64220]" role="alert">{uploadError}</p>}
+           {imageUpload.phase === "error" && imageUpload.error && <p className="rounded-lg border border-[#efc9ba] bg-[#fff0e9] px-3 py-2 text-xs text-[#a64220]" role="alert">{imageUpload.error}</p>}
         </div>
       )}
 
@@ -255,7 +430,7 @@ function BlockCard({
   );
 }
 
-export function EmailEditor({ blocks, onChange, campaignId, subject }: EmailEditorProps) {
+export function EmailEditor({ blocks, onChange, campaignId, subject, onUploadingChange }: EmailEditorProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [previewName, setPreviewName] = useState("Marina");
@@ -292,7 +467,7 @@ export function EmailEditor({ blocks, onChange, campaignId, subject }: EmailEdit
         <div>
           <div className="mb-4 flex items-end justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-[.13em] text-[#d35f2a]">Composição</p><p className="mt-1 text-sm font-extrabold text-[#263044]">Blocos editáveis</p><p className="mt-1 text-[11px] text-[#92939a]">{blocks.length} {blocks.length === 1 ? "bloco" : "blocos"} · arraste para reordenar</p></div><span className="rounded-full bg-[#f1f7f5] px-3 py-1.5 font-mono text-[9px] uppercase tracking-[.1em] text-[#247b79]">Sem limite</span></div>
           <div className="space-y-3">
-            {blocks.map((block, index) => <BlockCard key={block.id} block={block} index={index} blocks={blocks} onChange={onChange} onRemove={() => removeBlock(block.id)} onDragStart={() => setDraggingId(block.id)} onDrop={() => { reorder(block.id); setDraggingId(null); }} onDragEnd={() => setDraggingId(null)} dragging={draggingId === block.id} campaignId={campaignId} resetKey={editorSessionKey} />)}
+            {blocks.map((block, index) => <BlockCard key={block.id} block={block} index={index} blocks={blocks} onChange={onChange} onRemove={() => removeBlock(block.id)} onDragStart={() => setDraggingId(block.id)} onDrop={() => { reorder(block.id); setDraggingId(null); }} onDragEnd={() => setDraggingId(null)} dragging={draggingId === block.id} campaignId={campaignId} resetKey={editorSessionKey} onUploadingChange={onUploadingChange} />)}
             {blocks.length === 0 && <div className="rounded-2xl border border-dashed border-[#d8cdbd] bg-[#f8f3ec] px-5 py-12 text-center"><div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-[#d7ef56] text-[#263044]"><Plus size={18} /></div><p className="mt-4 text-sm font-bold text-[#42495b]">Comece pelo primeiro bloco</p><p className="mt-1 text-xs leading-5 text-[#85858b]">A prévia já mostra o rodapé fixo enquanto você cria.</p></div>}
           </div>
           <div className="mt-5 rounded-2xl border border-[#eee7dc] bg-[#f8f3ec] p-3"><p className="mb-2 px-1 font-mono text-[9px] uppercase tracking-[.12em] text-[#99959a]">Adicionar ao e-mail</p><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

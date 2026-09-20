@@ -420,12 +420,30 @@ function CampaignForm({ campaign, onSaved }: { campaign?: Campaign; onSaved: (ca
   const isEditing = Boolean(campaign);
   const emailBlocks = form.watch('corpo');
   const emailSubject = form.watch('assunto');
+  const [uploadingBlockIds, setUploadingBlockIds] = useState<Set<string>>(() => new Set());
+  const isUploadPending = uploadingBlockIds.size > 0;
+
+  const handleUploadingChange = (blockId: string, uploading: boolean) => {
+    setUploadingBlockIds((current) => {
+      const next = new Set(current);
+      if (uploading) {
+        next.add(blockId);
+      } else {
+        next.delete(blockId);
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     form.reset(campaignToForm(campaign));
   }, [campaign, form]);
 
   const submit = (values: CampaignFormValues) => {
+    if (isUploadPending) {
+      form.setError('corpo', { type: 'upload', message: 'Aguarde o término do upload das imagens antes de salvar.' });
+      return;
+    }
     if (!values.nome.trim() || !values.assunto.trim() || !values.remetente_nome.trim() || !values.remetente_email.trim()) {
       form.setError('nome', { message: 'Preencha os campos obrigatórios antes de salvar.' });
       return;
@@ -506,8 +524,10 @@ function CampaignForm({ campaign, onSaved }: { campaign?: Campaign; onSaved: (ca
         onChange={(blocks) => form.setValue('corpo', blocks, { shouldDirty: true })}
         campaignId={campaign?.id}
         subject={emailSubject}
+        onUploadingChange={handleUploadingChange}
       />
       {form.formState.errors.corpo?.message && <p className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" data-testid="error-email-content">{form.formState.errors.corpo.message}</p>}
+      {isUploadPending && <p className="flex items-center gap-2 rounded-xl border border-[#d4e5df] bg-[#f1f7f5] px-4 py-3 text-xs text-[#247b79]" role="status" data-testid="status-image-upload-blocking"><LoaderCircle size={14} className="animate-spin" /> Aguarde o upload das imagens terminar para salvar a campanha.</p>}
 
       <section className="panel p-5 sm:p-7">
         <div className="mb-6"><p className="section-kicker">05 · Operação</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Quando e em que estado ela está?</h2></div>
@@ -523,7 +543,7 @@ function CampaignForm({ campaign, onSaved }: { campaign?: Campaign; onSaved: (ca
       </section>
 
       {error && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-save-error"><div className="flex items-start gap-3"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{getErrorMessage(error, 'Não foi possível salvar a campanha.')}</span></div></div>}
-      <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row"><Link href={campaign ? `/campaigns/${campaign.id}` : '/'} className="action-button action-button-secondary" data-testid="link-cancel-campaign">Cancelar</Link><button type="submit" disabled={isPending} className="action-button action-button-primary" data-testid="button-save-campaign">{isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando...</> : <><Save size={16} /> {isEditing ? 'Salvar alterações' : 'Criar campanha'}</>}</button></div>
+       <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row"><Link href={campaign ? `/campaigns/${campaign.id}` : '/'} className="action-button action-button-secondary" data-testid="link-cancel-campaign">Cancelar</Link><button type="submit" disabled={isPending || isUploadPending} className="action-button action-button-primary" data-testid="button-save-campaign">{isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando...</> : isUploadPending ? <><LoaderCircle size={16} className="animate-spin" /> Aguardando upload...</> : <><Save size={16} /> {isEditing ? 'Salvar alterações' : 'Criar campanha'}</>}</button></div>
     </form>
   );
 }
