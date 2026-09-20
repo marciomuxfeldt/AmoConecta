@@ -319,6 +319,7 @@ async function loadExistingCampaignEmails(
       .select("email")
       .eq("campanha_id", campaignId)
       .eq("is_lembrete", false)
+      .order("id", { ascending: true })
       .range(offset, offset + EXISTING_EMAIL_PAGE_SIZE - 1);
     if (error) throw error;
     for (const row of data ?? []) {
@@ -370,7 +371,6 @@ export async function validateAndImportCsv({
 }): Promise<ImportSummary> {
   const summary = buildSummary(storagePath);
   const suppression = await loadSuppression(client);
-  const existingEmails = await loadExistingCampaignEmails(client, campaignId);
   const seenEmails = new Set<string>();
   const seenPhones = new Set<string>();
   const iterator = recordsFromStream(stream);
@@ -429,6 +429,7 @@ export async function validateAndImportCsv({
     );
   }
 
+  const existingEmails = await loadExistingCampaignEmails(client, campaignId);
   let block: ImportRow[] = [];
   let blockNewCount = 0;
   let blockUpdatedCount = 0;

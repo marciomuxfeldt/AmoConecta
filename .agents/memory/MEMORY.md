@@ -3,3 +3,4 @@
 - [CSV import validation rules](csv-import-validation-rules.md) — localized timestamps and optional contact fields must not reject otherwise valid e-mail rows.
 - [Asynchronous CSV import jobs](async-import-jobs.md) — large validations must persist progress and outlive the HTTP request.
 - [Technical error persistence](technical-error-persistence.md) — persist structured technical failures while masking them at the HTTP boundary.
+- [Import count semantics](import-count-semantics.md) — “Salvos” counts only new records; existing and in-file duplicates are separate outcomes.

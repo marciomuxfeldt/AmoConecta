@@ -13,6 +13,9 @@ export interface ImportValidationSummary {
   total_linhas: number;
   validos: number;
   invalidos: number;
+  novos: number;
+  atualizados: number;
+  duplicados_no_arquivo: number;
   duplicados_email: number;
   duplicados_telefone: number;
   suprimidos: number;
