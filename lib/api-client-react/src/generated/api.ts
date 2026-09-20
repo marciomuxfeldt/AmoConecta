@@ -33,6 +33,7 @@ import type {
   RequestEmailImageUploadInput,
   RequestImportUploadInput,
   SafetyMode,
+  SendTestResponse,
   UpdateCampaignInput,
   ValidateImportInput
 } from './api.schemas';
@@ -862,6 +863,80 @@ export const useDeleteCampaign = <TError = ErrorType<Error>,
         TContext
       > => {
       return useMutation(getDeleteCampaignMutationOptions(options));
+    }
+
+export const getSendCampaignTestUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/test`
+}
+
+/**
+ * @summary Envia um teste para o e-mail da sessão
+ */
+export const sendCampaignTest = async (campaignId: string, options?: Parameters<typeof customFetch>[1]): Promise<SendTestResponse> => {
+
+  return customFetch<SendTestResponse>(getSendCampaignTestUrl(campaignId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getSendCampaignTestMutationKey = () => ['sendCampaignTest'] as const;
+
+export const getSendCampaignTestMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCampaignTest>>, TError,SendCampaignTestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendCampaignTest>>, TError,SendCampaignTestMutationVariables, TContext> => {
+
+const mutationKey = getSendCampaignTestMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendCampaignTest>>, SendCampaignTestMutationVariables> = (props) => {
+          const {campaignId} = props ?? {};
+
+          return  sendCampaignTest(campaignId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendCampaignTestMutationResult = NonNullable<Awaited<ReturnType<typeof sendCampaignTest>>>
+
+    export type SendCampaignTestMutationError = ErrorType<Error>
+    export type SendCampaignTestMutationVariables = {campaignId: string}
+
+    /**
+ * @summary Envia um teste para o e-mail da sessão
+ */
+export const useSendCampaignTest = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCampaignTest>>, TError,SendCampaignTestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendCampaignTest>>,
+        TError,
+        SendCampaignTestMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSendCampaignTestMutationOptions(options));
     }
 
 export const getRequestCampaignAssetUploadUrlUrl = (campaignId: string,) => {

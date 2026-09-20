@@ -72,6 +72,11 @@ export const CampaignStatus = {
   concluida: 'concluida',
 } as const;
 
+export interface SendTestResponse {
+  sent: boolean;
+  resend_email_id: string;
+}
+
 export type EmailTextBlockType = typeof EmailTextBlockType[keyof typeof EmailTextBlockType];
 
 

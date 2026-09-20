@@ -395,6 +395,19 @@ export const DeleteCampaignResponse = zod.void()
 
 
 /**
+ * @summary Envia um teste para o e-mail da sessão
+ */
+export const SendCampaignTestParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const SendCampaignTestResponse = zod.object({
+  "sent": zod.boolean(),
+  "resend_email_id": zod.string()
+})
+
+
+/**
  * @summary Gera URL assinada para upload de imagem do e-mail
  */
 export const RequestCampaignAssetUploadUrlParams = zod.object({

@@ -263,6 +263,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/test:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: sendCampaignTest
+      tags: [campaigns]
+      summary: Envia um teste para o e-mail da sessão
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Teste enviado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendTestResponse"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Teste bloqueado ou inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /campaigns/{campaignId}/assets/upload-url:
     parameters:
       - name: campaignId
@@ -563,6 +596,14 @@ components:
     CampaignStatus:
       type: string
       enum: [rascunho, agendada, enviando, pausada, concluida]
+    SendTestResponse:
+      type: object
+      properties:
+        sent:
+          type: boolean
+        resend_email_id:
+          type: string
+      required: [sent, resend_email_id]
     Campaign:
       type: object
       properties:

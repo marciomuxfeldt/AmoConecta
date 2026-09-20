@@ -43,6 +43,7 @@ import {
   useGetSafetyMode,
   useLogout,
   useRequestCampaignImportUploadUrl,
+  useSendCampaignTest,
   useUpdateCampaign,
   useValidateCampaignImport,
 } from '@workspace/api-client-react';
@@ -433,7 +434,21 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return <div><label className="field-label">{label}</label>{children}{hint && <p className="field-hint">{hint}</p>}</div>;
 }
 
-function CampaignForm({ campaign, onSaved }: { campaign?: Campaign; onSaved: (campaign: Campaign) => void }) {
+function CampaignForm({
+  campaign,
+  onSaved,
+  onSendTest,
+  testPending,
+  testError,
+  testSent,
+}: {
+  campaign?: Campaign;
+  onSaved: (campaign: Campaign) => void;
+  onSendTest?: () => void;
+  testPending?: boolean;
+  testError?: string | null;
+  testSent?: boolean;
+}) {
   const create = useCreateCampaign();
   const update = useUpdateCampaign();
   const form = useForm<CampaignFormValues>({ defaultValues: campaignToForm(campaign) });
@@ -545,6 +560,10 @@ function CampaignForm({ campaign, onSaved }: { campaign?: Campaign; onSaved: (ca
         campaignId={campaign?.id}
         subject={emailSubject}
         onUploadingChange={handleUploadingChange}
+        onSendTest={onSendTest}
+        testPending={testPending}
+        testError={testError}
+        testSent={testSent}
       />
       {form.formState.errors.corpo?.message && <p className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" data-testid="error-email-content">{form.formState.errors.corpo.message}</p>}
       {isUploadPending && <p className="flex items-center gap-2 rounded-xl border border-[#d4e5df] bg-[#f1f7f5] px-4 py-3 text-xs text-[#247b79]" role="status" data-testid="status-image-upload-blocking"><LoaderCircle size={14} className="animate-spin" /> Aguarde o upload das imagens terminar para salvar a campanha.</p>}
@@ -759,6 +778,8 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
   const [confirmDelete, setConfirmDelete] = useState(false);
   const campaignQuery = useGetCampaign(campaignId, { query: { enabled: Boolean(campaignId), queryKey: getGetCampaignQueryKey(campaignId) } });
   const deleteCampaign = useDeleteCampaign();
+  const sendTest = useSendCampaignTest();
+  const [testSent, setTestSent] = useState(false);
   const campaign = campaignQuery.data;
 
   const deleteCurrent = () => {
@@ -769,6 +790,14 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
         setLocation('/');
       },
     });
+  };
+
+  const sendCampaignTest = () => {
+    setTestSent(false);
+    sendTest.mutate(
+      { campaignId },
+      { onSuccess: () => setTestSent(true) },
+    );
   };
 
   if (campaignQuery.isLoading) {
@@ -785,7 +814,17 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
           <div className="relative"><button onClick={() => setConfirmDelete((open) => !open)} className="action-button action-button-danger" data-testid="button-delete-campaign"><Trash2 size={15} /> Excluir campanha</button>{confirmDelete && <div className="absolute right-0 top-12 z-10 w-72 rounded-xl border border-[#efc9ba] bg-[#fffaf6] p-4 text-left shadow-[0_18px_45px_rgba(38,48,68,.14)]"><p className="text-sm font-extrabold text-[#263044]">Excluir esta campanha?</p><p className="mt-1 text-xs leading-5 text-[#7d6c6c]">Esta ação remove os metadados da campanha.</p><div className="mt-4 flex justify-end gap-2"><button onClick={() => setConfirmDelete(false)} className="action-button action-button-secondary !px-3" data-testid="button-cancel-delete">Cancelar</button><button onClick={deleteCurrent} disabled={deleteCampaign.isPending} className="action-button action-button-danger !px-3" data-testid="button-confirm-delete">{deleteCampaign.isPending ? <LoaderCircle size={14} className="animate-spin" /> : 'Excluir'}</button></div></div>}</div>
         </div>
         {deleteCampaign.isError && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm text-[#a64220]" data-testid="status-delete-error">Não foi possível excluir a campanha. Tente novamente.</div>}
-         <CampaignForm campaign={campaign} onSaved={(updated) => { queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated); queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() }); }} />
+          <CampaignForm
+            campaign={campaign}
+            onSaved={(updated) => {
+              queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
+              queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+            }}
+            onSendTest={sendCampaignTest}
+            testPending={sendTest.isPending}
+            testError={sendTest.error ? getErrorMessage(sendTest.error, "Não foi possível enviar o teste.") : null}
+            testSent={testSent}
+          />
         <ImportPanel campaignId={campaignId} />
       </div>
     </Shell>

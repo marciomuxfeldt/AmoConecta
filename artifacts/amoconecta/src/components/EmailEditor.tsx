@@ -34,6 +34,10 @@ type EmailEditorProps = {
   campaignId?: string;
   subject: string;
   onUploadingChange?: (blockId: string, uploading: boolean) => void;
+  onSendTest?: () => void;
+  testPending?: boolean;
+  testError?: string | null;
+  testSent?: boolean;
 };
 
 const blockLabels: Record<EmailBlock["type"], string> = {
@@ -429,7 +433,17 @@ function BlockCard({
   );
 }
 
-export function EmailEditor({ blocks, onChange, campaignId, subject, onUploadingChange }: EmailEditorProps) {
+export function EmailEditor({
+  blocks,
+  onChange,
+  campaignId,
+  subject,
+  onUploadingChange,
+  onSendTest,
+  testPending = false,
+  testError = null,
+  testSent = false,
+}: EmailEditorProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [previewName, setPreviewName] = useState("Marina");
@@ -458,9 +472,9 @@ export function EmailEditor({ blocks, onChange, campaignId, subject, onUploading
       <div className="border-b border-[#eee7dc] bg-[#fbf9f5] p-5 sm:p-7">
         <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
           <div><div className="flex items-center gap-3"><p className="section-kicker">04 · Corpo do e-mail</p><span className="rounded-full bg-[#f1f7f5] px-2.5 py-1 font-mono text-[9px] uppercase tracking-[.1em] text-[#247b79]">Editor ativo</span></div><h2 className="mt-2 text-xl font-extrabold tracking-[-.05em] text-[#263044] sm:text-2xl">Monte a mensagem bloco a bloco.</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-[#747783]">A ordem é sua. Veja a leitura final ao lado enquanto prepara uma mensagem pronta para chegar bem.</p></div>
-          <button type="button" disabled title="Disponível em uma fase futura" className="action-button action-button-secondary cursor-not-allowed opacity-50" aria-describedby="test-send-note" data-testid="button-send-test"><ExternalLink size={14} /> Enviar teste</button>
+          <button type="button" onClick={onSendTest} disabled={!campaignId || !onSendTest || testPending} title={!campaignId ? "Salve a campanha antes de enviar um teste" : undefined} className="action-button action-button-secondary disabled:cursor-not-allowed disabled:opacity-50" aria-describedby="test-send-note" data-testid="button-send-test">{testPending ? <LoaderCircle size={14} className="animate-spin" /> : <ExternalLink size={14} />} {testPending ? "Enviando…" : "Enviar teste"}</button>
         </div>
-        <p id="test-send-note" className="mt-2 text-right font-mono text-[9px] uppercase tracking-[.08em] text-[#aaa3a1] lg:pr-1">Disponível em uma fase futura</p>
+        <p id="test-send-note" className={`mt-2 text-right font-mono text-[9px] uppercase tracking-[.08em] lg:pr-1 ${testError ? "text-[#a64220]" : testSent ? "text-[#247b79]" : "text-[#aaa3a1]"}`}>{testError ?? (testSent ? "Teste enviado para o e-mail da sua sessão." : campaignId ? "O teste respeita supressão e a lista de segurança." : "Salve a campanha antes de enviar um teste.")}</p>
       </div>
       <div className="grid gap-7 p-5 sm:p-7 xl:grid-cols-[minmax(0,.9fr)_minmax(360px,1.1fr)]">
         <div>
