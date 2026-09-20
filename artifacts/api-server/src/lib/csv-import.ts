@@ -106,6 +106,12 @@ function normalizeEmail(value: string): string {
   return value.trim().replace(/\s+/g, "").toLocaleLowerCase("pt-BR");
 }
 
+function fallbackName(email: string): string {
+  const localPart = email.split("@", 1)[0] ?? "";
+  const name = normalizeName(localPart.replace(/[.+_-]+/gu, " "));
+  return name || "Contato";
+}
+
 function normalizePhone(value: string): string | null {
   const digits = value.replace(/\D/g, "");
   return digits.length >= 8 && digits.length <= 15 ? digits : null;
@@ -124,11 +130,16 @@ function parseDate(value: string): { date: string | null; invalid: boolean } {
   let year: number;
   const iso = input.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/u);
   const numeric = input.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/u);
-  const written = input
+  const writtenInput = input
     .toLocaleLowerCase("pt-BR")
     .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .match(/^(\d{1,2})\s+(?:de\s+)?([a-z]+)(?:\s+de)?\s+(\d{4})$/u);
+    .replace(/\p{Diacritic}/gu, "");
+  const writtenWithTime = writtenInput.match(
+    /^(\d{1,2})\s+([a-z]+),\s*(\d{4}),\s*\d{1,2}:\d{2}$/u,
+  );
+  const written = writtenInput.match(
+    /^(\d{1,2})\s+(?:de\s+)?([a-z]+)(?:\s+de)?\s+(\d{4})$/u,
+  );
 
   if (iso) {
     year = Number(iso[1]);
@@ -138,10 +149,12 @@ function parseDate(value: string): { date: string | null; invalid: boolean } {
     day = Number(numeric[1]);
     month = Number(numeric[2]);
     year = Number(numeric[3]);
-  } else if (written) {
-    day = Number(written[1]);
-    month = MONTHS[written[2]];
-    year = Number(written[3]);
+  } else if (writtenWithTime || written) {
+    const match = writtenWithTime ?? written;
+    if (!match) return { date: null, invalid: true };
+    day = Number(match[1]);
+    month = MONTHS[match[2]];
+    year = Number(match[3]);
   } else {
     return { date: null, invalid: true };
   }
@@ -387,34 +400,28 @@ export async function validateAndImportCsv({
     const rawRegion = regionIndex >= 0 ? record.values[regionIndex] ?? "" : "";
     const rawDate =
       purchaseDateIndex >= 0 ? record.values[purchaseDateIndex] ?? "" : "";
-    const reasons: string[] = [];
     const idUsuario = rawUserId.trim() || null;
-    const nome = normalizeName(rawName);
     const email = normalizeEmail(rawEmail);
+    const normalizedName = normalizeName(rawName);
+    const nome = normalizedName || fallbackName(email);
     const telefone = rawPhone.trim() ? normalizePhone(rawPhone) : null;
     const regiao = rawRegion.trim() || null;
     const parsedDate = parseDate(rawDate);
 
-    if (!nome) {
+    if (!normalizedName) {
       summary.nomes_ausentes += 1;
-      reasons.push("nome ausente");
     }
     if (!isValidEmail(email)) {
       summary.emails_invalidos += 1;
-      reasons.push("e-mail inválido");
+      summary.invalidos += 1;
+      addError(summary, record.line, "e-mail ausente ou inválido");
+      continue;
     }
     if (rawPhone.trim() && !telefone) {
       summary.telefones_invalidos += 1;
-      reasons.push("telefone inválido");
     }
     if (parsedDate.invalid) {
       summary.datas_invalidas += 1;
-      reasons.push("data da última compra inválida");
-    }
-    if (reasons.length > 0) {
-      summary.invalidos += 1;
-      addError(summary, record.line, reasons.join("; "));
-      continue;
     }
     if (suppression.emails.has(email) || (telefone && suppression.phones.has(telefone))) {
       summary.suprimidos += 1;
