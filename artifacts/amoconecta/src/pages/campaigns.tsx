@@ -34,11 +34,13 @@ import {
   getGetCampaignImportQueryKey,
   getGetAuthSessionQueryKey,
   getListCampaignsQueryKey,
+  getGetSafetyModeQueryKey,
   useCreateCampaign,
   useDeleteCampaign,
   useGetCampaign,
   useGetCampaignImport,
   useListCampaigns,
+  useGetSafetyMode,
   useLogout,
   useRequestCampaignImportUploadUrl,
   useUpdateCampaign,
@@ -170,6 +172,9 @@ function Shell({
   setMobileNavOpen: (open: boolean) => void;
 }) {
   const logout = useLogout();
+  const safetyModeQuery = useGetSafetyMode({
+    query: { queryKey: getGetSafetyModeQueryKey() },
+  });
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
 
@@ -232,6 +237,21 @@ function Shell({
           </div>
         </header>
         <main className="mx-auto max-w-[1420px] px-5 pb-16 pt-10 sm:px-8 sm:pt-14 md:px-10">
+          {safetyModeQuery.data?.message && (
+            <div
+              className="mb-7 flex items-start gap-3 rounded-2xl border border-[#e8c56f] bg-[#fff7dc] px-4 py-3 text-sm leading-6 text-[#74561c]"
+              role="status"
+              data-testid="status-safety-mode"
+            >
+              <ShieldCheck size={18} className="mt-1 shrink-0 text-[#b47b1c]" />
+              <div>
+                <strong className="font-bold">{safetyModeQuery.data.message}</strong>
+                <p className="text-xs text-[#8a6b2c]">
+                  A operação permanece bloqueada até a liberação explícita do ambiente.
+                </p>
+              </div>
+            </div>
+          )}
           <div className="animate-rise-in mb-9 flex flex-col justify-between gap-6 border-b border-[#e1d8cc] pb-8 lg:flex-row lg:items-end">
             <div>
               <p className="section-kicker">{eyebrow}</p>

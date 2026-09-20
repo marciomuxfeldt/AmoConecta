@@ -18,6 +18,21 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * Não expõe os endereços configurados na allowlist.
+ * @summary Retorna o estado seguro da operação de envios
+ */
+export const getSafetyModeResponseAllowlistCountMin = 0;
+
+
+
+export const GetSafetyModeResponse = zod.object({
+  "envio_liberado": zod.boolean(),
+  "allowlist_count": zod.number().int().min(getSafetyModeResponseAllowlistCountMin),
+  "message": zod.string().nullable()
+})
+
+
+/**
  * @summary Retorna a sessão atual
  */
 export const GetAuthSessionResponse = zod.object({

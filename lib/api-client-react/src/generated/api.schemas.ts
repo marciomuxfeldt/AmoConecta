@@ -9,6 +9,14 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface SafetyMode {
+  envio_liberado: boolean;
+  /** @minimum 0 */
+  allowlist_count: number;
+  /** @nullable */
+  message: string | null;
+}
+
 export interface Error {
   error: string;
 }

@@ -14,6 +14,7 @@ import { getSupabaseUser } from "./auth";
 import { supabaseAdminClient } from "../lib/supabase";
 import { getTechnicalError } from "../lib/technical-error";
 import { normalizeEmailBlocks } from "@workspace/email-template";
+import { getSafetyMode, getSafetyModeMessage } from "../lib/safety-mode";
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
@@ -192,6 +193,22 @@ router.post("/campaigns", async (req, res) => {
       res.status(401).json({ error: "Sessão expirada. Entre novamente." });
       return;
     }
+    if (
+      (parsed.data.status === "agendada" || parsed.data.status === "enviando") &&
+      !getSafetyMode().envio_liberado
+    ) {
+      res.status(422).json({ error: getSafetyModeMessage() });
+      return;
+    }
+    if (
+      (parsed.data.status === "agendada" || parsed.data.status === "enviando") &&
+      !parsed.data.teste_enviado
+    ) {
+      res.status(422).json({
+        error: "Envie e confirme o teste antes de agendar ou iniciar a campanha.",
+      });
+      return;
+    }
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
       .insert(campaignPayload(parsed.data as Record<string, unknown>))
@@ -304,6 +321,22 @@ router.patch("/campaigns/:campaignId", async (req, res) => {
     const session = await getSupabaseUser(req, res);
     if (!session) {
       res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+    if (
+      (parsed.data.status === "agendada" || parsed.data.status === "enviando") &&
+      !getSafetyMode().envio_liberado
+    ) {
+      res.status(422).json({ error: getSafetyModeMessage() });
+      return;
+    }
+    if (
+      (parsed.data.status === "agendada" || parsed.data.status === "enviando") &&
+      parsed.data.teste_enviado !== true
+    ) {
+      res.status(422).json({
+        error: "Envie e confirme o teste antes de agendar ou iniciar a campanha.",
+      });
       return;
     }
     const existing = await findCampaign(params.data.campaignId);

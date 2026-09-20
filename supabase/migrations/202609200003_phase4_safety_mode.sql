@@ -1,5 +1,6 @@
 -- Fase 4: fila de envio, rastreabilidade e modo de segurança.
--- Aplicar manualmente no Supabase. Não cria nem altera políticas de RLS.
+-- Aplicar manualmente no Supabase. Mantém RLS habilitado sem políticas:
+-- estas tabelas são acessadas pelo backend usando a service role.
 
 alter table public.destinatario
   add column if not exists status text not null default 'pendente',
@@ -52,3 +53,12 @@ alter table public.supressao
 
 alter table public.campanha
   add column if not exists reply_to text;
+
+drop policy if exists "Usuário autenticado pode consultar campanhas" on public.campanha;
+drop policy if exists "Usuário autenticado pode consultar destinatários" on public.destinatario;
+drop policy if exists "Usuário autenticado pode consultar importações" on public.importacao;
+
+alter table public.campanha enable row level security;
+alter table public.supressao enable row level security;
+alter table public.destinatario enable row level security;
+alter table public.importacao enable row level security;

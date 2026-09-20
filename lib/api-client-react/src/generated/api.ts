@@ -32,6 +32,7 @@ import type {
   LoginInput,
   RequestEmailImageUploadInput,
   RequestImportUploadInput,
+  SafetyMode,
   UpdateCampaignInput,
   ValidateImportInput
 } from './api.schemas';
@@ -70,6 +71,7 @@ export const getHealthCheckUrl = () => {
 
   return `/api/healthz`
 }
+
 /**
  * Returns server health status
  * @summary Health check
@@ -128,6 +130,84 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetSafetyModeUrl = () => {
+
+
+
+
+  return `/api/safety-mode`
+}
+
+/**
+ * Não expõe os endereços configurados na allowlist.
+ * @summary Retorna o estado seguro da operação de envios
+ */
+export const getSafetyMode = async ( options?: Parameters<typeof customFetch>[1]): Promise<SafetyMode> => {
+
+  return customFetch<SafetyMode>(getGetSafetyModeUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSafetyModeQueryKey = () => {
+    return [
+    `/api/safety-mode`
+    ] as const;
+    }
+
+
+export const getGetSafetyModeQueryOptions = <TData = Awaited<ReturnType<typeof getSafetyMode>>, TError = ErrorType<Error>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSafetyMode>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSafetyModeQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSafetyMode>>> = ({ signal }) => getSafetyMode({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSafetyMode>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSafetyModeQueryResult = NonNullable<Awaited<ReturnType<typeof getSafetyMode>>>
+export type GetSafetyModeQueryError = ErrorType<Error>
+
+
+/**
+ * @summary Retorna o estado seguro da operação de envios
+ */
+
+export function useGetSafetyMode<TData = Awaited<ReturnType<typeof getSafetyMode>>, TError = ErrorType<Error>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSafetyMode>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSafetyModeQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -1126,4 +1206,10 @@ export function useGetCampaignImport<TData = Awaited<ReturnType<typeof getCampai
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+
+
+
+
+
 

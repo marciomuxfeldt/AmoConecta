@@ -35,5 +35,6 @@ export * from './recencyBucket';
 export * from './requestEmailImageUploadInput';
 export * from './requestEmailImageUploadInputMimeType';
 export * from './requestImportUploadInput';
+export * from './safetyMode';
 export * from './updateCampaignInput';
 export * from './validateImportInput';

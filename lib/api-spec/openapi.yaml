@@ -14,6 +14,8 @@ tags:
     description: Sessão da equipe de marketing
   - name: campaigns
     description: Campanhas de e-mail
+  - name: safety
+    description: Estado seguro da operação de envios
 paths:
   /healthz:
     get:
@@ -28,6 +30,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /safety-mode:
+    get:
+      operationId: getSafetyMode
+      tags: [safety]
+      summary: Retorna o estado seguro da operação de envios
+      description: Não expõe os endereços configurados na allowlist.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Estado do modo de segurança
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SafetyMode"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /auth/session:
     get:
       operationId: getAuthSession
@@ -446,6 +469,20 @@ components:
           type: string
       required:
         - status
+    SafetyMode:
+      type: object
+      properties:
+        envio_liberado:
+          type: boolean
+        allowlist_count:
+          type: integer
+          minimum: 0
+        message:
+          type: ["string", "null"]
+      required:
+        - envio_liberado
+        - allowlist_count
+        - message
     Error:
       type: object
       properties:
