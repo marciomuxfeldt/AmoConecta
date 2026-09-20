@@ -16,6 +16,7 @@ import { getTechnicalError } from "../lib/technical-error";
 import { normalizeEmailBlocks } from "@workspace/email-template";
 import { getSafetyMode, getSafetyModeMessage } from "../lib/safety-mode";
 import { sendTestEmail } from "../lib/worker";
+import { formatValidationError } from "../lib/validation";
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
@@ -185,7 +186,7 @@ router.get("/campaigns", async (req, res) => {
 router.post("/campaigns", async (req, res) => {
   const parsed = CreateCampaignBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(422).json({ error: "Confira os dados da campanha." });
+    res.status(422).json({ error: formatValidationError(parsed.error) });
     return;
   }
   try {
@@ -280,7 +281,10 @@ router.post("/campaigns/:campaignId/test", async (req, res) => {
   } catch (error) {
     logSupabaseError(req, "Campaign test send failed", error);
     const message =
-      error instanceof Error && /modo de segurança|suprimido|não encontrada/iu.test(error.message)
+      error instanceof Error &&
+      /modo de segurança|suprimido|não encontrada|remetente da campanha|APP_BASE_URL|UNSUBSCRIBE_SECRET|RESEND_API_KEY|Resend não retornou/iu.test(
+        error.message,
+      )
         ? error.message
         : "Não foi possível enviar o teste.";
     res.status(422).json({ error: message });
@@ -290,7 +294,11 @@ router.post("/campaigns/:campaignId/test", async (req, res) => {
 router.post("/campaigns/:campaignId/assets/upload-url", async (req, res) => {
   const body = RequestCampaignAssetUploadUrlBody.safeParse(req.body);
   if (!body.success || !req.params.campaignId) {
-    res.status(422).json({ error: "Informe uma imagem válida." });
+    res.status(422).json({
+      error: body.success
+        ? "Campo obrigatório: identificador da campanha."
+        : formatValidationError(body.error),
+    });
     return;
   }
   if (body.data.tamanho > MAX_EMAIL_IMAGE_BYTES) {
@@ -342,7 +350,12 @@ router.patch("/campaigns/:campaignId", async (req, res) => {
     return;
   }
   if (!parsed.success || Object.keys(req.body ?? {}).length === 0) {
-    res.status(422).json({ error: "Nenhum dado válido foi enviado." });
+    res.status(422).json({
+      error:
+        Object.keys(req.body ?? {}).length === 0
+          ? "Nenhum dado válido foi enviado."
+          : formatValidationError(parsed.error),
+    });
     return;
   }
   try {

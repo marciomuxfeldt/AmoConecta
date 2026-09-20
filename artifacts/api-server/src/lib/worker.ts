@@ -457,7 +457,9 @@ export async function sendTestEmail(
     throw new Error("O destinatário de teste está suprimido.");
   }
   if (!isRecipientAllowed(normalizedEmail)) {
-    throw new Error("Modo de segurança ativo — e-mail fora da lista de teste.");
+    throw new Error(
+      "Bloqueado pelo modo de segurança: este endereço não está na lista de teste.",
+    );
   }
   const testRecipient: WorkerRecipient = {
     id: `teste:${campaign.id}:${normalizedEmail}`,

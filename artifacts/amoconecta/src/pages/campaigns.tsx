@@ -70,9 +70,13 @@ const statusDescriptions: Record<string, string> = {
 };
 
 function getErrorMessage(error: unknown, fallback: string) {
-  if (error && typeof error === 'object' && 'error' in error) {
-    const value = (error as { error?: unknown }).error;
-    if (typeof value === 'string') return value;
+  if (error && typeof error === 'object') {
+    const record = error as { error?: unknown; data?: unknown };
+    if (typeof record.error === 'string') return record.error;
+    if (record.data && typeof record.data === 'object' && 'error' in record.data) {
+      const value = (record.data as { error?: unknown }).error;
+      if (typeof value === 'string') return value;
+    }
   }
   if (error instanceof Error && error.message) return error.message;
   return fallback;
