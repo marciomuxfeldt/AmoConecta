@@ -498,12 +498,13 @@ function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
   return (
     <div className="mt-6 border-t border-[#eee7dc] pt-6" data-testid="import-validation-summary">
       <div className="mb-5 flex flex-col justify-between gap-2 sm:flex-row sm:items-end"><div><p className="section-kicker">Resultado da validação</p><h3 className="mt-2 text-xl font-extrabold tracking-[-.05em] text-[#263044]">Base pronta para uma decisão.</h3></div><span className="font-mono text-[9px] text-[#989498]" data-testid="text-import-storage-path">{summary.storage_path}</span></div>
-       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
         <div className="metric-tile"><strong>{formatNumber(summary.total_linhas)}</strong><span>Linhas lidas</span></div>
         <div className="metric-tile border-[#cfe4c7] bg-[#f2f8ee]"><strong className="text-[#417846]">{formatNumber(summary.validos)}</strong><span>Válidos</span></div>
         <div className="metric-tile border-[#efc9ba] bg-[#fff3ee]"><strong className="text-[#a64220]">{formatNumber(summary.invalidos)}</strong><span>Inválidos</span></div>
          <div className="metric-tile border-[#cfe4c7] bg-[#f2f8ee]"><strong className="text-[#417846]">{formatNumber(summary.novos)}</strong><span>Salvos</span></div>
          <div className="metric-tile"><strong>{formatNumber(summary.atualizados)}</strong><span>Atualizados</span></div>
+         <div className="metric-tile border-[#f1dfb8] bg-[#fff9e9]"><strong className="text-[#9b6b17]">{formatNumber(summary.duplicados_no_arquivo)}</strong><span>Duplicados</span></div>
         <div className="metric-tile"><strong>{formatNumber(summary.suprimidos)}</strong><span>Suprimidos</span></div>
       </div>
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.2fr]">

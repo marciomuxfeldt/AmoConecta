@@ -123,8 +123,12 @@ function fallbackName(email: string): string | null {
   return normalizeName(parts.join(" ")) || null;
 }
 
-function normalizePhone(value: string): string | null {
-  const digits = value.replace(/\D/g, "");
+export function normalizePhone(value: string): string | null {
+  let digits = value.replace(/\D/g, "");
+  if (digits.length > 11 && digits.startsWith("55")) {
+    digits = digits.slice(2);
+  }
+  digits = digits.replace(/^0+/u, "");
   return digits.length >= 8 && digits.length <= 15 ? digits : null;
 }
 
@@ -482,7 +486,6 @@ export async function validateAndImportCsv({
     }
     if (suppression.emails.has(email) || (telefone && suppression.phones.has(telefone))) {
       summary.suprimidos += 1;
-      summary.invalidos += 1;
       addError(summary, record.line, "destinatário presente na supressão");
       await reportProgress();
       continue;
@@ -490,15 +493,12 @@ export async function validateAndImportCsv({
     if (seenEmails.has(email)) {
       summary.duplicados_no_arquivo += 1;
       summary.duplicados_email += 1;
-      summary.invalidos += 1;
-      addError(summary, record.line, "e-mail duplicado no arquivo");
       await reportProgress();
       continue;
     }
     if (deduplicatePhone && telefone && seenPhones.has(telefone)) {
+      summary.duplicados_no_arquivo += 1;
       summary.duplicados_telefone += 1;
-      summary.invalidos += 1;
-      addError(summary, record.line, "telefone duplicado no arquivo");
       await reportProgress();
       continue;
     }
