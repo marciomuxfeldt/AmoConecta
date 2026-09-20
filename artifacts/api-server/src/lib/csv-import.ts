@@ -28,9 +28,11 @@ const RECENCY_BUCKETS = [
 ] as const;
 
 type ImportRow = {
+  id_usuario: string | null;
   nome: string;
   email: string;
   telefone: string | null;
+  regiao: string | null;
   data_ultima_compra: string | null;
 };
 
@@ -325,10 +327,28 @@ export async function validateAndImportCsv({
   }
 
   const headers = first.value.values.map(headerKey);
-  const nameIndex = resolveHeader(headers, ["nome", "nome completo", "name", "cliente"]);
-  const emailIndex = resolveHeader(headers, ["email", "e mail", "e-mail"]);
-  const phoneIndex = resolveHeader(headers, ["telefone", "celular", "phone", "whatsapp"]);
+  const displayHeaders = first.value.values
+    .map((value) => value.replace(/^\uFEFF/u, "").trim())
+    .filter(Boolean);
+  const userIdIndex = resolveHeader(headers, ["user_id", "id"]);
+  const nameIndex = resolveHeader(headers, [
+    "user_name",
+    "nome",
+    "nome completo",
+    "name",
+    "cliente",
+  ]);
+  const emailIndex = resolveHeader(headers, ["user_email", "email", "e mail", "e-mail"]);
+  const phoneIndex = resolveHeader(headers, [
+    "user_phone",
+    "telefone",
+    "celular",
+    "phone",
+    "whatsapp",
+  ]);
+  const regionIndex = resolveHeader(headers, ["last_order_region", "regiao", "região"]);
   const purchaseDateIndex = resolveHeader(headers, [
+    "last_order_date",
     "data ultima compra",
     "ultima compra",
     "data compra",
@@ -336,7 +356,14 @@ export async function validateAndImportCsv({
   ]);
 
   if (nameIndex < 0 || emailIndex < 0) {
-    throw new ImportValidationError("O CSV precisa conter as colunas nome e email.");
+    const missing = [
+      nameIndex < 0 ? "nome (user_name)" : null,
+      emailIndex < 0 ? "e-mail (user_email)" : null,
+    ].filter((value): value is string => Boolean(value));
+    throw new ImportValidationError(
+      `Colunas obrigatórias ausentes: ${missing.join(", ")}. ` +
+        `Colunas encontradas: ${displayHeaders.length > 0 ? displayHeaders.join(", ") : "(nenhuma)"}.`,
+    );
   }
 
   let block: ImportRow[] = [];
@@ -353,15 +380,19 @@ export async function validateAndImportCsv({
 
   for await (const record of iterator) {
     summary.total_linhas += 1;
+    const rawUserId = userIdIndex >= 0 ? record.values[userIdIndex] ?? "" : "";
     const rawName = record.values[nameIndex] ?? "";
     const rawEmail = record.values[emailIndex] ?? "";
     const rawPhone = phoneIndex >= 0 ? record.values[phoneIndex] ?? "" : "";
+    const rawRegion = regionIndex >= 0 ? record.values[regionIndex] ?? "" : "";
     const rawDate =
       purchaseDateIndex >= 0 ? record.values[purchaseDateIndex] ?? "" : "";
     const reasons: string[] = [];
+    const idUsuario = rawUserId.trim() || null;
     const nome = normalizeName(rawName);
     const email = normalizeEmail(rawEmail);
     const telefone = rawPhone.trim() ? normalizePhone(rawPhone) : null;
+    const regiao = rawRegion.trim() || null;
     const parsedDate = parseDate(rawDate);
 
     if (!nome) {
@@ -411,9 +442,11 @@ export async function validateAndImportCsv({
     const bucket = summary.recencia.find((item) => item.faixa === faixa);
     if (bucket) bucket.quantidade += 1;
     block.push({
+      id_usuario: idUsuario,
       nome,
       email,
       telefone,
+      regiao,
       data_ultima_compra: parsedDate.date,
     });
     if (block.length >= BLOCK_SIZE) {

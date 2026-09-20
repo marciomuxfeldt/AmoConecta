@@ -18,13 +18,21 @@ create unique index if not exists supressao_telefone_uidx
 create table if not exists public.destinatario (
   id uuid primary key default gen_random_uuid(),
   campanha_id uuid not null references public.campanha(id) on delete cascade,
+  id_usuario text,
   nome text not null,
   email text not null,
   telefone text,
+  regiao text,
   data_ultima_compra date,
   is_lembrete boolean not null default false,
   criado_em timestamptz not null default now()
 );
+
+alter table public.destinatario
+  add column if not exists id_usuario text;
+
+alter table public.destinatario
+  add column if not exists regiao text;
 
 create unique index if not exists destinatario_campanha_email_lembrete_uidx
   on public.destinatario (campanha_id, email, is_lembrete);
