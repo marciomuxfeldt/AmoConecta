@@ -23,6 +23,8 @@ type Campaign = {
   corpo: unknown;
   status: string;
   agendada_para?: string | null;
+  teto_hora?: number | null;
+  teto_dia?: number | null;
 };
 
 export type WorkerRecipient = {
@@ -132,7 +134,7 @@ async function loadCampaign(campaignId: string): Promise<Campaign | null> {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,nome,assunto,remetente_nome,remetente_email,reply_to,corpo,status,agendada_para",
+      "id,nome,assunto,remetente_nome,remetente_email,reply_to,corpo,status,agendada_para,teto_hora,teto_dia",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -174,13 +176,13 @@ async function updateCampaignStatus(campaignId: string, status: string): Promise
 }
 
 function sender(campaign: Campaign): string {
-  const email = normalize(campaign.remetente_email);
+  const email = normalize(campaign.remetente_email || requiredEnv("SENDER_EMAIL"));
   if (!email.endsWith("@marketing.amo.delivery")) {
     throw new WorkerConfigurationError(
       "O remetente da campanha precisa pertencer a marketing.amo.delivery.",
     );
   }
-  return `${campaign.remetente_nome || DEFAULT_SENDER_NAME} <${email}>`;
+  return `${campaign.remetente_nome || process.env.SENDER_NAME || DEFAULT_SENDER_NAME} <${email}>`;
 }
 
 function replyTo(campaign: Campaign): string | undefined {
@@ -293,13 +295,18 @@ async function sendWithRetries(
   for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
     try {
       const results = await sendBatch(campaign, recipients);
+      if (results.length !== recipients.length) {
+        throw new Error(
+          `Resend retornou ${results.length} resultado(s) para ${recipients.length} mensagem(ns).`,
+        );
+      }
       const sentAt = new Date().toISOString();
       await Promise.all(
         recipients.map((recipient, index) =>
           updateRecipient(recipient.id, {
-            status: "enviado",
+            status: results[index]?.error ? "erro" : "enviado",
             resend_email_id: results[index]?.id ?? null,
-            enviado_em: sentAt,
+            enviado_em: results[index]?.error ? null : sentAt,
             erro: results[index]?.error?.message ?? null,
           }),
         ),
@@ -335,20 +342,77 @@ async function maybePauseCampaign(campaignId: string): Promise<void> {
     .eq("campanha_id", campaignId)
     .eq("status", "bounce");
   if (bounceError) throw bounceError;
-  if ((bounces ?? 0) / sent > 0.02) await updateCampaignStatus(campaignId, "pausada");
+  const { count: complaints, error: complaintError } = await client
+    .from("supressao")
+    .select("email", { count: "exact", head: true })
+    .eq("origem", `campanha:${campaignId}`)
+    .eq("motivo", "complaint");
+  if (complaintError) throw complaintError;
+  if (
+    (bounces ?? 0) / sent > 0.02 ||
+    (complaints ?? 0) / sent > 0.002
+  ) {
+    await updateCampaignStatus(campaignId, "pausada");
+  }
+}
+
+async function quotaRemaining(campaign: Campaign): Promise<number> {
+  const client = supabaseAdminClient();
+  const limits = [campaign.teto_hora, campaign.teto_dia].filter(
+    (limit): limit is number => typeof limit === "number" && limit > 0,
+  );
+  if (limits.length === 0) return RESEND_BATCH_SIZE;
+  const now = Date.now();
+  const hourStart = new Date(now - 60 * 60 * 1000).toISOString();
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  const dayStart = day.toISOString();
+  const counts = await Promise.all([
+    client
+      .from("destinatario")
+      .select("id", { count: "exact", head: true })
+      .eq("campanha_id", campaign.id)
+      .gte("enviado_em", hourStart),
+    client
+      .from("destinatario")
+      .select("id", { count: "exact", head: true })
+      .eq("campanha_id", campaign.id)
+      .gte("enviado_em", dayStart),
+  ]);
+  for (const result of counts) {
+    if (result.error) throw result.error;
+  }
+  const hourRemaining =
+    campaign.teto_hora && campaign.teto_hora > 0
+      ? Math.max(0, campaign.teto_hora - (counts[0].count ?? 0))
+      : RESEND_BATCH_SIZE;
+  const dayRemaining =
+    campaign.teto_dia && campaign.teto_dia > 0
+      ? Math.max(0, campaign.teto_dia - (counts[1].count ?? 0))
+      : RESEND_BATCH_SIZE;
+  return Math.min(RESEND_BATCH_SIZE, hourRemaining, dayRemaining);
 }
 
 export async function processCampaign(campaignId: string): Promise<number> {
-  const campaign = await loadCampaign(campaignId);
+  let campaign = await loadCampaign(campaignId);
   if (!campaign || !["agendada", "enviando"].includes(campaign.status)) return 0;
   if (campaign.status === "agendada" && campaign.agendada_para) {
     if (new Date(campaign.agendada_para).getTime() > Date.now()) return 0;
   }
 
+  if (campaign.status === "agendada") {
+    await updateCampaignStatus(campaignId, "enviando");
+    campaign = { ...campaign, status: "enviando" };
+  }
   let processed = 0;
   while (true) {
-    const reserved = await reserveRecipients(campaignId);
-    if (reserved.length === 0) break;
+    const remaining = await quotaRemaining(campaign);
+    if (remaining <= 0) break;
+    const reserved = await reserveRecipients(campaignId, remaining);
+    if (reserved.length === 0) {
+      await updateCampaignStatus(campaignId, "concluida");
+      break;
+    }
     const sendable = await markSuppressedOrBlocked(reserved);
     if (sendable.length > 0) {
       await sendWithRetries(campaign, sendable);
@@ -357,6 +421,7 @@ export async function processCampaign(campaignId: string): Promise<number> {
     await maybePauseCampaign(campaignId);
     const refreshed = await loadCampaign(campaignId);
     if (!refreshed || refreshed.status === "pausada") break;
+    campaign = refreshed;
   }
   return processed;
 }
