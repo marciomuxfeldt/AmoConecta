@@ -286,7 +286,20 @@ export const ValidateCampaignImportBody = zod.object({
   "deduplicar_por_telefone": zod.boolean().default(validateCampaignImportBodyDeduplicarPorTelefoneDefault)
 })
 
+export const validateCampaignImportResponseLinhasProcessadasMin = 0;
+
+export const validateCampaignImportResponseTotalLinhasMin = 0;
+
+
+
 export const ValidateCampaignImportResponse = zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid(),
+  "caminho_arquivo": zod.string(),
+  "status": zod.enum(['pendente', 'processando', 'concluida', 'erro']),
+  "linhas_processadas": zod.number().int().min(validateCampaignImportResponseLinhasProcessadasMin),
+  "total_linhas": zod.number().int().min(validateCampaignImportResponseTotalLinhasMin).nullable(),
+  "resultado": zod.union([zod.object({
   "storage_path": zod.string(),
   "total_linhas": zod.number().int(),
   "validos": zod.number().int(),
@@ -307,6 +320,59 @@ export const ValidateCampaignImportResponse = zod.object({
   "linha": zod.number().int(),
   "motivo": zod.string()
 }))
+}),zod.null()]),
+  "erro": zod.string().nullable(),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Consulta o progresso de uma validação
+ */
+export const GetCampaignImportParams = zod.object({
+  "campaignId": zod.coerce.string().uuid(),
+  "importId": zod.coerce.string().uuid()
+})
+
+export const getCampaignImportResponseLinhasProcessadasMin = 0;
+
+export const getCampaignImportResponseTotalLinhasMin = 0;
+
+
+
+export const GetCampaignImportResponse = zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid(),
+  "caminho_arquivo": zod.string(),
+  "status": zod.enum(['pendente', 'processando', 'concluida', 'erro']),
+  "linhas_processadas": zod.number().int().min(getCampaignImportResponseLinhasProcessadasMin),
+  "total_linhas": zod.number().int().min(getCampaignImportResponseTotalLinhasMin).nullable(),
+  "resultado": zod.union([zod.object({
+  "storage_path": zod.string(),
+  "total_linhas": zod.number().int(),
+  "validos": zod.number().int(),
+  "invalidos": zod.number().int(),
+  "duplicados_email": zod.number().int(),
+  "duplicados_telefone": zod.number().int(),
+  "suprimidos": zod.number().int(),
+  "emails_invalidos": zod.number().int(),
+  "datas_invalidas": zod.number().int(),
+  "nomes_ausentes": zod.number().int(),
+  "telefones_invalidos": zod.number().int(),
+  "destinatarios_salvos": zod.number().int(),
+  "recencia": zod.array(zod.object({
+  "faixa": zod.string(),
+  "quantidade": zod.number().int()
+})),
+  "amostras_erros": zod.array(zod.object({
+  "linha": zod.number().int(),
+  "motivo": zod.string()
+}))
+}),zod.null()]),
+  "erro": zod.string().nullable(),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable()
 })
 
 

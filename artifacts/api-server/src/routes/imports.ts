@@ -1,5 +1,7 @@
 import { Router, type IRouter, type Request } from "express";
 import {
+  GetCampaignImportParams,
+  GetCampaignImportResponse,
   RequestCampaignImportUploadUrlBody,
   RequestCampaignImportUploadUrlResponse,
   ValidateCampaignImportBody,
@@ -12,10 +14,15 @@ import {
   ImportValidationError,
   validateAndImportCsv,
 } from "../lib/csv-import";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 const IMPORT_BUCKET = "amoconecta-imports";
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+const IMPORT_JOB_COLUMNS =
+  "id,campanha_id,caminho_arquivo,status,linhas_processadas,total_linhas,resultado,erro,criado_em,concluido_em";
+const IMPORT_JOB_STATUSES = ["pendente", "processando", "concluida", "erro"] as const;
+type ImportJobStatus = (typeof IMPORT_JOB_STATUSES)[number];
 
 function logSupabaseError(req: Request, operation: string, error: unknown) {
   req.log.error({ supabaseError: error }, operation);
@@ -44,6 +51,76 @@ async function ensurePrivateBucket() {
     if (error && !/already exists|duplicate/iu.test(error.message ?? "")) throw error;
   }
   return client;
+}
+
+function logImportError(operation: string, error: unknown, importId: string) {
+  logger.error({ supabaseError: error, importacaoId: importId }, operation);
+}
+
+async function processImportJob({
+  importId,
+  campaignId,
+  storagePath,
+  deduplicatePhone,
+}: {
+  importId: string;
+  campaignId: string;
+  storagePath: string;
+  deduplicatePhone: boolean;
+}) {
+  const client = supabaseAdminClient();
+  const updateJob = async (payload: Record<string, unknown>) => {
+    const { error } = await client
+      .from("importacao")
+      .update(payload)
+      .eq("id", importId)
+      .eq("campanha_id", campaignId);
+    if (error) throw error;
+  };
+
+  try {
+    await updateJob({ status: "processando" satisfies ImportJobStatus });
+    const { data: signed, error: signedError } = await client.storage
+      .from(IMPORT_BUCKET)
+      .createSignedUrl(storagePath, 300);
+    if (signedError) throw signedError;
+    const fileResponse = await fetch(signed.signedUrl);
+    if (!fileResponse.ok || !fileResponse.body) {
+      throw new Error(`Falha ao baixar o arquivo de importação (${fileResponse.status}).`);
+    }
+    const summary = await validateAndImportCsv({
+      client,
+      stream: fileResponse.body,
+      campaignId,
+      storagePath,
+      deduplicatePhone,
+      onProgress: async (linesProcessed) => {
+        await updateJob({ linhas_processadas: linesProcessed });
+      },
+    });
+    await updateJob({
+      status: "concluida" satisfies ImportJobStatus,
+      linhas_processadas: summary.total_linhas,
+      total_linhas: summary.total_linhas,
+      resultado: summary,
+      erro: null,
+      concluido_em: new Date().toISOString(),
+    });
+  } catch (error) {
+    logImportError("Campaign import background job failed", error, importId);
+    try {
+      await updateJob({
+        status: "erro" satisfies ImportJobStatus,
+        erro:
+          error instanceof ImportValidationError
+            ? error.message
+            : "Não foi possível validar o arquivo.",
+        concluido_em: new Date().toISOString(),
+      });
+    } catch (updateError) {
+      logImportError("Campaign import job failure status update failed", updateError, importId);
+    }
+  }
 }
 
 router.post("/campaigns/:campaignId/imports/upload-url", async (req, res) => {
@@ -121,22 +198,31 @@ router.post("/campaigns/:campaignId/imports/validate", async (req, res) => {
       return;
     }
     const client = supabaseAdminClient();
-    const { data: signed, error: signedError } = await client.storage
-      .from(IMPORT_BUCKET)
-      .createSignedUrl(storagePath, 300);
-    if (signedError) throw signedError;
-    const fileResponse = await fetch(signed.signedUrl);
-    if (!fileResponse.ok || !fileResponse.body) {
-      throw new Error(`Falha ao baixar o arquivo de importação (${fileResponse.status}).`);
+    const { data: job, error } = await client
+      .from("importacao")
+      .insert({
+        campanha_id: req.params.campaignId,
+        caminho_arquivo: storagePath,
+        status: "pendente",
+        linhas_processadas: 0,
+      })
+      .select(IMPORT_JOB_COLUMNS)
+      .single();
+    if (error) {
+      logSupabaseError(req, "Supabase import job creation failed", error);
+      res.status(502).json({ error: "Não foi possível iniciar a validação." });
+      return;
     }
-    const summary = await validateAndImportCsv({
-      client,
-      stream: fileResponse.body,
-      campaignId: req.params.campaignId,
-      storagePath,
-      deduplicatePhone: body.data.deduplicar_por_telefone,
+    const response = ValidateCampaignImportResponse.parse(job);
+    res.status(202).json(response);
+    setImmediate(() => {
+      void processImportJob({
+        importId: response.id,
+        campaignId: req.params.campaignId,
+        storagePath,
+        deduplicatePhone: body.data.deduplicar_por_telefone,
+      });
     });
-    res.json(ValidateCampaignImportResponse.parse(summary));
   } catch (error) {
     if (error instanceof ImportValidationError) {
       res.status(422).json({ error: error.message });
@@ -144,6 +230,45 @@ router.post("/campaigns/:campaignId/imports/validate", async (req, res) => {
     }
     logSupabaseError(req, "Campaign import validation failed", error);
     res.status(502).json({ error: "Não foi possível validar o arquivo." });
+  }
+});
+
+router.get("/campaigns/:campaignId/imports/:importId", async (req, res) => {
+  const params = GetCampaignImportParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(422).json({ error: "Identificador de importação inválido." });
+    return;
+  }
+  try {
+    const session = await getSupabaseUser(req, res);
+    if (!session) {
+      res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+    const campaign = await findCampaign(params.data.campaignId);
+    if (!campaign) {
+      res.status(404).json({ error: "Campanha não encontrada." });
+      return;
+    }
+    const { data, error } = await supabaseAdminClient()
+      .from("importacao")
+      .select(IMPORT_JOB_COLUMNS)
+      .eq("id", params.data.importId)
+      .eq("campanha_id", params.data.campaignId)
+      .maybeSingle();
+    if (error) {
+      logSupabaseError(req, "Supabase import job lookup failed", error);
+      res.status(502).json({ error: "Não foi possível consultar a validação." });
+      return;
+    }
+    if (!data) {
+      res.status(404).json({ error: "Importação não encontrada." });
+      return;
+    }
+    res.json(GetCampaignImportResponse.parse(data));
+  } catch (error) {
+    logSupabaseError(req, "Import job lookup failed", error);
+    res.status(502).json({ error: "Não foi possível consultar a validação." });
   }
 });
 

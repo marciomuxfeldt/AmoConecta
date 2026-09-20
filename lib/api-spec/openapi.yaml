@@ -306,12 +306,12 @@ paths:
             schema:
               $ref: "#/components/schemas/ValidateImportInput"
       responses:
-        "200":
-          description: Resumo da validação
+        "202":
+          description: Validação registrada para processamento assíncrono
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ImportValidationSummary"
+                $ref: "#/components/schemas/ImportValidationJob"
         "401":
           description: Usuário não autenticado
           content:
@@ -332,6 +332,51 @@ paths:
                 $ref: "#/components/schemas/Error"
         "502":
           description: Falha ao validar ou importar no Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/imports/{importId}:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: importId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getCampaignImport
+      tags: [campaigns]
+      summary: Consulta o progresso de uma validação
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Estado e progresso da validação
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportValidationJob"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Importação não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao consultar o Supabase
           content:
             application/json:
               schema:
@@ -640,6 +685,51 @@ components:
           default: false
       required:
         - storage_path
+    ImportValidationStatus:
+      type: string
+      enum: [pendente, processando, concluida, erro]
+    ImportValidationJob:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        campanha_id:
+          type: string
+          format: uuid
+        caminho_arquivo:
+          type: string
+        status:
+          $ref: "#/components/schemas/ImportValidationStatus"
+        linhas_processadas:
+          type: integer
+          minimum: 0
+        total_linhas:
+          type: ["integer", "null"]
+          minimum: 0
+        resultado:
+          anyOf:
+            - $ref: "#/components/schemas/ImportValidationSummary"
+            - type: "null"
+        erro:
+          type: ["string", "null"]
+        criado_em:
+          type: string
+          format: date-time
+        concluido_em:
+          type: ["string", "null"]
+          format: date-time
+      required:
+        - id
+        - campanha_id
+        - caminho_arquivo
+        - status
+        - linhas_processadas
+        - total_linhas
+        - resultado
+        - erro
+        - criado_em
+        - concluido_em
     RecencyBucket:
       type: object
       properties:

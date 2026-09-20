@@ -17,6 +17,8 @@ export * from './error';
 export * from './healthStatus';
 export * from './importUploadUrl';
 export * from './importValidationError';
+export * from './importValidationJob';
+export * from './importValidationStatus';
 export * from './importValidationSummary';
 export * from './loginInput';
 export * from './recencyBucket';

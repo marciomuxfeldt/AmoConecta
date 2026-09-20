@@ -198,6 +198,16 @@ export interface ValidateImportInput {
   deduplicar_por_telefone?: boolean;
 }
 
+export type ImportValidationStatus = typeof ImportValidationStatus[keyof typeof ImportValidationStatus];
+
+
+export const ImportValidationStatus = {
+  pendente: 'pendente',
+  processando: 'processando',
+  concluida: 'concluida',
+  erro: 'erro',
+} as const;
+
 export interface RecencyBucket {
   faixa: string;
   quantidade: number;
@@ -223,5 +233,25 @@ export interface ImportValidationSummary {
   destinatarios_salvos: number;
   recencia: RecencyBucket[];
   amostras_erros: ImportValidationError[];
+}
+
+export interface ImportValidationJob {
+  id: string;
+  campanha_id: string;
+  caminho_arquivo: string;
+  status: ImportValidationStatus;
+  /** @minimum 0 */
+  linhas_processadas: number;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  total_linhas: number | null;
+  resultado: ImportValidationSummary | null;
+  /** @nullable */
+  erro: string | null;
+  criado_em: string;
+  /** @nullable */
+  concluido_em: string | null;
 }
 

@@ -27,14 +27,17 @@ import {
   type Campaign,
   type CampaignListItem,
   type CreateCampaignInput,
+  type ImportValidationJob,
   type ImportValidationSummary,
   type UpdateCampaignInput,
   getGetCampaignQueryKey,
+  getGetCampaignImportQueryKey,
   getGetAuthSessionQueryKey,
   getListCampaignsQueryKey,
   useCreateCampaign,
   useDeleteCampaign,
   useGetCampaign,
+  useGetCampaignImport,
   useListCampaigns,
   useLogout,
   useRequestCampaignImportUploadUrl,
@@ -528,8 +531,39 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
   const [dragging, setDragging] = useState(false);
   const [deduplicatePhone, setDeduplicatePhone] = useState(false);
   const [summary, setSummary] = useState<ImportValidationSummary | null>(null);
-  const [phase, setPhase] = useState<'idle' | 'requesting' | 'uploading' | 'validating'>('idle');
+  const [importJobId, setImportJobId] = useState<string | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'requesting' | 'uploading' | 'processing'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const importJobQuery = useGetCampaignImport(campaignId, importJobId ?? '', {
+    query: {
+      enabled: Boolean(importJobId),
+      queryKey: getGetCampaignImportQueryKey(campaignId, importJobId ?? ''),
+      refetchInterval: 1000,
+    },
+  });
+
+  useEffect(() => {
+    const job = importJobQuery.data;
+    if (!job) return;
+    if (job.status === 'concluida') {
+      setSummary(job.resultado);
+      setImportJobId(null);
+      setPhase('idle');
+      return;
+    }
+    if (job.status === 'erro') {
+      setError(job.erro ?? 'Não foi possível validar o arquivo.');
+      setImportJobId(null);
+      setPhase('idle');
+    }
+  }, [importJobQuery.data]);
+
+  useEffect(() => {
+    if (!importJobQuery.isError || !importJobId) return;
+    setError(getErrorMessage(importJobQuery.error, 'Não foi possível consultar o progresso da validação.'));
+    setImportJobId(null);
+    setPhase('idle');
+  }, [importJobQuery.error, importJobQuery.isError, importJobId]);
 
   const chooseFile = (nextFile?: File) => {
     if (!nextFile) return;
@@ -540,6 +574,7 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
     }
     setError(null);
     setSummary(null);
+    setImportJobId(null);
     setFile(nextFile);
   };
   const onDrop = (event: DragEvent<HTMLLabelElement>) => {
@@ -562,17 +597,26 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
       uploadBody.append('', file);
       const response = await fetch(upload.signed_url, { method: 'PUT', body: uploadBody });
       if (!response.ok) throw new Error(`O upload do arquivo foi recusado (${response.status}).`);
-      setPhase('validating');
-      const result = await validateImport.mutateAsync({ campaignId, data: { storage_path: upload.path, deduplicar_por_telefone: deduplicatePhone } });
-      setSummary(result);
-      setPhase('idle');
+       setPhase('processing');
+       const job = await validateImport.mutateAsync({ campaignId, data: { storage_path: upload.path, deduplicar_por_telefone: deduplicatePhone } });
+       setImportJobId(job.id);
     } catch (uploadError) {
       setPhase('idle');
       setError(getErrorMessage(uploadError, 'Não foi possível concluir a validação do CSV.'));
     }
   };
   const isBusy = phase !== 'idle';
-  const phaseLabel = phase === 'requesting' ? 'Preparando upload...' : phase === 'uploading' ? 'Enviando arquivo...' : phase === 'validating' ? 'Validando destinatários...' : 'Validar CSV';
+  const job = importJobQuery.data;
+  const progress = job?.total_linhas
+    ? Math.min(100, Math.round((job.linhas_processadas / job.total_linhas) * 100))
+    : null;
+  const phaseLabel = phase === 'requesting'
+    ? 'Preparando upload...'
+    : phase === 'uploading'
+      ? 'Enviando arquivo...'
+      : phase === 'processing'
+        ? 'Processando destinatários...'
+        : 'Validar CSV';
 
   return (
     <section className="panel p-5 sm:p-7" data-testid="panel-import">
@@ -592,6 +636,16 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
         <label className="flex items-start gap-3 text-xs text-[#626876]"><input type="checkbox" checked={deduplicatePhone} onChange={(event) => setDeduplicatePhone(event.target.checked)} className="mt-0.5 accent-[#e96527]" data-testid="checkbox-deduplicate-phone" /><span><strong className="block text-[#263044]">Deduplicar por telefone</strong><span className="mt-1 block leading-5">Além do e-mail, considera o telefone na validação.</span></span></label>
         <button onClick={validate} disabled={!file || isBusy} className="action-button action-button-primary" data-testid="button-validate-import">{isBusy ? <><LoaderCircle size={16} className="animate-spin" /> {phaseLabel}</> : <><FileCheck2 size={16} /> {phaseLabel}</>}</button>
       </div>
+      {phase === 'processing' && job && <div className="mt-5 rounded-xl border border-[#d9e3e0] bg-[#f1f7f5] p-4" data-testid="import-progress">
+        <div className="flex items-center justify-between gap-3 text-xs font-bold text-[#247b79]">
+          <span>{job.status === 'pendente' ? 'Aguardando processamento...' : 'Validação em andamento...'}</span>
+          <span>{progress == null ? `${formatNumber(job.linhas_processadas)} linhas processadas` : `${progress}%`}</span>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#dce9e5]">
+          <div className="h-full rounded-full bg-[#247b79] transition-[width] duration-500" style={{ width: `${progress ?? 4}%` }} />
+        </div>
+        <p className="mt-2 text-[11px] text-[#6d7f7c]">{job.total_linhas == null ? 'Lendo o arquivo e contando linhas...' : `${formatNumber(job.linhas_processadas)} de ${formatNumber(job.total_linhas)} linhas`}</p>
+      </div>}
       {error && <div className="mt-5 flex items-start gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-import-error"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{error}</span><button onClick={() => setError(null)} className="ml-auto rounded p-1" aria-label="Fechar erro de importação" data-testid="button-dismiss-import-error"><X size={14} /></button></div>}
       {summary && <ImportSummary summary={summary} />}
     </section>

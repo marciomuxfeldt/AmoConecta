@@ -328,18 +328,30 @@ export async function validateAndImportCsv({
   campaignId,
   storagePath,
   deduplicatePhone,
+  onProgress,
 }: {
   client: SupabaseClient;
   stream: ReadableStream<Uint8Array>;
   campaignId: string;
   storagePath: string;
   deduplicatePhone: boolean;
+  onProgress?: (linesProcessed: number) => Promise<void>;
 }): Promise<ImportSummary> {
   const summary = buildSummary(storagePath);
   const suppression = await loadSuppression(client);
   const seenEmails = new Set<string>();
   const seenPhones = new Set<string>();
   const iterator = recordsFromStream(stream);
+  let lastReportedLines = 0;
+  const reportProgress = async () => {
+    if (
+      onProgress &&
+      summary.total_linhas - lastReportedLines >= BLOCK_SIZE
+    ) {
+      lastReportedLines = summary.total_linhas;
+      await onProgress(lastReportedLines);
+    }
+  };
   const first = await iterator.next();
   if (first.done || first.value.values.length === 0) {
     throw new ImportValidationError("O CSV está vazio.");
@@ -421,6 +433,7 @@ export async function validateAndImportCsv({
       summary.emails_invalidos += 1;
       summary.invalidos += 1;
       addError(summary, record.line, "e-mail ausente ou inválido");
+      await reportProgress();
       continue;
     }
     if (rawPhone.trim() && !telefone) {
@@ -433,18 +446,21 @@ export async function validateAndImportCsv({
       summary.suprimidos += 1;
       summary.invalidos += 1;
       addError(summary, record.line, "destinatário presente na supressão");
+      await reportProgress();
       continue;
     }
     if (seenEmails.has(email)) {
       summary.duplicados_email += 1;
       summary.invalidos += 1;
       addError(summary, record.line, "e-mail duplicado no arquivo");
+      await reportProgress();
       continue;
     }
     if (deduplicatePhone && telefone && seenPhones.has(telefone)) {
       summary.duplicados_telefone += 1;
       summary.invalidos += 1;
       addError(summary, record.line, "telefone duplicado no arquivo");
+      await reportProgress();
       continue;
     }
 
@@ -465,7 +481,11 @@ export async function validateAndImportCsv({
     if (block.length >= BLOCK_SIZE) {
       await flush();
     }
+    await reportProgress();
   }
   await flush();
+  if (onProgress && summary.total_linhas > lastReportedLines) {
+    await onProgress(summary.total_linhas);
+  }
   return summary;
 }
