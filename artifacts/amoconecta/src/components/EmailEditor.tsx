@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import {
   Bold,
   ExternalLink,
@@ -83,10 +83,26 @@ function RichTextBlock({
   onChange: (html: string) => void;
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
+  const initialHtmlRef = useRef(sanitizeRichTextHtml(block.html));
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const initializedRef = useRef(false);
+  const setEditorRef = (node: HTMLDivElement | null) => {
+    editorRef.current = node;
+    if (node && !initializedRef.current) {
+      node.innerHTML = initialHtmlRef.current;
+      initializedRef.current = true;
+    }
+  };
+  const syncState = () => {
+    if (editorRef.current) {
+      onChangeRef.current(sanitizeRichTextHtml(editorRef.current.innerHTML));
+    }
+  };
   const command = (name: string, value?: string) => {
     editorRef.current?.focus();
     document.execCommand(name, false, value);
-    if (editorRef.current) onChange(sanitizeRichTextHtml(editorRef.current.innerHTML));
+    syncState();
   };
 
   return (
@@ -99,11 +115,11 @@ function RichTextBlock({
         <span className="ml-auto font-mono text-[9px] uppercase tracking-[.1em] text-[#99959a]">Use {"{{nome}}"} na saudação</span>
       </div>
       <div
-        ref={editorRef}
+        ref={setEditorRef}
         contentEditable
         suppressContentEditableWarning
-        onInput={(event) => onChange(sanitizeRichTextHtml(event.currentTarget.innerHTML))}
-        dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(block.html) }}
+        onInput={syncState}
+        onBlur={syncState}
         aria-label="Conteúdo do bloco de texto"
         className="min-h-28 px-4 py-4 text-sm leading-6 text-[#42495b] outline-none empty:before:text-[#a7a7aa] empty:before:content-['Escreva_a_mensagem...'] focus:bg-[#fffefa]"
         data-testid={`editor-text-${block.id}`}
@@ -111,6 +127,11 @@ function RichTextBlock({
     </div>
   );
 }
+
+const MemoizedRichTextBlock = memo(
+  RichTextBlock,
+  (previous, next) => previous.block.id === next.block.id && previous.onChange === next.onChange,
+);
 
 function BlockCard({
   block,
@@ -123,6 +144,7 @@ function BlockCard({
   onDragEnd,
   dragging,
   campaignId,
+  resetKey,
 }: {
   block: EmailBlock;
   index: number;
@@ -134,11 +156,26 @@ function BlockCard({
   onDragEnd: () => void;
   dragging: boolean;
   campaignId?: string;
+  resetKey: string;
 }) {
   const upload = useRequestCampaignAssetUploadUrl();
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const blocksRef = useRef(blocks);
+  const onChangeRef = useRef(onChange);
+  blocksRef.current = blocks;
+  onChangeRef.current = onChange;
 
   const update = (next: EmailBlock) => onChange(updateBlock(blocks, block.id, () => next));
+  const updateText = useMemo(
+    () => (html: string) => {
+      const currentBlock = blocksRef.current.find((candidate) => candidate.id === block.id);
+      if (currentBlock?.type !== "text") return;
+      onChangeRef.current(updateBlock(blocksRef.current, block.id, (candidate) => (
+        candidate.type === "text" ? { ...candidate, html } : candidate
+      )));
+    },
+    [block.id],
+  );
   const uploadImage = async (file?: File) => {
     if (!file || block.type !== "image") return;
     if (!campaignId) {
@@ -191,7 +228,7 @@ function BlockCard({
         <button type="button" onClick={onRemove} className="focus-ring ml-auto rounded-lg p-2 text-[#a64220] opacity-75 transition-colors hover:bg-[#fff0e9] hover:opacity-100" aria-label={`Remover bloco ${index + 1}, ${blockLabels[block.type]}`} title="Remover bloco" data-testid={`button-remove-${block.id}`}><Trash2 size={14} /></button>
       </div>
 
-      {block.type === "text" && <RichTextBlock block={block} onChange={(html) => update({ ...block, html })} />}
+      {block.type === "text" && <MemoizedRichTextBlock key={`${block.id}:${resetKey}`} block={block} onChange={updateText} />}
 
       {block.type === "image" && (
         <div className="space-y-3">
@@ -227,6 +264,7 @@ export function EmailEditor({ blocks, onChange, campaignId, subject }: EmailEdit
     () => renderEmailHtml(normalizedBlocks, { name: previewName || null }),
     [normalizedBlocks, previewName],
   );
+  const editorSessionKey = campaignId ?? "new-campaign";
 
   const addBlock = (type: EmailBlock["type"]) => onChange([...blocks, newBlock(type)]);
   const removeBlock = (id: string) => onChange(blocks.filter((block) => block.id !== id));
@@ -254,7 +292,7 @@ export function EmailEditor({ blocks, onChange, campaignId, subject }: EmailEdit
         <div>
           <div className="mb-4 flex items-end justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-[.13em] text-[#d35f2a]">Composição</p><p className="mt-1 text-sm font-extrabold text-[#263044]">Blocos editáveis</p><p className="mt-1 text-[11px] text-[#92939a]">{blocks.length} {blocks.length === 1 ? "bloco" : "blocos"} · arraste para reordenar</p></div><span className="rounded-full bg-[#f1f7f5] px-3 py-1.5 font-mono text-[9px] uppercase tracking-[.1em] text-[#247b79]">Sem limite</span></div>
           <div className="space-y-3">
-            {blocks.map((block, index) => <BlockCard key={block.id} block={block} index={index} blocks={blocks} onChange={onChange} onRemove={() => removeBlock(block.id)} onDragStart={() => setDraggingId(block.id)} onDrop={() => { reorder(block.id); setDraggingId(null); }} onDragEnd={() => setDraggingId(null)} dragging={draggingId === block.id} campaignId={campaignId} />)}
+            {blocks.map((block, index) => <BlockCard key={block.id} block={block} index={index} blocks={blocks} onChange={onChange} onRemove={() => removeBlock(block.id)} onDragStart={() => setDraggingId(block.id)} onDrop={() => { reorder(block.id); setDraggingId(null); }} onDragEnd={() => setDraggingId(null)} dragging={draggingId === block.id} campaignId={campaignId} resetKey={editorSessionKey} />)}
             {blocks.length === 0 && <div className="rounded-2xl border border-dashed border-[#d8cdbd] bg-[#f8f3ec] px-5 py-12 text-center"><div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-[#d7ef56] text-[#263044]"><Plus size={18} /></div><p className="mt-4 text-sm font-bold text-[#42495b]">Comece pelo primeiro bloco</p><p className="mt-1 text-xs leading-5 text-[#85858b]">A prévia já mostra o rodapé fixo enquanto você cria.</p></div>}
           </div>
           <div className="mt-5 rounded-2xl border border-[#eee7dc] bg-[#f8f3ec] p-3"><p className="mb-2 px-1 font-mono text-[9px] uppercase tracking-[.12em] text-[#99959a]">Adicionar ao e-mail</p><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
