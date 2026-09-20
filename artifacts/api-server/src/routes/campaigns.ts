@@ -10,6 +10,7 @@ import {
 } from "@workspace/api-zod";
 import { getSupabaseUser } from "./auth";
 import { supabaseAdminClient } from "../lib/supabase";
+import { getTechnicalError } from "../lib/technical-error";
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
@@ -20,7 +21,7 @@ function logSupabaseError(
   operation: string,
   error: unknown,
 ): void {
-  req.log.error({ supabaseError: error }, operation);
+  req.log.error({ technicalError: getTechnicalError(error) }, operation);
 }
 
 function dateValue(value: unknown): string | null {

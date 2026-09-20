@@ -28,6 +28,7 @@ const RECENCY_BUCKETS = [
 ] as const;
 
 type ImportRow = {
+  campanha_id: string;
   id_usuario: string | null;
   nome: string | null;
   email: string;
@@ -471,6 +472,7 @@ export async function validateAndImportCsv({
     const bucket = summary.recencia.find((item) => item.faixa === faixa);
     if (bucket) bucket.quantidade += 1;
     block.push({
+      campanha_id: campaignId,
       id_usuario: idUsuario,
       nome,
       email,

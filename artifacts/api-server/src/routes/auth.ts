@@ -4,6 +4,7 @@ import {
   LoginBody,
   LoginResponse,
 } from "@workspace/api-zod";
+import { getTechnicalError } from "../lib/technical-error";
 import { createClient } from "@supabase/supabase-js";
 
 const router: IRouter = Router();
@@ -96,7 +97,7 @@ router.post("/auth/login", async (req, res) => {
     req.log.error(
       {
         supabaseStatus: error.status,
-        supabaseError: error,
+        technicalError: getTechnicalError(error),
       },
       "Supabase Auth login failed",
     );

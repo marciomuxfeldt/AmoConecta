@@ -15,6 +15,10 @@ import {
   validateAndImportCsv,
 } from "../lib/csv-import";
 import { logger } from "../lib/logger";
+import {
+  getTechnicalError,
+  getTechnicalErrorText,
+} from "../lib/technical-error";
 
 const router: IRouter = Router();
 const IMPORT_BUCKET = "amoconecta-imports";
@@ -25,7 +29,7 @@ const IMPORT_JOB_STATUSES = ["pendente", "processando", "concluida", "erro"] as 
 type ImportJobStatus = (typeof IMPORT_JOB_STATUSES)[number];
 
 function logSupabaseError(req: Request, operation: string, error: unknown) {
-  req.log.error({ supabaseError: error }, operation);
+  req.log.error({ technicalError: getTechnicalError(error) }, operation);
 }
 
 function safeFileName(fileName: string): string {
@@ -53,10 +57,6 @@ async function ensurePrivateBucket() {
   return client;
 }
 
-function logImportError(operation: string, error: unknown, importId: string) {
-  logger.error({ supabaseError: error, importacaoId: importId }, operation);
-}
-
 async function processImportJob({
   importId,
   campaignId,
@@ -80,17 +80,14 @@ async function processImportJob({
 
   try {
     await updateJob({ status: "processando" satisfies ImportJobStatus });
-    const { data: signed, error: signedError } = await client.storage
+    const { data: file, error: downloadError } = await client.storage
       .from(IMPORT_BUCKET)
-      .createSignedUrl(storagePath, 300);
-    if (signedError) throw signedError;
-    const fileResponse = await fetch(signed.signedUrl);
-    if (!fileResponse.ok || !fileResponse.body) {
-      throw new Error(`Falha ao baixar o arquivo de importação (${fileResponse.status}).`);
-    }
+      .download(storagePath);
+    if (downloadError) throw downloadError;
+    if (!file) throw new Error("O Storage não retornou conteúdo para o arquivo.");
     const summary = await validateAndImportCsv({
       client,
-      stream: fileResponse.body,
+      stream: file.stream(),
       campaignId,
       storagePath,
       deduplicatePhone,
@@ -107,18 +104,31 @@ async function processImportJob({
       concluido_em: new Date().toISOString(),
     });
   } catch (error) {
-    logImportError("Campaign import background job failed", error, importId);
+    logger.error(
+      {
+        technicalError: getTechnicalError(error),
+        importacaoId: importId,
+        storageBucket: IMPORT_BUCKET,
+        storagePath,
+      },
+      "Campaign import background job failed",
+    );
     try {
       await updateJob({
         status: "erro" satisfies ImportJobStatus,
-        erro:
-          error instanceof ImportValidationError
-            ? error.message
-            : "Não foi possível validar o arquivo.",
+        erro: getTechnicalErrorText(error),
         concluido_em: new Date().toISOString(),
       });
     } catch (updateError) {
-      logImportError("Campaign import job failure status update failed", updateError, importId);
+      logger.error(
+        {
+          technicalError: getTechnicalError(updateError),
+          importacaoId: importId,
+          storageBucket: IMPORT_BUCKET,
+          storagePath,
+        },
+        "Campaign import job failure status update failed",
+      );
     }
   }
 }
@@ -265,7 +275,15 @@ router.get("/campaigns/:campaignId/imports/:importId", async (req, res) => {
       res.status(404).json({ error: "Importação não encontrada." });
       return;
     }
-    res.json(GetCampaignImportResponse.parse(data));
+    res.json(
+      GetCampaignImportResponse.parse({
+        ...data,
+        erro:
+          data.status === "erro"
+            ? "Não foi possível validar o arquivo."
+            : null,
+      }),
+    );
   } catch (error) {
     logSupabaseError(req, "Import job lookup failed", error);
     res.status(502).json({ error: "Não foi possível consultar a validação." });
