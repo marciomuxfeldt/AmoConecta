@@ -57,6 +57,14 @@ async function ensurePrivateBucket() {
   } else if (bucket.public) {
     // Customer CSVs must never be exposed, even if a bucket was configured
     // incorrectly outside this application.
+    logger.warn(
+      {
+        event: "public_import_bucket_detected",
+        bucket: IMPORT_BUCKET,
+        detectedAt: new Date().toISOString(),
+      },
+      "Import bucket was public; forcing it back to private",
+    );
     const { error } = await client.storage.updateBucket(IMPORT_BUCKET, {
       public: false,
       fileSizeLimit: `${MAX_IMPORT_BYTES}B`,
