@@ -1,1 +1,2 @@
 - [Supabase connector limits](supabase-integration-constraints.md) — the connected Supabase integration exposes authenticated REST/PostgREST access, not direct SQL/DDL execution.
+- [Supabase signed uploads](supabase-signed-upload.md) — signed browser uploads use PUT with the Storage SDK's multipart FormData shape.

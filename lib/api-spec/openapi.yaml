@@ -94,6 +94,248 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+    post:
+      operationId: createCampaign
+      tags: [campaigns]
+      summary: Cria uma campanha
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCampaignInput"
+      responses:
+        "201":
+          description: Campanha criada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Dados inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao salvar no Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getCampaign
+      tags: [campaigns]
+      summary: Consulta uma campanha
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Campanha
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao consultar o Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      operationId: updateCampaign
+      tags: [campaigns]
+      summary: Atualiza uma campanha
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCampaignInput"
+      responses:
+        "200":
+          description: Campanha atualizada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Dados inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao salvar no Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteCampaign
+      tags: [campaigns]
+      summary: Exclui uma campanha
+      security:
+        - sessionCookie: []
+      responses:
+        "204":
+          description: Campanha excluída
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao excluir no Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/imports/upload-url:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: requestCampaignImportUploadUrl
+      tags: [campaigns]
+      summary: Gera URL assinada para upload do CSV
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestImportUploadInput"
+      responses:
+        "200":
+          description: URL assinada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportUploadUrl"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao criar URL de upload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/imports/validate:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: validateCampaignImport
+      tags: [campaigns]
+      summary: Valida e importa um CSV de destinatários
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateImportInput"
+      responses:
+        "200":
+          description: Resumo da validação
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportValidationSummary"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Arquivo inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao validar ou importar no Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   securitySchemes:
     sessionCookie:
@@ -185,4 +427,287 @@ components:
         - clicados
         - agendada_para
         - criado_em
+    CampaignStatus:
+      type: string
+      enum: [rascunho, agendada, enviando, pausada, concluida]
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        nome:
+          type: string
+        assunto:
+          type: string
+        assunto_lembrete:
+          type: ["string", "null"]
+        remetente_nome:
+          type: string
+        remetente_email:
+          type: string
+          format: email
+        valor_credito:
+          type: ["number", "null"]
+        validade_credito:
+          type: ["string", "null"]
+          format: date
+        url_deeplink:
+          type: ["string", "null"]
+          format: uri
+        url_landing:
+          type: ["string", "null"]
+          format: uri
+        teto_hora:
+          type: ["integer", "null"]
+          minimum: 0
+        teto_dia:
+          type: ["integer", "null"]
+          minimum: 0
+        status:
+          $ref: "#/components/schemas/CampaignStatus"
+        agendada_para:
+          type: ["string", "null"]
+          format: date-time
+        lembrete_ativo:
+          type: boolean
+        lembrete_horas:
+          type: integer
+          minimum: 1
+        teste_enviado:
+          type: boolean
+        corpo:
+          type: array
+          items: {}
+        criado_em:
+          type: string
+          format: date-time
+      required:
+        - id
+        - nome
+        - assunto
+        - assunto_lembrete
+        - remetente_nome
+        - remetente_email
+        - valor_credito
+        - validade_credito
+        - url_deeplink
+        - url_landing
+        - teto_hora
+        - teto_dia
+        - status
+        - agendada_para
+        - lembrete_ativo
+        - lembrete_horas
+        - teste_enviado
+        - corpo
+        - criado_em
+    CreateCampaignInput:
+      type: object
+      properties:
+        nome:
+          type: string
+          minLength: 1
+        assunto:
+          type: string
+          minLength: 1
+        assunto_lembrete:
+          type: ["string", "null"]
+        remetente_nome:
+          type: string
+          minLength: 1
+        remetente_email:
+          type: string
+          format: email
+        valor_credito:
+          type: ["number", "null"]
+        validade_credito:
+          type: ["string", "null"]
+          format: date
+        url_deeplink:
+          type: ["string", "null"]
+          format: uri
+        url_landing:
+          type: ["string", "null"]
+          format: uri
+        teto_hora:
+          type: ["integer", "null"]
+          minimum: 0
+        teto_dia:
+          type: ["integer", "null"]
+          minimum: 0
+        status:
+          $ref: "#/components/schemas/CampaignStatus"
+        agendada_para:
+          type: ["string", "null"]
+          format: date-time
+        lembrete_ativo:
+          type: boolean
+        lembrete_horas:
+          type: integer
+          minimum: 1
+        teste_enviado:
+          type: boolean
+      required:
+        - nome
+        - assunto
+        - remetente_nome
+        - remetente_email
+    UpdateCampaignInput:
+      type: object
+      description: Campos enviados parcialmente; campos omitidos permanecem iguais.
+      properties:
+        nome:
+          type: string
+          minLength: 1
+        assunto:
+          type: string
+          minLength: 1
+        assunto_lembrete:
+          type: ["string", "null"]
+        remetente_nome:
+          type: string
+          minLength: 1
+        remetente_email:
+          type: string
+          format: email
+        valor_credito:
+          type: ["number", "null"]
+        validade_credito:
+          type: ["string", "null"]
+          format: date
+        url_deeplink:
+          type: ["string", "null"]
+          format: uri
+        url_landing:
+          type: ["string", "null"]
+          format: uri
+        teto_hora:
+          type: ["integer", "null"]
+          minimum: 0
+        teto_dia:
+          type: ["integer", "null"]
+          minimum: 0
+        status:
+          $ref: "#/components/schemas/CampaignStatus"
+        agendada_para:
+          type: ["string", "null"]
+          format: date-time
+        lembrete_ativo:
+          type: boolean
+        lembrete_horas:
+          type: integer
+          minimum: 1
+        teste_enviado:
+          type: boolean
+    RequestImportUploadInput:
+      type: object
+      properties:
+        nome_arquivo:
+          type: string
+          minLength: 1
+        tamanho:
+          type: integer
+          minimum: 1
+      required:
+        - nome_arquivo
+        - tamanho
+    ImportUploadUrl:
+      type: object
+      properties:
+        bucket:
+          type: string
+        path:
+          type: string
+        signed_url:
+          type: string
+          format: uri
+        expires_in:
+          type: integer
+      required:
+        - bucket
+        - path
+        - signed_url
+        - expires_in
+    ValidateImportInput:
+      type: object
+      properties:
+        storage_path:
+          type: string
+          minLength: 1
+        deduplicar_por_telefone:
+          type: boolean
+          default: false
+      required:
+        - storage_path
+    RecencyBucket:
+      type: object
+      properties:
+        faixa:
+          type: string
+        quantidade:
+          type: integer
+      required:
+        - faixa
+        - quantidade
+    ImportValidationError:
+      type: object
+      properties:
+        linha:
+          type: integer
+        motivo:
+          type: string
+      required:
+        - linha
+        - motivo
+    ImportValidationSummary:
+      type: object
+      properties:
+        storage_path:
+          type: string
+        total_linhas:
+          type: integer
+        validos:
+          type: integer
+        invalidos:
+          type: integer
+        duplicados_email:
+          type: integer
+        duplicados_telefone:
+          type: integer
+        suprimidos:
+          type: integer
+        emails_invalidos:
+          type: integer
+        datas_invalidas:
+          type: integer
+        nomes_ausentes:
+          type: integer
+        telefones_invalidos:
+          type: integer
+        destinatarios_salvos:
+          type: integer
+        recencia:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecencyBucket"
+        amostras_erros:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImportValidationError"
+      required:
+        - storage_path
+        - total_linhas
+        - validos
+        - invalidos
+        - duplicados_email
+        - duplicados_telefone
+        - suprimidos
+        - emails_invalidos
+        - datas_invalidas
+        - nomes_ausentes
+        - telefones_invalidos
+        - destinatarios_salvos
+        - recencia
+        - amostras_erros
 

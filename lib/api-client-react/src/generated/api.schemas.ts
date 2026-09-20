@@ -53,3 +53,175 @@ export interface CampaignListItem {
   criado_em: string;
 }
 
+export type CampaignStatus = typeof CampaignStatus[keyof typeof CampaignStatus];
+
+
+export const CampaignStatus = {
+  rascunho: 'rascunho',
+  agendada: 'agendada',
+  enviando: 'enviando',
+  pausada: 'pausada',
+  concluida: 'concluida',
+} as const;
+
+export interface Campaign {
+  id: string;
+  nome: string;
+  assunto: string;
+  /** @nullable */
+  assunto_lembrete: string | null;
+  remetente_nome: string;
+  remetente_email: string;
+  /** @nullable */
+  valor_credito: number | null;
+  /** @nullable */
+  validade_credito: string | null;
+  /** @nullable */
+  url_deeplink: string | null;
+  /** @nullable */
+  url_landing: string | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  teto_hora: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  teto_dia: number | null;
+  status: CampaignStatus;
+  /** @nullable */
+  agendada_para: string | null;
+  lembrete_ativo: boolean;
+  /** @minimum 1 */
+  lembrete_horas: number;
+  teste_enviado: boolean;
+  corpo: unknown[];
+  criado_em: string;
+}
+
+export interface CreateCampaignInput {
+  /** @minLength 1 */
+  nome: string;
+  /** @minLength 1 */
+  assunto: string;
+  /** @nullable */
+  assunto_lembrete?: string | null;
+  /** @minLength 1 */
+  remetente_nome: string;
+  remetente_email: string;
+  /** @nullable */
+  valor_credito?: number | null;
+  /** @nullable */
+  validade_credito?: string | null;
+  /** @nullable */
+  url_deeplink?: string | null;
+  /** @nullable */
+  url_landing?: string | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  teto_hora?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  teto_dia?: number | null;
+  status?: CampaignStatus;
+  /** @nullable */
+  agendada_para?: string | null;
+  lembrete_ativo?: boolean;
+  /** @minimum 1 */
+  lembrete_horas?: number;
+  teste_enviado?: boolean;
+}
+
+/**
+ * Campos enviados parcialmente; campos omitidos permanecem iguais.
+ */
+export interface UpdateCampaignInput {
+  /** @minLength 1 */
+  nome?: string;
+  /** @minLength 1 */
+  assunto?: string;
+  /** @nullable */
+  assunto_lembrete?: string | null;
+  /** @minLength 1 */
+  remetente_nome?: string;
+  remetente_email?: string;
+  /** @nullable */
+  valor_credito?: number | null;
+  /** @nullable */
+  validade_credito?: string | null;
+  /** @nullable */
+  url_deeplink?: string | null;
+  /** @nullable */
+  url_landing?: string | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  teto_hora?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  teto_dia?: number | null;
+  status?: CampaignStatus;
+  /** @nullable */
+  agendada_para?: string | null;
+  lembrete_ativo?: boolean;
+  /** @minimum 1 */
+  lembrete_horas?: number;
+  teste_enviado?: boolean;
+}
+
+export interface RequestImportUploadInput {
+  /** @minLength 1 */
+  nome_arquivo: string;
+  /** @minimum 1 */
+  tamanho: number;
+}
+
+export interface ImportUploadUrl {
+  bucket: string;
+  path: string;
+  signed_url: string;
+  expires_in: number;
+}
+
+export interface ValidateImportInput {
+  /** @minLength 1 */
+  storage_path: string;
+  deduplicar_por_telefone?: boolean;
+}
+
+export interface RecencyBucket {
+  faixa: string;
+  quantidade: number;
+}
+
+export interface ImportValidationError {
+  linha: number;
+  motivo: string;
+}
+
+export interface ImportValidationSummary {
+  storage_path: string;
+  total_linhas: number;
+  validos: number;
+  invalidos: number;
+  duplicados_email: number;
+  duplicados_telefone: number;
+  suprimidos: number;
+  emails_invalidos: number;
+  datas_invalidas: number;
+  nomes_ausentes: number;
+  telefones_invalidos: number;
+  destinatarios_salvos: number;
+  recencia: RecencyBucket[];
+  amostras_erros: ImportValidationError[];
+}
+

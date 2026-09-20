@@ -72,3 +72,241 @@ export const ListCampaignsResponseItem = zod.object({
 export const ListCampaignsResponse = zod.array(ListCampaignsResponseItem)
 
 
+/**
+ * @summary Cria uma campanha
+ */
+
+
+
+export const createCampaignBodyTetoHoraMin = 0;
+
+export const createCampaignBodyTetoDiaMin = 0;
+
+
+
+
+export const CreateCampaignBody = zod.object({
+  "nome": zod.string().min(1),
+  "assunto": zod.string().min(1),
+  "assunto_lembrete": zod.string().nullish(),
+  "remetente_nome": zod.string().min(1),
+  "remetente_email": zod.string().email(),
+  "valor_credito": zod.number().nullish(),
+  "validade_credito": zod.coerce.date().nullish(),
+  "url_deeplink": zod.string().url().nullish(),
+  "url_landing": zod.string().url().nullish(),
+  "teto_hora": zod.number().int().min(createCampaignBodyTetoHoraMin).nullish(),
+  "teto_dia": zod.number().int().min(createCampaignBodyTetoDiaMin).nullish(),
+  "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida']).optional(),
+  "agendada_para": zod.coerce.date().nullish(),
+  "lembrete_ativo": zod.boolean().optional(),
+  "lembrete_horas": zod.number().int().min(1).optional(),
+  "teste_enviado": zod.boolean().optional()
+})
+
+export const createCampaignResponseTetoHoraMin = 0;
+
+export const createCampaignResponseTetoDiaMin = 0;
+
+
+
+
+export const CreateCampaignResponse = zod.object({
+  "id": zod.string().uuid(),
+  "nome": zod.string(),
+  "assunto": zod.string(),
+  "assunto_lembrete": zod.string().nullable(),
+  "remetente_nome": zod.string(),
+  "remetente_email": zod.string().email(),
+  "valor_credito": zod.number().nullable(),
+  "validade_credito": zod.coerce.date().nullable(),
+  "url_deeplink": zod.string().url().nullable(),
+  "url_landing": zod.string().url().nullable(),
+  "teto_hora": zod.number().int().min(createCampaignResponseTetoHoraMin).nullable(),
+  "teto_dia": zod.number().int().min(createCampaignResponseTetoDiaMin).nullable(),
+  "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida']),
+  "agendada_para": zod.coerce.date().nullable(),
+  "lembrete_ativo": zod.boolean(),
+  "lembrete_horas": zod.number().int().min(1),
+  "teste_enviado": zod.boolean(),
+  "corpo": zod.array(zod.unknown()),
+  "criado_em": zod.coerce.date()
+})
+
+
+/**
+ * @summary Consulta uma campanha
+ */
+export const GetCampaignParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const getCampaignResponseTetoHoraMin = 0;
+
+export const getCampaignResponseTetoDiaMin = 0;
+
+
+
+
+export const GetCampaignResponse = zod.object({
+  "id": zod.string().uuid(),
+  "nome": zod.string(),
+  "assunto": zod.string(),
+  "assunto_lembrete": zod.string().nullable(),
+  "remetente_nome": zod.string(),
+  "remetente_email": zod.string().email(),
+  "valor_credito": zod.number().nullable(),
+  "validade_credito": zod.coerce.date().nullable(),
+  "url_deeplink": zod.string().url().nullable(),
+  "url_landing": zod.string().url().nullable(),
+  "teto_hora": zod.number().int().min(getCampaignResponseTetoHoraMin).nullable(),
+  "teto_dia": zod.number().int().min(getCampaignResponseTetoDiaMin).nullable(),
+  "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida']),
+  "agendada_para": zod.coerce.date().nullable(),
+  "lembrete_ativo": zod.boolean(),
+  "lembrete_horas": zod.number().int().min(1),
+  "teste_enviado": zod.boolean(),
+  "corpo": zod.array(zod.unknown()),
+  "criado_em": zod.coerce.date()
+})
+
+
+/**
+ * @summary Atualiza uma campanha
+ */
+export const UpdateCampaignParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+
+
+
+export const updateCampaignBodyTetoHoraMin = 0;
+
+export const updateCampaignBodyTetoDiaMin = 0;
+
+
+
+
+export const UpdateCampaignBody = zod.object({
+  "nome": zod.string().min(1).optional(),
+  "assunto": zod.string().min(1).optional(),
+  "assunto_lembrete": zod.string().nullish(),
+  "remetente_nome": zod.string().min(1).optional(),
+  "remetente_email": zod.string().email().optional(),
+  "valor_credito": zod.number().nullish(),
+  "validade_credito": zod.coerce.date().nullish(),
+  "url_deeplink": zod.string().url().nullish(),
+  "url_landing": zod.string().url().nullish(),
+  "teto_hora": zod.number().int().min(updateCampaignBodyTetoHoraMin).nullish(),
+  "teto_dia": zod.number().int().min(updateCampaignBodyTetoDiaMin).nullish(),
+  "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida']).optional(),
+  "agendada_para": zod.coerce.date().nullish(),
+  "lembrete_ativo": zod.boolean().optional(),
+  "lembrete_horas": zod.number().int().min(1).optional(),
+  "teste_enviado": zod.boolean().optional()
+}).describe('Campos enviados parcialmente; campos omitidos permanecem iguais.')
+
+export const updateCampaignResponseTetoHoraMin = 0;
+
+export const updateCampaignResponseTetoDiaMin = 0;
+
+
+
+
+export const UpdateCampaignResponse = zod.object({
+  "id": zod.string().uuid(),
+  "nome": zod.string(),
+  "assunto": zod.string(),
+  "assunto_lembrete": zod.string().nullable(),
+  "remetente_nome": zod.string(),
+  "remetente_email": zod.string().email(),
+  "valor_credito": zod.number().nullable(),
+  "validade_credito": zod.coerce.date().nullable(),
+  "url_deeplink": zod.string().url().nullable(),
+  "url_landing": zod.string().url().nullable(),
+  "teto_hora": zod.number().int().min(updateCampaignResponseTetoHoraMin).nullable(),
+  "teto_dia": zod.number().int().min(updateCampaignResponseTetoDiaMin).nullable(),
+  "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida']),
+  "agendada_para": zod.coerce.date().nullable(),
+  "lembrete_ativo": zod.boolean(),
+  "lembrete_horas": zod.number().int().min(1),
+  "teste_enviado": zod.boolean(),
+  "corpo": zod.array(zod.unknown()),
+  "criado_em": zod.coerce.date()
+})
+
+
+/**
+ * @summary Exclui uma campanha
+ */
+export const DeleteCampaignParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const DeleteCampaignResponse = zod.void()
+
+
+/**
+ * @summary Gera URL assinada para upload do CSV
+ */
+export const RequestCampaignImportUploadUrlParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+
+
+
+
+export const RequestCampaignImportUploadUrlBody = zod.object({
+  "nome_arquivo": zod.string().min(1),
+  "tamanho": zod.number().int().min(1)
+})
+
+export const RequestCampaignImportUploadUrlResponse = zod.object({
+  "bucket": zod.string(),
+  "path": zod.string(),
+  "signed_url": zod.string().url(),
+  "expires_in": zod.number().int()
+})
+
+
+/**
+ * @summary Valida e importa um CSV de destinatários
+ */
+export const ValidateCampaignImportParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+
+export const validateCampaignImportBodyDeduplicarPorTelefoneDefault = false;
+
+export const ValidateCampaignImportBody = zod.object({
+  "storage_path": zod.string().min(1),
+  "deduplicar_por_telefone": zod.boolean().default(validateCampaignImportBodyDeduplicarPorTelefoneDefault)
+})
+
+export const ValidateCampaignImportResponse = zod.object({
+  "storage_path": zod.string(),
+  "total_linhas": zod.number().int(),
+  "validos": zod.number().int(),
+  "invalidos": zod.number().int(),
+  "duplicados_email": zod.number().int(),
+  "duplicados_telefone": zod.number().int(),
+  "suprimidos": zod.number().int(),
+  "emails_invalidos": zod.number().int(),
+  "datas_invalidas": zod.number().int(),
+  "nomes_ausentes": zod.number().int(),
+  "telefones_invalidos": zod.number().int(),
+  "destinatarios_salvos": zod.number().int(),
+  "recencia": zod.array(zod.object({
+  "faixa": zod.string(),
+  "quantidade": zod.number().int()
+})),
+  "amostras_erros": zod.array(zod.object({
+  "linha": zod.number().int(),
+  "motivo": zod.string()
+}))
+})
+
+
