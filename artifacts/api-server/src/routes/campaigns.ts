@@ -25,7 +25,7 @@ import {
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
-  "id,nome,assunto,assunto_lembrete,remetente_nome,remetente_email,valor_credito,validade_credito,url_deeplink,url_landing,teto_hora,teto_dia,status,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo,criado_em";
+  "id,nome,assunto,assunto_lembrete,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,url_deeplink,url_landing,teto_hora,teto_dia,status,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo,criado_em";
 // Public by design: this bucket contains only e-mail image assets.
 // Never reuse the private CSV bucket from routes/imports.ts here.
 const EMAIL_ASSET_BUCKET = "amoconecta-assets";
@@ -56,11 +56,15 @@ function campaignPayload(input: Record<string, unknown>, partial = false) {
   const stringFields = [
     "nome",
     "assunto",
+    "preheader",
     "remetente_nome",
     "remetente_email",
   ];
   for (const field of stringFields) {
-    if (!partial || field in input) payload[field] = String(input[field] ?? "").trim();
+    if (!partial || field in input) {
+      const value = String(input[field] ?? "").trim();
+      payload[field] = field === "preheader" ? value || null : value;
+    }
   }
 
   if (!partial || "assunto_lembrete" in input) {

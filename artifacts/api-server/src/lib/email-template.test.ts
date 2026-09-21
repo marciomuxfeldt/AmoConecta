@@ -25,6 +25,29 @@ test("renders Outlook-safe table markup and fixed footer", () => {
   assert.ok(html.indexOf("Ver oferta") < html.indexOf("Descadastrar-se"));
 });
 
+test("renders an optional hidden inbox preheader before the email content", () => {
+  const html = renderEmailHtml(
+    [{ id: "first", type: "text", html: "Conteúdo da campanha" }],
+    { preheader: "Resumo da oferta <seguro>" },
+  );
+
+  assert.match(
+    html,
+    /display:none!important[^>]*>Resumo da oferta &lt;seguro&gt;/iu,
+  );
+  const bodyStart = html.indexOf("<body");
+  assert.ok(
+    html.indexOf("Resumo da oferta", bodyStart) < html.indexOf("<table", bodyStart),
+  );
+});
+
+test("limits rendered preheaders to 100 characters", () => {
+  const html = renderEmailHtml([], { preheader: "x".repeat(140) });
+  const hidden = html.match(/display:none!important[^>]*>([^<]*)<\/div>/iu)?.[1];
+
+  assert.equal(hidden?.match(/^x+/u)?.[0].length, 100);
+});
+
 test("removes the name token and greeting separator when name is absent", () => {
   const html = renderEmailHtml(
     [{ id: "greeting", type: "text", html: "Olá, {{nome}}" }],

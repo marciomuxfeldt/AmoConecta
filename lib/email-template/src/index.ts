@@ -32,6 +32,7 @@ export type EmailPreviewOptions = {
   name?: string | null;
   unsubscribeUrl?: string;
   reason?: string;
+  preheader?: string | null;
 };
 
 const ALLOWED_TAGS = new Set(["strong", "b", "em", "i", "a", "br"]);
@@ -123,9 +124,13 @@ export function renderEmailHtml(
 ): string {
   const unsubscribeUrl = safeUrl(options.unsubscribeUrl, DEFAULT_UNSUBSCRIBE_URL);
   const reason = escapeHtml(options.reason?.trim() || DEFAULT_REASON);
+  const preheader = options.preheader?.trim().slice(0, 100);
+  const hiddenPreheader = preheader
+    ? `<div style="display:none!important;font-size:1px;line-height:1px;color:#f4f0e9;max-height:0;max-width:0;opacity:0;overflow:hidden;">${escapeHtml(preheader)}&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;</div>`
+    : "";
   const body = blocks.map((block) => renderBlock(block, options.name)).join("");
 
-  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AmoConecta</title></head><body style="margin:0;padding:0;background-color:#f4f0e9;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#f4f0e9;"><tr><td align="center" style="padding:24px 12px;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#fffdf9;"><tr><td style="padding:30px 32px 24px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase;color:#247b79;">AmoConecta</td></tr>${body}<tr><td style="padding:20px 32px 28px;border-top:1px solid #e5ddd0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#777984;text-align:center;">${reason}<br><a href="${escapeHtml(unsubscribeUrl)}" style="color:#247b79;text-decoration:underline;">Descadastrar-se</a></td></tr></table></td></tr></table></body></html>`;
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AmoConecta</title></head><body style="margin:0;padding:0;background-color:#f4f0e9;">${hiddenPreheader}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#f4f0e9;"><tr><td align="center" style="padding:24px 12px;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#fffdf9;"><tr><td style="padding:30px 32px 24px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase;color:#247b79;">AmoConecta</td></tr>${body}<tr><td style="padding:20px 32px 28px;border-top:1px solid #e5ddd0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#777984;text-align:center;">${reason}<br><a href="${escapeHtml(unsubscribeUrl)}" style="color:#247b79;text-decoration:underline;">Descadastrar-se</a></td></tr></table></td></tr></table></body></html>`;
 }
 
 export function normalizeEmailBlocks(value: unknown): EmailBlock[] {

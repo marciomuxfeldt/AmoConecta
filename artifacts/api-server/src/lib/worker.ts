@@ -23,6 +23,7 @@ type Campaign = {
   assunto: string;
   remetente_nome: string;
   remetente_email: string;
+  preheader?: string | null;
   reply_to?: string | null;
   corpo: unknown;
   status: string;
@@ -138,7 +139,7 @@ async function loadCampaign(campaignId: string): Promise<Campaign | null> {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,nome,assunto,remetente_nome,remetente_email,reply_to,corpo,status,agendada_para,teto_hora,teto_dia",
+      "id,nome,assunto,remetente_nome,remetente_email,preheader,reply_to,corpo,status,agendada_para,teto_hora,teto_dia",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -202,6 +203,7 @@ function emailPayload(campaign: Campaign, recipient: WorkerRecipient) {
   const html = renderEmailHtml(normalizeEmailBlocks(campaign.corpo) as EmailBlock[], {
     name: recipient.nome,
     unsubscribeUrl: unsubscribe,
+    preheader: campaign.preheader,
   });
   return {
     from: sender(campaign),

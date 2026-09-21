@@ -100,6 +100,8 @@ export const ListCampaignsResponse = zod.array(ListCampaignsResponseItem)
  */
 
 
+export const createCampaignBodyPreheaderMax = 100;
+
 
 export const createCampaignBodyTetoHoraMin = 0;
 
@@ -119,6 +121,7 @@ export const createCampaignBodyCorpoItemThreeLabelMax = 120;
 export const CreateCampaignBody = zod.object({
   "nome": zod.string().min(1),
   "assunto": zod.string().min(1),
+  "preheader": zod.string().max(createCampaignBodyPreheaderMax).nullish(),
   "assunto_lembrete": zod.string().nullish(),
   "remetente_nome": zod.string().min(1),
   "remetente_email": zod.string().email(),
@@ -154,6 +157,8 @@ export const CreateCampaignBody = zod.object({
 })])).optional()
 })
 
+export const createCampaignResponsePreheaderMax = 100;
+
 export const createCampaignResponseTetoHoraMin = 0;
 
 export const createCampaignResponseTetoDiaMin = 0;
@@ -173,6 +178,7 @@ export const CreateCampaignResponse = zod.object({
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
+  "preheader": zod.string().max(createCampaignResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
@@ -217,6 +223,8 @@ export const GetCampaignParams = zod.object({
   "campaignId": zod.coerce.string().uuid()
 })
 
+export const getCampaignResponsePreheaderMax = 100;
+
 export const getCampaignResponseTetoHoraMin = 0;
 
 export const getCampaignResponseTetoDiaMin = 0;
@@ -236,6 +244,7 @@ export const GetCampaignResponse = zod.object({
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
+  "preheader": zod.string().max(getCampaignResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
@@ -282,6 +291,8 @@ export const UpdateCampaignParams = zod.object({
 
 
 
+export const updateCampaignBodyPreheaderMax = 100;
+
 
 export const updateCampaignBodyTetoHoraMin = 0;
 
@@ -301,6 +312,7 @@ export const updateCampaignBodyCorpoItemThreeLabelMax = 120;
 export const UpdateCampaignBody = zod.object({
   "nome": zod.string().min(1).optional(),
   "assunto": zod.string().min(1).optional(),
+  "preheader": zod.string().max(updateCampaignBodyPreheaderMax).nullish(),
   "assunto_lembrete": zod.string().nullish(),
   "remetente_nome": zod.string().min(1).optional(),
   "remetente_email": zod.string().email().optional(),
@@ -336,6 +348,8 @@ export const UpdateCampaignBody = zod.object({
 })])).optional()
 }).describe('Campos enviados parcialmente; campos omitidos permanecem iguais.')
 
+export const updateCampaignResponsePreheaderMax = 100;
+
 export const updateCampaignResponseTetoHoraMin = 0;
 
 export const updateCampaignResponseTetoDiaMin = 0;
@@ -355,6 +369,7 @@ export const UpdateCampaignResponse = zod.object({
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
+  "preheader": zod.string().max(updateCampaignResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),

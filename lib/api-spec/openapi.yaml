@@ -648,6 +648,9 @@ components:
           type: string
         assunto:
           type: string
+        preheader:
+          type: ["string", "null"]
+          maxLength: 100
         assunto_lembrete:
           type: ["string", "null"]
         remetente_nome:
@@ -695,6 +698,7 @@ components:
         - id
         - nome
         - assunto
+        - preheader
         - assunto_lembrete
         - remetente_nome
         - remetente_email
@@ -720,6 +724,9 @@ components:
         assunto:
           type: string
           minLength: 1
+        preheader:
+          type: ["string", "null"]
+          maxLength: 100
         assunto_lembrete:
           type: ["string", "null"]
         remetente_nome:
@@ -776,6 +783,9 @@ components:
         assunto:
           type: string
           minLength: 1
+        preheader:
+          type: ["string", "null"]
+          maxLength: 100
         assunto_lembrete:
           type: ["string", "null"]
         remetente_nome:

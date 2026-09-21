@@ -151,6 +151,11 @@ export interface Campaign {
   id: string;
   nome: string;
   assunto: string;
+  /**
+     * @maxLength 100
+     * @nullable
+     */
+  preheader: string | null;
   /** @nullable */
   assunto_lembrete: string | null;
   remetente_nome: string;
@@ -189,6 +194,11 @@ export interface CreateCampaignInput {
   nome: string;
   /** @minLength 1 */
   assunto: string;
+  /**
+     * @maxLength 100
+     * @nullable
+     */
+  preheader?: string | null;
   /** @nullable */
   assunto_lembrete?: string | null;
   /** @minLength 1 */
@@ -230,6 +240,11 @@ export interface UpdateCampaignInput {
   nome?: string;
   /** @minLength 1 */
   assunto?: string;
+  /**
+     * @maxLength 100
+     * @nullable
+     */
+  preheader?: string | null;
   /** @nullable */
   assunto_lembrete?: string | null;
   /** @minLength 1 */

@@ -13,6 +13,11 @@ export interface CreateCampaignInput {
   nome: string;
   /** @minLength 1 */
   assunto: string;
+  /**
+     * @maxLength 100
+     * @nullable
+     */
+  preheader?: string | null;
   /** @nullable */
   assunto_lembrete?: string | null;
   /** @minLength 1 */

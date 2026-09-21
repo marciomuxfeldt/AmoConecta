@@ -375,6 +375,7 @@ export function CampaignsPage({ user }: { user: SessionUser }) {
 type CampaignFormValues = {
   nome: string;
   assunto: string;
+  preheader: string;
   assunto_lembrete: string;
   remetente_nome: string;
   remetente_email: string;
@@ -396,6 +397,7 @@ function blankCampaign(senderEmail = ''): CampaignFormValues {
   return {
     nome: '',
     assunto: '',
+    preheader: '',
     assunto_lembrete: '',
     remetente_nome: '',
     remetente_email: senderEmail,
@@ -419,6 +421,7 @@ function campaignToForm(campaign?: Campaign, senderEmail = ''): CampaignFormValu
   return {
     nome: campaign.nome,
     assunto: campaign.assunto,
+    preheader: campaign.preheader ?? '',
     assunto_lembrete: campaign.assunto_lembrete ?? '',
     remetente_nome: campaign.remetente_nome,
     remetente_email: campaign.remetente_email,
@@ -465,6 +468,7 @@ function CampaignForm({
   const isEditing = Boolean(campaign);
   const emailBlocks = form.watch('corpo');
   const emailSubject = form.watch('assunto');
+  const preheader = form.watch('preheader');
   const [uploadingBlockIds, setUploadingBlockIds] = useState<Set<string>>(() => new Set());
   const isUploadPending = uploadingBlockIds.size > 0;
 
@@ -513,6 +517,7 @@ function CampaignForm({
     const payload = {
       nome: values.nome.trim(),
       assunto: values.assunto.trim(),
+      preheader: values.preheader.trim() || null,
       assunto_lembrete: values.assunto_lembrete.trim() || null,
       remetente_nome: values.remetente_nome.trim(),
       remetente_email: values.remetente_email.trim(),
@@ -545,7 +550,8 @@ function CampaignForm({
         <div className="mb-6 flex items-start justify-between gap-4"><div><p className="section-kicker">01 · Identidade</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Como esta campanha será reconhecida?</h2></div><span className="font-mono text-[9px] uppercase tracking-[.12em] text-[#aaa3a1]">Obrigatório</span></div>
         <div className="grid gap-5 md:grid-cols-2">
           <Field label="Nome interno"><input {...form.register('nome')} className="field-control" placeholder="Ex.: Ofertas de sexta — eletrônicos" data-testid="input-campaign-name" /></Field>
-          <Field label="Assunto principal"><input {...form.register('assunto')} className="field-control" placeholder="Ex.: As melhores ofertas chegaram" data-testid="input-campaign-subject" /></Field>
+           <Field label="Assunto principal"><input {...form.register('assunto')} className="field-control" placeholder="Ex.: As melhores ofertas chegaram" data-testid="input-campaign-subject" /></Field>
+           <div className="md:col-span-2"><Field label="Prévia na caixa de entrada" hint="Opcional. Resumo curto exibido ao lado do assunto em alguns clientes de e-mail."><input {...form.register('preheader')} maxLength={100} className="field-control" placeholder="Ex.: Aproveite as ofertas escolhidas para você" data-testid="input-campaign-preheader" /><p className="mt-1 text-right font-mono text-[10px] text-[#99959a]">{(preheader?.length ?? 0)}/100</p></Field></div>
           <div className="md:col-span-2"><Field label="Assunto do lembrete" hint="Opcional. Usado para identificar uma eventual mensagem de lembrete."><input {...form.register('assunto_lembrete')} className="field-control" placeholder="Ex.: Você ainda pode aproveitar estas ofertas" data-testid="input-campaign-reminder-subject" /></Field></div>
         </div>
         {form.formState.errors.nome && <p className="mt-4 flex items-center gap-2 text-xs font-bold text-[#bd4f26]" data-testid="error-campaign-form"><CircleAlert size={14} /> {form.formState.errors.nome.message}</p>}
