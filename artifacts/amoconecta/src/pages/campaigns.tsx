@@ -35,6 +35,7 @@ import {
   getGetAuthSessionQueryKey,
   getListCampaignsQueryKey,
   getGetSafetyModeQueryKey,
+  useGetCampaignDefaults,
   useCreateCampaign,
   useDeleteCampaign,
   useGetCampaign,
@@ -391,28 +392,30 @@ type CampaignFormValues = {
   corpo: EmailBlock[];
 };
 
-const blankCampaign: CampaignFormValues = {
-  nome: '',
-  assunto: '',
-  assunto_lembrete: '',
-  remetente_nome: '',
-  remetente_email: '',
-  valor_credito: '',
-  validade_credito: '',
-  url_deeplink: '',
-  url_landing: '',
-  teto_hora: '',
-  teto_dia: '',
-  status: CampaignStatus.rascunho,
-  agendada_para: '',
-  lembrete_ativo: false,
-  lembrete_horas: '24',
-  teste_enviado: false,
-  corpo: [],
-};
+function blankCampaign(senderEmail = ''): CampaignFormValues {
+  return {
+    nome: '',
+    assunto: '',
+    assunto_lembrete: '',
+    remetente_nome: '',
+    remetente_email: senderEmail,
+    valor_credito: '',
+    validade_credito: '',
+    url_deeplink: '',
+    url_landing: '',
+    teto_hora: '',
+    teto_dia: '',
+    status: CampaignStatus.rascunho,
+    agendada_para: '',
+    lembrete_ativo: false,
+    lembrete_horas: '24',
+    teste_enviado: false,
+    corpo: [],
+  };
+}
 
-function campaignToForm(campaign?: Campaign): CampaignFormValues {
-  if (!campaign) return blankCampaign;
+function campaignToForm(campaign?: Campaign, senderEmail = ''): CampaignFormValues {
+  if (!campaign) return blankCampaign(senderEmail);
   return {
     nome: campaign.nome,
     assunto: campaign.assunto,
@@ -455,7 +458,10 @@ function CampaignForm({
 }) {
   const create = useCreateCampaign();
   const update = useUpdateCampaign();
-  const form = useForm<CampaignFormValues>({ defaultValues: campaignToForm(campaign) });
+  const defaultsQuery = useGetCampaignDefaults();
+  const form = useForm<CampaignFormValues>({
+    defaultValues: campaignToForm(campaign, defaultsQuery.data?.remetente_email),
+  });
   const isEditing = Boolean(campaign);
   const emailBlocks = form.watch('corpo');
   const emailSubject = form.watch('assunto');
@@ -475,8 +481,8 @@ function CampaignForm({
   };
 
   useEffect(() => {
-    form.reset(campaignToForm(campaign));
-  }, [campaign, form]);
+    form.reset(campaignToForm(campaign, defaultsQuery.data?.remetente_email));
+  }, [campaign, defaultsQuery.data?.remetente_email, form]);
 
   const submit = (values: CampaignFormValues) => {
     if (isUploadPending) {
@@ -484,7 +490,14 @@ function CampaignForm({
       return;
     }
     if (!values.nome.trim() || !values.assunto.trim() || !values.remetente_nome.trim() || !values.remetente_email.trim()) {
-      form.setError('nome', { message: 'Preencha os campos obrigatórios antes de salvar.' });
+      const missingField: keyof CampaignFormValues = !values.nome.trim()
+        ? 'nome'
+        : !values.assunto.trim()
+          ? 'assunto'
+          : !values.remetente_nome.trim()
+            ? 'remetente_nome'
+            : 'remetente_email';
+      form.setError(missingField, { message: 'Campo obrigatório.' });
       return;
     }
     const contentError = validateEmailBlocks(values.corpo);
@@ -542,7 +555,7 @@ function CampaignForm({
         <div className="mb-6"><p className="section-kicker">02 · Remetente</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">De quem a mensagem chega?</h2></div>
         <div className="grid gap-5 md:grid-cols-2">
           <Field label="Nome do remetente"><div className="relative"><UserRound size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_nome')} className="field-control pl-10" placeholder="Amo Ofertas" data-testid="input-sender-name" /></div></Field>
-          <Field label="E-mail do remetente"><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_email')} type="email" className="field-control pl-10" placeholder="ofertas@amoofertas.com.br" data-testid="input-sender-email" /></div></Field>
+          <Field label="E-mail do remetente" hint="Definido pela configuração segura do ambiente."><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_email')} type="email" readOnly aria-readonly="true" className="field-control bg-[#f3eee7] pl-10 text-[#6d7180]" placeholder="Carregando remetente seguro…" data-testid="input-sender-email" /></div>{form.formState.errors.remetente_email && <p className="mt-2 text-xs font-bold text-[#bd4f26]" data-testid="error-sender-email">{form.formState.errors.remetente_email.message}</p>}</Field>
         </div>
       </section>
 

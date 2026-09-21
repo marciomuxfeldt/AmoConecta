@@ -33,6 +33,14 @@ export const GetSafetyModeResponse = zod.object({
 
 
 /**
+ * @summary Retorna os padrões seguros para novas campanhas
+ */
+export const GetCampaignDefaultsResponse = zod.object({
+  "remetente_email": zod.string().email()
+})
+
+
+/**
  * @summary Retorna a sessão atual
  */
 export const GetAuthSessionResponse = zod.object({

@@ -22,6 +22,7 @@ import type {
 import type {
   AuthSession,
   Campaign,
+  CampaignDefaults,
   CampaignListItem,
   CreateCampaignInput,
   EmailImageUploadUrl,
@@ -209,6 +210,83 @@ export function useGetSafetyMode<TData = Awaited<ReturnType<typeof getSafetyMode
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetSafetyModeQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetCampaignDefaultsUrl = () => {
+
+
+
+
+  return `/api/campaign-defaults`
+}
+
+/**
+ * @summary Retorna os padrões seguros para novas campanhas
+ */
+export const getCampaignDefaults = async ( options?: Parameters<typeof customFetch>[1]): Promise<CampaignDefaults> => {
+
+  return customFetch<CampaignDefaults>(getGetCampaignDefaultsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCampaignDefaultsQueryKey = () => {
+    return [
+    `/api/campaign-defaults`
+    ] as const;
+    }
+
+
+export const getGetCampaignDefaultsQueryOptions = <TData = Awaited<ReturnType<typeof getCampaignDefaults>>, TError = ErrorType<Error>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCampaignDefaults>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCampaignDefaultsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCampaignDefaults>>> = ({ signal }) => getCampaignDefaults({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCampaignDefaults>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCampaignDefaultsQueryResult = NonNullable<Awaited<ReturnType<typeof getCampaignDefaults>>>
+export type GetCampaignDefaultsQueryError = ErrorType<Error>
+
+
+/**
+ * @summary Retorna os padrões seguros para novas campanhas
+ */
+
+export function useGetCampaignDefaults<TData = Awaited<ReturnType<typeof getCampaignDefaults>>, TError = ErrorType<Error>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCampaignDefaults>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCampaignDefaultsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

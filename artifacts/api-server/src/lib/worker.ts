@@ -6,6 +6,10 @@ import {
 } from "@workspace/email-template";
 import { supabaseAdminClient } from "./supabase";
 import { isRecipientAllowed } from "./safety-mode";
+import {
+  configuredSenderEmail,
+  isVerifiedSenderEmail,
+} from "./sender-config";
 
 const RESEND_BATCH_SIZE = 100;
 const MAX_RETRIES = 3;
@@ -176,8 +180,8 @@ async function updateCampaignStatus(campaignId: string, status: string): Promise
 }
 
 function sender(campaign: Campaign): string {
-  const email = normalize(campaign.remetente_email || requiredEnv("SENDER_EMAIL"));
-  if (!email.endsWith("@marketing.amo.delivery")) {
+  const email = normalize(campaign.remetente_email || configuredSenderEmail() || requiredEnv("SENDER_EMAIL"));
+  if (!isVerifiedSenderEmail(email)) {
     throw new WorkerConfigurationError(
       "O remetente da campanha precisa pertencer a marketing.amo.delivery.",
     );

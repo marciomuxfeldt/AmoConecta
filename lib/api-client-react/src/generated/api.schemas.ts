@@ -17,6 +17,10 @@ export interface SafetyMode {
   message: string | null;
 }
 
+export interface CampaignDefaults {
+  remetente_email: string;
+}
+
 export interface Error {
   error: string;
 }

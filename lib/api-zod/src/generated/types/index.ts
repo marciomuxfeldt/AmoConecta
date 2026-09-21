@@ -9,6 +9,7 @@
 export * from './authSession';
 export * from './authUser';
 export * from './campaign';
+export * from './campaignDefaults';
 export * from './campaignListItem';
 export * from './campaignListItemStatus';
 export * from './campaignStatus';

@@ -51,6 +51,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /campaign-defaults:
+    get:
+      operationId: getCampaignDefaults
+      tags: [campaigns]
+      summary: Retorna os padrões seguros para novas campanhas
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Padrões da campanha
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignDefaults"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Configuração de remetente ausente ou inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /auth/session:
     get:
       operationId: getAuthSession
@@ -516,6 +542,14 @@ components:
         - envio_liberado
         - allowlist_count
         - message
+    CampaignDefaults:
+      type: object
+      properties:
+        remetente_email:
+          type: string
+          format: email
+      required:
+        - remetente_email
     Error:
       type: object
       properties:

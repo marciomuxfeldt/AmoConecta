@@ -17,6 +17,11 @@ import { normalizeEmailBlocks } from "@workspace/email-template";
 import { getSafetyMode, getSafetyModeMessage } from "../lib/safety-mode";
 import { sendTestEmail } from "../lib/worker";
 import { formatValidationError } from "../lib/validation";
+import {
+  configuredSenderEmail,
+  isVerifiedSenderEmail,
+  senderDomainValidationMessage,
+} from "../lib/sender-config";
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
@@ -95,6 +100,20 @@ function campaignPayload(input: Record<string, unknown>, partial = false) {
     payload.corpo = normalizeEmailBlocks(input.corpo);
   }
   return payload;
+}
+
+function withDefaultSender(input: Record<string, unknown>): Record<string, unknown> {
+  const senderEmail = configuredSenderEmail();
+  if (senderEmail && !String(input.remetente_email ?? "").trim()) {
+    return { ...input, remetente_email: senderEmail };
+  }
+  return input;
+}
+
+function senderValidationError(email: unknown): string | null {
+  return typeof email === "string" && isVerifiedSenderEmail(email)
+    ? null
+    : senderDomainValidationMessage();
 }
 
 function safeAssetFileName(fileName: string, mimeType: string): string {
@@ -184,9 +203,14 @@ router.get("/campaigns", async (req, res) => {
 });
 
 router.post("/campaigns", async (req, res) => {
-  const parsed = CreateCampaignBody.safeParse(req.body);
+  const parsed = CreateCampaignBody.safeParse(withDefaultSender(req.body ?? {}));
   if (!parsed.success) {
     res.status(422).json({ error: formatValidationError(parsed.error) });
+    return;
+  }
+  const senderError = senderValidationError(parsed.data.remetente_email);
+  if (senderError) {
+    res.status(422).json({ error: senderError });
     return;
   }
   try {
@@ -357,6 +381,13 @@ router.patch("/campaigns/:campaignId", async (req, res) => {
           : formatValidationError(parsed.error),
     });
     return;
+  }
+  if (parsed.success && "remetente_email" in parsed.data) {
+    const senderError = senderValidationError(parsed.data.remetente_email);
+    if (senderError) {
+      res.status(422).json({ error: senderError });
+      return;
+    }
   }
   try {
     const session = await getSupabaseUser(req, res);
