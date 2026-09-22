@@ -2,15 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   batchIdempotencyKey,
+  DEFAULT_RESEND_MIN_INTERVAL_MS,
   idempotencyKey,
+  RESEND_MIN_INTERVAL_ENV,
   sendResendMessages,
   type PreparedResendMessage,
 } from "./resend-sender";
 
 const originalFetch = globalThis.fetch;
+const originalInterval = process.env[RESEND_MIN_INTERVAL_ENV];
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
+  if (originalInterval === undefined) delete process.env[RESEND_MIN_INTERVAL_ENV];
+  else process.env[RESEND_MIN_INTERVAL_ENV] = originalInterval;
 });
 
 test("keeps recipient keys stable when a recovered batch is recomposed", () => {
@@ -82,4 +87,65 @@ test("sends one deterministic idempotency key per Resend request", async () => {
       /primeira|segunda|terceira/u.test(String(call.init.body)),
     ),
   );
+});
+
+function testMessage(email: string): PreparedResendMessage {
+  return {
+    from: "envios@marketing.amo.delivery",
+    to: [email],
+    subject: "Oferta",
+    html: "<p>Olá</p>",
+    headers: {},
+    _idempotencyKey: idempotencyKey("rate-limit-campaign", email, false),
+  };
+}
+
+test("spaces request starts using the configured minimum interval", async () => {
+  process.env[RESEND_MIN_INTERVAL_ENV] = "20";
+  const starts: number[] = [];
+  globalThis.fetch = async () => {
+    starts.push(Date.now());
+    return new Response(JSON.stringify({ id: `resend-${starts.length}` }), {
+      status: 200,
+    });
+  };
+
+  await sendResendMessages("resend-test-key", [
+    testMessage("primeira@example.com"),
+    testMessage("segunda@example.com"),
+    testMessage("terceira@example.com"),
+  ]);
+
+  assert.ok(starts[1] - starts[0] >= 18);
+  assert.ok(starts[2] - starts[1] >= 18);
+});
+
+test("defaults to 125ms and waits for a low remaining window", async () => {
+  delete process.env[RESEND_MIN_INTERVAL_ENV];
+  const starts: number[] = [];
+  let call = 0;
+  globalThis.fetch = async () => {
+    const startedAt = Date.now();
+    starts.push(startedAt);
+    call += 1;
+    const headers =
+      call === 1
+        ? {
+            "ratelimit-remaining": "0",
+            "ratelimit-reset": String(startedAt + 60),
+          }
+        : undefined;
+    return new Response(JSON.stringify({ id: `resend-${call}` }), {
+      status: 200,
+      headers,
+    });
+  };
+
+  await sendResendMessages("resend-test-key", [
+    testMessage("quarta@example.com"),
+    testMessage("quinta@example.com"),
+  ]);
+
+  assert.ok(DEFAULT_RESEND_MIN_INTERVAL_MS === 125);
+  assert.ok(starts[1] - starts[0] >= 55);
 });
