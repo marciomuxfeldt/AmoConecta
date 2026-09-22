@@ -196,7 +196,7 @@ async function releaseWorkerLock(): Promise<void> {
   if (data !== true) {
     logger.warn(
       { lockKey: WORKER_LOCK_KEY },
-      "AmoConecta worker lock was not held by this database session",
+       "AmoConecta worker lock was not owned by this worker",
     );
   }
 }
