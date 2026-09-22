@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { addSuppression, verifyUnsubscribeToken } from "../lib/worker";
 import { getTechnicalError } from "../lib/technical-error";
 
@@ -8,7 +8,7 @@ function page(title: string, body: string): string {
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>body{margin:0;background:#f4f0e9;color:#263044;font:16px Arial,sans-serif}main{box-sizing:border-box;max-width:560px;margin:12vh auto;padding:32px;background:#fffdf9;border:1px solid #e5ddd0;border-radius:16px;text-align:center}h1{font-size:24px}p{line-height:1.6;color:#626775}button{border:0;border-radius:8px;background:#e96527;color:#fff;padding:12px 20px;font-weight:bold;cursor:pointer}</style></head><body><main><h1>${title}</h1>${body}</main></body></html>`;
 }
 
-router.get("/unsubscribe", async (req, res) => {
+async function getUnsubscribe(req: Request, res: Response): Promise<void> {
   const token = typeof req.query.t === "string" ? req.query.t : "";
   const campaignId = typeof req.query.c === "string" ? req.query.c : null;
   const email = verifyUnsubscribeToken(token);
@@ -41,9 +41,9 @@ router.get("/unsubscribe", async (req, res) => {
       page("Não foi possível concluir", "<p>Tente novamente em alguns instantes.</p>"),
     );
   }
-});
+}
 
-router.post("/unsubscribe", async (req, res) => {
+async function postUnsubscribe(req: Request, res: Response): Promise<void> {
   const token = typeof req.query.t === "string" ? req.query.t : "";
   const campaignId = typeof req.query.c === "string" ? req.query.c : null;
   const email = verifyUnsubscribeToken(token);
@@ -58,6 +58,9 @@ router.post("/unsubscribe", async (req, res) => {
     req.log.error({ technicalError: getTechnicalError(error) }, "One-click unsubscribe failed");
     res.status(502).json({ error: "Não foi possível concluir o descadastro." });
   }
-});
+}
+
+router.get(["/unsubscribe", "/descadastro"], getUnsubscribe);
+router.post(["/unsubscribe", "/descadastro"], postUnsubscribe);
 
 export default router;

@@ -7,6 +7,10 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+// The public deployment sits behind Replit's reverse proxy. Trust the proxy
+// hop so req.ip identifies the client address used by the login limiter.
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,

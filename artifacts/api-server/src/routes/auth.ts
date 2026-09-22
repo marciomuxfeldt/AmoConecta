@@ -6,6 +6,12 @@ import {
 } from "@workspace/api-zod";
 import { getTechnicalError } from "../lib/technical-error";
 import { createClient } from "@supabase/supabase-js";
+import {
+  checkLoginAttempt,
+  LOGIN_RATE_LIMIT,
+  LOGIN_RATE_WINDOW_MS,
+  resetLoginAttempts,
+} from "../lib/login-rate-limit";
 
 const router: IRouter = Router();
 const SESSION_COOKIE = "amoconecta_session";
@@ -87,7 +93,31 @@ router.get("/auth/session", async (req, res) => {
 });
 
 router.post("/auth/login", async (req, res) => {
-  const credentials = LoginBody.parse(req.body);
+  const ip = req.ip || "unknown";
+  const rateLimit = checkLoginAttempt(ip);
+  if (!rateLimit.allowed) {
+    req.log.warn(
+      {
+        ip,
+        attempts: LOGIN_RATE_LIMIT,
+        windowMinutes: LOGIN_RATE_WINDOW_MS / 60_000,
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      },
+      "Login temporarily blocked by IP rate limit",
+    );
+    res.setHeader("Retry-After", String(rateLimit.retryAfterSeconds));
+    res.status(429).json({
+      error: "Muitas tentativas de login. Tente novamente mais tarde.",
+    });
+    return;
+  }
+
+  const parsedCredentials = LoginBody.safeParse(req.body);
+  if (!parsedCredentials.success) {
+    res.status(422).json({ error: "Informe um e-mail e uma senha válidos." });
+    return;
+  }
+  const credentials = parsedCredentials.data;
   const { data: authData, error } =
     await supabaseAuthClient().auth.signInWithPassword(
     credentials,
@@ -110,6 +140,7 @@ router.post("/auth/login", async (req, res) => {
     return;
   }
 
+  resetLoginAttempts(ip);
   setSession(res, authData.session.access_token);
   const data = LoginResponse.parse({
     authenticated: true,
