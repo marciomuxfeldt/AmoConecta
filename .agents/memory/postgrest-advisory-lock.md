@@ -1,6 +1,6 @@
 ---
-name: PostgREST advisory lock handling
-description: Session advisory locks called through separate Supabase RPC requests need durable lease state.
+name: PostgREST worker lease
+description: Cross-request worker coordination through Supabase HTTP needs a durable tokenized lease.
 ---
 
 PostgREST calls use pooled HTTP sessions, so cross-request coordination must use a tokenized, expiring database lease and release only when the token matches. A single conditional `UPDATE` is sufficient for acquisition.
