@@ -16,6 +16,8 @@ const MAX_RETRIES = 3;
 const DEFAULT_SENDER_NAME = "Amo Ofertas";
 const DEFAULT_REPLY_TO = "contato@marketing.amo.delivery";
 const WORKER_RPC = "reservar_destinatarios";
+const RECOVERY_RPC = "recuperar_destinatarios_travados";
+const RECOVERY_BATCH_SIZE = 1000;
 
 type Campaign = {
   id: string;
@@ -128,6 +130,21 @@ async function reserveRecipients(
     if (error.code === "PGRST202" || error.code === "42883") {
       throw new WorkerConfigurationError(
         `A RPC ${WORKER_RPC} não existe. Aplique o SQL manual em supabase/functions/worker-reservation.sql.`,
+      );
+    }
+    throw error;
+  }
+  return (data ?? []) as WorkerRecipient[];
+}
+
+async function recoverStuckRecipients(limit = RECOVERY_BATCH_SIZE): Promise<WorkerRecipient[]> {
+  const { data, error } = await supabaseAdminClient().rpc(RECOVERY_RPC, {
+    p_limite: limit,
+  });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new WorkerConfigurationError(
+        `A RPC ${RECOVERY_RPC} não existe. Aplique o SQL manual em supabase/functions/worker-reservation.sql.`,
       );
     }
     throw error;
@@ -277,6 +294,7 @@ async function markSuppressedOrBlocked(
     if (suppression.has(normalize(recipient.email))) {
       await updateRecipient(recipient.id, {
         status: "suprimido",
+        processando_em: null,
         erro: "Destinatário presente na lista de supressão.",
       });
       continue;
@@ -284,6 +302,7 @@ async function markSuppressedOrBlocked(
     if (!isRecipientAllowed(recipient.email)) {
       await updateRecipient(recipient.id, {
         status: "bloqueado_modo_teste",
+        processando_em: null,
         erro: "Bloqueado pelo modo de segurança.",
       });
       continue;
@@ -313,6 +332,7 @@ async function sendWithRetries(
             status: results[index]?.error ? "erro" : "enviado",
             resend_email_id: results[index]?.id ?? null,
             enviado_em: results[index]?.error ? null : sentAt,
+            processando_em: null,
             erro: results[index]?.error?.message ?? null,
           }),
         ),
@@ -328,7 +348,11 @@ async function sendWithRetries(
   const message = lastError instanceof Error ? lastError.message : String(lastError);
   await Promise.all(
     recipients.map((recipient) =>
-      updateRecipient(recipient.id, { status: "erro", erro: message }),
+      updateRecipient(recipient.id, {
+        status: "erro",
+        processando_em: null,
+        erro: message,
+      }),
     ),
   );
 }
@@ -433,6 +457,7 @@ export async function processCampaign(campaignId: string): Promise<number> {
 }
 
 export async function processDueCampaigns(): Promise<number> {
+  await recoverStuckRecipients();
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select("id,status,agendada_para")
