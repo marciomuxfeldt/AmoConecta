@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   normalizeEmailBlocks,
   renderEmailHtml,
@@ -6,6 +6,12 @@ import {
 } from "@workspace/email-template";
 import { supabaseAdminClient } from "./supabase";
 import { isRecipientAllowed } from "./safety-mode";
+import {
+  idempotencyKey,
+  sendResendMessages,
+  type PreparedResendMessage,
+  type ResendResult,
+} from "./resend-sender";
 import {
   configuredSenderEmail,
   isVerifiedSenderEmail,
@@ -43,8 +49,6 @@ export type WorkerRecipient = {
   tentativas: number;
   resend_email_id?: string | null;
 };
-
-type ResendResult = { id?: string; error?: { message?: string } };
 
 export class WorkerConfigurationError extends Error {}
 
@@ -99,15 +103,7 @@ export function verifyUnsubscribeToken(token: string): string | null {
   }
 }
 
-export function idempotencyKey(
-  campaignId: string,
-  email: string,
-  isReminder: boolean,
-): string {
-  return createHash("sha256")
-    .update(`${campaignId}:${normalize(email)}:${isReminder ? "lembrete" : "principal"}`)
-    .digest("hex");
-}
+export { batchIdempotencyKey, idempotencyKey } from "./resend-sender";
 
 export function unsubscribeUrl(email: string, campaignId: string): string {
   const query = new URLSearchParams({
@@ -214,7 +210,10 @@ function replyTo(campaign: Campaign): string | undefined {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value) ? value : undefined;
 }
 
-function emailPayload(campaign: Campaign, recipient: WorkerRecipient) {
+function emailPayload(
+  campaign: Campaign,
+  recipient: WorkerRecipient,
+): PreparedResendMessage {
   const key = idempotencyKey(campaign.id, recipient.email, false);
   const unsubscribe = unsubscribeUrl(recipient.email, campaign.id);
   const html = renderEmailHtml(normalizeEmailBlocks(campaign.corpo) as EmailBlock[], {
@@ -237,39 +236,13 @@ function emailPayload(campaign: Campaign, recipient: WorkerRecipient) {
   };
 }
 
-async function sendBatch(
+export async function sendBatch(
   campaign: Campaign,
   recipients: WorkerRecipient[],
 ): Promise<ResendResult[]> {
   const apiKey = requiredEnv("RESEND_API_KEY");
   const messages = recipients.map((recipient) => emailPayload(campaign, recipient));
-  const batchKey = createHash("sha256")
-    .update(messages.map((message) => message._idempotencyKey).join(","))
-    .digest("hex");
-  const response = await fetch("https://api.resend.com/emails/batch", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": batchKey,
-    },
-    body: JSON.stringify(
-      messages.map(({ _idempotencyKey: _ignored, ...message }) => message),
-    ),
-  });
-  const body = (await response.json().catch(() => null)) as
-    | { data?: ResendResult[]; message?: string; error?: string }
-    | null;
-  if (!response.ok) {
-    const error = new Error(
-      `Resend ${response.status}: ${body?.message ?? body?.error ?? "falha sem detalhe"}`,
-    ) as Error & { status?: number; retryAfter?: number };
-    error.status = response.status;
-    const retryAfter = Number(response.headers.get("retry-after"));
-    error.retryAfter = Number.isFinite(retryAfter) ? retryAfter : undefined;
-    throw error;
-  }
-  return body?.data ?? [];
+  return sendResendMessages(apiKey, messages);
 }
 
 function retryDelay(error: unknown, attempt: number): number {
