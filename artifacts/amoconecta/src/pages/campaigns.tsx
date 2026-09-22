@@ -13,6 +13,8 @@ import {
   LogOut,
   Mail,
   Menu,
+  Pause,
+  Play,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -379,6 +381,7 @@ type CampaignFormValues = {
   assunto_lembrete: string;
   remetente_nome: string;
   remetente_email: string;
+  reply_to: string;
   valor_credito: string;
   validade_credito: string;
   url_deeplink: string;
@@ -393,20 +396,27 @@ type CampaignFormValues = {
   corpo: EmailBlock[];
 };
 
-function blankCampaign(senderEmail = ''): CampaignFormValues {
+function blankCampaign(
+  senderEmail = '',
+  senderName = '',
+  replyTo = '',
+  hourCap = '100',
+  dayCap = '1000',
+): CampaignFormValues {
   return {
     nome: '',
     assunto: '',
     preheader: '',
     assunto_lembrete: '',
-    remetente_nome: '',
+    remetente_nome: senderName,
     remetente_email: senderEmail,
+    reply_to: replyTo,
     valor_credito: '',
     validade_credito: '',
     url_deeplink: '',
     url_landing: '',
-    teto_hora: '',
-    teto_dia: '',
+    teto_hora: hourCap,
+    teto_dia: dayCap,
     status: CampaignStatus.rascunho,
     agendada_para: '',
     lembrete_ativo: false,
@@ -416,8 +426,15 @@ function blankCampaign(senderEmail = ''): CampaignFormValues {
   };
 }
 
-function campaignToForm(campaign?: Campaign, senderEmail = ''): CampaignFormValues {
-  if (!campaign) return blankCampaign(senderEmail);
+function campaignToForm(
+  campaign?: Campaign,
+  senderEmail = '',
+  senderName = '',
+  replyTo = '',
+  hourCap = '100',
+  dayCap = '1000',
+): CampaignFormValues {
+  if (!campaign) return blankCampaign(senderEmail, senderName, replyTo, hourCap, dayCap);
   return {
     nome: campaign.nome,
     assunto: campaign.assunto,
@@ -425,6 +442,7 @@ function campaignToForm(campaign?: Campaign, senderEmail = ''): CampaignFormValu
     assunto_lembrete: campaign.assunto_lembrete ?? '',
     remetente_nome: campaign.remetente_nome,
     remetente_email: campaign.remetente_email,
+    reply_to: campaign.reply_to ?? replyTo,
     valor_credito: campaign.valor_credito == null ? '' : String(campaign.valor_credito),
     validade_credito: campaign.validade_credito ?? '',
     url_deeplink: campaign.url_deeplink ?? '',
@@ -463,7 +481,14 @@ function CampaignForm({
   const update = useUpdateCampaign();
   const defaultsQuery = useGetCampaignDefaults();
   const form = useForm<CampaignFormValues>({
-    defaultValues: campaignToForm(campaign, defaultsQuery.data?.remetente_email),
+    defaultValues: campaignToForm(
+      campaign,
+      defaultsQuery.data?.remetente_email,
+      defaultsQuery.data?.remetente_nome,
+      defaultsQuery.data?.reply_to,
+      defaultsQuery.data?.teto_hora == null ? '100' : String(defaultsQuery.data.teto_hora),
+      defaultsQuery.data?.teto_dia == null ? '1000' : String(defaultsQuery.data.teto_dia),
+    ),
   });
   const isEditing = Boolean(campaign);
   const emailBlocks = form.watch('corpo');
@@ -485,8 +510,23 @@ function CampaignForm({
   };
 
   useEffect(() => {
-    form.reset(campaignToForm(campaign, defaultsQuery.data?.remetente_email));
-  }, [campaign, defaultsQuery.data?.remetente_email, form]);
+    form.reset(campaignToForm(
+      campaign,
+      defaultsQuery.data?.remetente_email,
+      defaultsQuery.data?.remetente_nome,
+      defaultsQuery.data?.reply_to,
+      defaultsQuery.data?.teto_hora == null ? '100' : String(defaultsQuery.data.teto_hora),
+      defaultsQuery.data?.teto_dia == null ? '1000' : String(defaultsQuery.data.teto_dia),
+    ));
+  }, [
+    campaign,
+    defaultsQuery.data?.remetente_email,
+    defaultsQuery.data?.remetente_nome,
+    defaultsQuery.data?.reply_to,
+    defaultsQuery.data?.teto_hora,
+    defaultsQuery.data?.teto_dia,
+    form,
+  ]);
 
   const submit = (values: CampaignFormValues) => {
     if (isUploadPending) {
@@ -521,6 +561,7 @@ function CampaignForm({
       assunto_lembrete: values.assunto_lembrete.trim() || null,
       remetente_nome: values.remetente_nome.trim(),
       remetente_email: values.remetente_email.trim(),
+      reply_to: values.reply_to.trim() || null,
       valor_credito: nullableNumber(values.valor_credito),
       validade_credito: values.validade_credito.trim() || null,
       url_deeplink: values.url_deeplink.trim() || null,
@@ -561,7 +602,8 @@ function CampaignForm({
         <div className="mb-6"><p className="section-kicker">02 · Remetente</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">De quem a mensagem chega?</h2></div>
         <div className="grid gap-5 md:grid-cols-2">
           <Field label="Nome do remetente"><div className="relative"><UserRound size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_nome')} className="field-control pl-10" placeholder="Amo Ofertas" data-testid="input-sender-name" /></div></Field>
-          <Field label="E-mail do remetente" hint="Definido pela configuração segura do ambiente."><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_email')} type="email" readOnly aria-readonly="true" className="field-control bg-[#f3eee7] pl-10 text-[#6d7180]" placeholder="Carregando remetente seguro…" data-testid="input-sender-email" /></div>{form.formState.errors.remetente_email && <p className="mt-2 text-xs font-bold text-[#bd4f26]" data-testid="error-sender-email">{form.formState.errors.remetente_email.message}</p>}</Field>
+           <Field label="E-mail do remetente" hint="Somente endereços do domínio verificado marketing.amo.delivery."><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_email')} type="email" readOnly aria-readonly="true" className="field-control bg-[#f3eee7] pl-10 text-[#6d7180]" placeholder="Carregando remetente seguro…" data-testid="input-sender-email" /></div>{form.formState.errors.remetente_email && <p className="mt-2 text-xs font-bold text-[#bd4f26]" data-testid="error-sender-email">{form.formState.errors.remetente_email.message}</p>}</Field>
+           <Field label="Reply-To" hint="Respostas dos destinatários serão encaminhadas para este endereço."><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('reply_to')} type="email" className="field-control pl-10" placeholder="contato@marketing.amo.delivery" data-testid="input-reply-to" /></div>{form.formState.errors.reply_to && <p className="mt-2 text-xs font-bold text-[#bd4f26]" data-testid="error-reply-to">{form.formState.errors.reply_to.message}</p>}</Field>
         </div>
       </section>
 
@@ -570,8 +612,8 @@ function CampaignForm({
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Valor do crédito" hint="Use o valor numérico em reais."><input {...form.register('valor_credito')} inputMode="decimal" className="field-control" placeholder="0,00" data-testid="input-credit-value" /></Field>
           <Field label="Validade do crédito" hint="Data limite do crédito."><input {...form.register('validade_credito')} type="date" className="field-control" data-testid="input-credit-expiry" /></Field>
-          <Field label="Teto por hora"><input {...form.register('teto_hora')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-hour-cap" /></Field>
-          <Field label="Teto por dia"><input {...form.register('teto_dia')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-day-cap" /></Field>
+           <Field label="Teto por hora" hint="Sugestão inicial para a rampa: 100."><input {...form.register('teto_hora')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-hour-cap" /></Field>
+           <Field label="Teto por dia" hint="Sugestão inicial para a rampa: 1.000."><input {...form.register('teto_dia')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-day-cap" /></Field>
           <div className="sm:col-span-2 lg:col-span-2"><Field label="Deep link"><div className="relative"><Link2 size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('url_deeplink')} type="url" className="field-control pl-10" placeholder="https://..." data-testid="input-deeplink" /></div></Field></div>
           <div className="sm:col-span-2 lg:col-span-2"><Field label="Landing page"><div className="relative"><Link2 size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('url_landing')} type="url" className="field-control pl-10" placeholder="https://..." data-testid="input-landing-page" /></div></Field></div>
         </div>
@@ -780,6 +822,60 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
   );
 }
 
+function SendQuotaPanel({ campaign }: { campaign: Campaign }) {
+  const hourSent = campaign.enviados_hora ?? 0;
+  const daySent = campaign.enviados_dia ?? 0;
+  const quotaRows = [
+    { label: 'Hora corrente', sent: hourSent, cap: campaign.teto_hora },
+    { label: 'Dia corrente', sent: daySent, cap: campaign.teto_dia },
+  ];
+  const formatRate = (value: number | null | undefined) =>
+    value == null ? null : `${(value * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
+
+  return (
+    <section className="panel p-5 sm:p-7" data-testid="panel-send-quota">
+      <div className="mb-5 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+        <div>
+          <p className="section-kicker">Controle de rampa</p>
+          <h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Quanto já foi enviado?</h2>
+        </div>
+        <span className="font-mono text-[9px] uppercase tracking-[.12em] text-[#989498]">Contagem atualizada ao abrir</span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {quotaRows.map((row) => {
+          const percentage = row.cap && row.cap > 0 ? Math.min(100, (row.sent / row.cap) * 100) : 0;
+          return (
+            <div key={row.label} className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4" data-testid={`quota-${row.label === 'Hora corrente' ? 'hour' : 'day'}`}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-bold text-[#565c6a]">{row.label}</span>
+                <span className="font-mono text-[10px] text-[#7d7e87]">
+                  {formatNumber(row.sent)} / {row.cap && row.cap > 0 ? formatNumber(row.cap) : 'sem teto'}
+                </span>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#e6ded3]">
+                <div className="h-full rounded-full bg-[#247b79] transition-[width] duration-500" style={{ width: `${row.cap ? Math.max(row.sent > 0 ? 3 : 0, percentage) : 0}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {campaign.status === 'pausada' && campaign.pausa_motivo && (
+        <div className="mt-5 rounded-xl border border-[#efc9ba] bg-[#fff3ee] px-4 py-3 text-xs leading-5 text-[#8e3a20]" data-testid="status-campaign-pause-reason">
+          <strong className="block">Motivo da pausa</strong>
+          <span>{campaign.pausa_motivo}</span>
+          {(campaign.pausa_taxa_bounce != null || campaign.pausa_taxa_reclamacao != null) && (
+            <span className="mt-1 block text-[#a65d46]">
+              {campaign.pausa_taxa_bounce != null && `Bounce: ${formatRate(campaign.pausa_taxa_bounce)}`}
+              {campaign.pausa_taxa_bounce != null && campaign.pausa_taxa_reclamacao != null && ' · '}
+              {campaign.pausa_taxa_reclamacao != null && `Reclamações: ${formatRate(campaign.pausa_taxa_reclamacao)}`}
+            </span>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function NewCampaignPage({ user }: { user: SessionUser }) {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
@@ -801,8 +897,10 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
   const [confirmDelete, setConfirmDelete] = useState(false);
   const campaignQuery = useGetCampaign(campaignId, { query: { enabled: Boolean(campaignId), queryKey: getGetCampaignQueryKey(campaignId) } });
   const deleteCampaign = useDeleteCampaign();
+  const updateCampaign = useUpdateCampaign();
   const sendTest = useSendCampaignTest();
   const [testSent, setTestSent] = useState(false);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const campaign = campaignQuery.data;
 
   const deleteCurrent = () => {
@@ -823,6 +921,25 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
     );
   };
 
+  const changeCampaignStatus = (status: 'pausada' | 'enviando') => {
+    setOperationError(null);
+    updateCampaign.mutate(
+      {
+        campaignId,
+        data: status === 'enviando'
+          ? { status, teste_enviado: true }
+          : { status },
+      },
+      {
+        onSuccess: (updated) => {
+          queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
+          queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+        },
+        onError: (error) => setOperationError(getErrorMessage(error, 'Não foi possível alterar o estado da campanha.')),
+      },
+    );
+  };
+
   if (campaignQuery.isLoading) {
     return <Shell user={user} title="Campanha" eyebrow="Campanhas / Abrir" mobileNavOpen={mobileNavOpen} setMobileNavOpen={setMobileNavOpen}><div className="panel mx-auto max-w-4xl p-7" data-testid="status-campaign-detail-loading"><div className="skeleton h-5 w-48 rounded-full" /><div className="mt-7 grid gap-4 sm:grid-cols-2">{Array.from({ length: 8 }).map((_, index) => <div key={index} className="skeleton h-12 rounded-xl" />)}</div></div></Shell>;
   }
@@ -832,11 +949,25 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
   return (
     <Shell user={user} title={campaign.nome} eyebrow="Campanhas / Operação" mobileNavOpen={mobileNavOpen} setMobileNavOpen={setMobileNavOpen}>
       <div className="animate-rise-in-delay mx-auto max-w-5xl space-y-5">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div className="flex items-center gap-3"><Link href="/" className="action-button action-button-secondary !px-3" data-testid="link-back-campaign-list"><ArrowLeft size={15} /></Link><div><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#92939a]">ID {campaign.id}</p><div className="mt-1 flex items-center gap-2"><StatusPill status={campaign.status} /><span className="text-xs text-[#777984]">{statusDescriptions[campaign.status]}</span></div></div></div>
-          <div className="relative"><button onClick={() => setConfirmDelete((open) => !open)} className="action-button action-button-danger" data-testid="button-delete-campaign"><Trash2 size={15} /> Excluir campanha</button>{confirmDelete && <div className="absolute right-0 top-12 z-10 w-72 rounded-xl border border-[#efc9ba] bg-[#fffaf6] p-4 text-left shadow-[0_18px_45px_rgba(38,48,68,.14)]"><p className="text-sm font-extrabold text-[#263044]">Excluir esta campanha?</p><p className="mt-1 text-xs leading-5 text-[#7d6c6c]">Esta ação remove os metadados da campanha.</p><div className="mt-4 flex justify-end gap-2"><button onClick={() => setConfirmDelete(false)} className="action-button action-button-secondary !px-3" data-testid="button-cancel-delete">Cancelar</button><button onClick={deleteCurrent} disabled={deleteCampaign.isPending} className="action-button action-button-danger !px-3" data-testid="button-confirm-delete">{deleteCampaign.isPending ? <LoaderCircle size={14} className="animate-spin" /> : 'Excluir'}</button></div></div>}</div>
+           <div className="flex flex-wrap items-center justify-end gap-2">
+             {(campaign.status === 'enviando' || campaign.status === 'pausada') && (
+               <button
+                 onClick={() => changeCampaignStatus(campaign.status === 'enviando' ? 'pausada' : 'enviando')}
+                 disabled={updateCampaign.isPending}
+                 className={`action-button ${campaign.status === 'enviando' ? 'action-button-secondary' : 'action-button-primary'}`}
+                 data-testid={campaign.status === 'enviando' ? 'button-pause-campaign' : 'button-resume-campaign'}
+               >
+                 {updateCampaign.isPending ? <LoaderCircle size={15} className="animate-spin" /> : campaign.status === 'enviando' ? <Pause size={15} /> : <Play size={15} />}
+                 {campaign.status === 'enviando' ? 'Pausar envio' : 'Retomar envio'}
+               </button>
+             )}
+             <div className="relative"><button onClick={() => setConfirmDelete((open) => !open)} className="action-button action-button-danger" data-testid="button-delete-campaign"><Trash2 size={15} /> Excluir campanha</button>{confirmDelete && <div className="absolute right-0 top-12 z-10 w-72 rounded-xl border border-[#efc9ba] bg-[#fffaf6] p-4 text-left shadow-[0_18px_45px_rgba(38,48,68,.14)]"><p className="text-sm font-extrabold text-[#263044]">Excluir esta campanha?</p><p className="mt-1 text-xs leading-5 text-[#7d6c6c]">Esta ação remove os metadados da campanha.</p><div className="mt-4 flex justify-end gap-2"><button onClick={() => setConfirmDelete(false)} className="action-button action-button-secondary !px-3" data-testid="button-cancel-delete">Cancelar</button><button onClick={deleteCurrent} disabled={deleteCampaign.isPending} className="action-button action-button-danger !px-3" data-testid="button-confirm-delete">{deleteCampaign.isPending ? <LoaderCircle size={14} className="animate-spin" /> : 'Excluir'}</button></div></div>}</div>
+           </div>
         </div>
         {deleteCampaign.isError && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm text-[#a64220]" data-testid="status-delete-error">Não foi possível excluir a campanha. Tente novamente.</div>}
+         {operationError && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm text-[#a64220]" data-testid="status-campaign-operation-error">{operationError}</div>}
           <CampaignForm
             campaign={campaign}
             onSaved={(updated) => {
@@ -848,6 +979,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             testError={sendTest.error ? getErrorMessage(sendTest.error, "Não foi possível enviar o teste.") : null}
             testSent={testSent}
           />
+         <SendQuotaPanel campaign={campaign} />
         <ImportPanel campaignId={campaignId} />
       </div>
     </Shell>

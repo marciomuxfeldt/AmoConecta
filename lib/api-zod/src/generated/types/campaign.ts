@@ -22,6 +22,8 @@ export interface Campaign {
   remetente_nome: string;
   remetente_email: string;
   /** @nullable */
+  reply_to: string | null;
+  /** @nullable */
   valor_credito: number | null;
   /** @nullable */
   validade_credito: Date | null;
@@ -39,6 +41,18 @@ export interface Campaign {
      * @nullable
      */
   teto_dia: number | null;
+  /** @nullable */
+  pausa_motivo?: string | null;
+  /** @nullable */
+  pausa_taxa_bounce?: number | null;
+  /** @nullable */
+  pausa_taxa_reclamacao?: number | null;
+  /** @nullable */
+  pausada_em?: Date | null;
+  /** @minimum 0 */
+  enviados_hora?: number;
+  /** @minimum 0 */
+  enviados_dia?: number;
   status: CampaignStatus;
   /** @nullable */
   agendada_para: Date | null;

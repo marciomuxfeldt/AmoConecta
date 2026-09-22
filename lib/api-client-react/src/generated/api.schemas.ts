@@ -19,6 +19,12 @@ export interface SafetyMode {
 
 export interface CampaignDefaults {
   remetente_email: string;
+  remetente_nome: string;
+  reply_to: string;
+  /** @minimum 0 */
+  teto_hora: number;
+  /** @minimum 0 */
+  teto_dia: number;
 }
 
 export interface Error {
@@ -161,6 +167,8 @@ export interface Campaign {
   remetente_nome: string;
   remetente_email: string;
   /** @nullable */
+  reply_to: string | null;
+  /** @nullable */
   valor_credito: number | null;
   /** @nullable */
   validade_credito: string | null;
@@ -178,6 +186,18 @@ export interface Campaign {
      * @nullable
      */
   teto_dia: number | null;
+  /** @nullable */
+  pausa_motivo?: string | null;
+  /** @nullable */
+  pausa_taxa_bounce?: number | null;
+  /** @nullable */
+  pausa_taxa_reclamacao?: number | null;
+  /** @nullable */
+  pausada_em?: string | null;
+  /** @minimum 0 */
+  enviados_hora?: number;
+  /** @minimum 0 */
+  enviados_dia?: number;
   status: CampaignStatus;
   /** @nullable */
   agendada_para: string | null;
@@ -204,6 +224,8 @@ export interface CreateCampaignInput {
   /** @minLength 1 */
   remetente_nome: string;
   remetente_email: string;
+  /** @nullable */
+  reply_to?: string | null;
   /** @nullable */
   valor_credito?: number | null;
   /** @nullable */
@@ -250,6 +272,8 @@ export interface UpdateCampaignInput {
   /** @minLength 1 */
   remetente_nome?: string;
   remetente_email?: string;
+  /** @nullable */
+  reply_to?: string | null;
   /** @nullable */
   valor_credito?: number | null;
   /** @nullable */

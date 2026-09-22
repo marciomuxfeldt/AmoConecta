@@ -19,13 +19,16 @@ import { sendTestEmail } from "../lib/worker";
 import { formatValidationError } from "../lib/validation";
 import {
   configuredSenderEmail,
+  configuredReplyToEmail,
+  configuredSenderName,
   isVerifiedSenderEmail,
+  isValidReplyToEmail,
   senderDomainValidationMessage,
 } from "../lib/sender-config";
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
-  "id,nome,assunto,assunto_lembrete,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,url_deeplink,url_landing,teto_hora,teto_dia,status,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo,criado_em";
+  "id,nome,assunto,assunto_lembrete,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,url_deeplink,url_landing,teto_hora,teto_dia,status,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em";
 // Public by design: this bucket contains only e-mail image assets.
 // Never reuse the private CSV bucket from routes/imports.ts here.
 const EMAIL_ASSET_BUCKET = "amoconecta-assets";
@@ -59,11 +62,12 @@ function campaignPayload(input: Record<string, unknown>, partial = false) {
     "preheader",
     "remetente_nome",
     "remetente_email",
+    "reply_to",
   ];
   for (const field of stringFields) {
     if (!partial || field in input) {
       const value = String(input[field] ?? "").trim();
-      payload[field] = field === "preheader" ? value || null : value;
+      payload[field] = field === "preheader" || field === "reply_to" ? value || null : value;
     }
   }
 
@@ -108,16 +112,59 @@ function campaignPayload(input: Record<string, unknown>, partial = false) {
 
 function withDefaultSender(input: Record<string, unknown>): Record<string, unknown> {
   const senderEmail = configuredSenderEmail();
-  if (senderEmail && !String(input.remetente_email ?? "").trim()) {
-    return { ...input, remetente_email: senderEmail };
+  const result = { ...input };
+  if (senderEmail && !String(result.remetente_email ?? "").trim()) {
+    result.remetente_email = senderEmail;
   }
-  return input;
+  if (!String(result.remetente_nome ?? "").trim()) {
+    result.remetente_nome = configuredSenderName();
+  }
+  if (!String(result.reply_to ?? "").trim()) {
+    result.reply_to = configuredReplyToEmail();
+  }
+  if (result.teto_hora == null) result.teto_hora = 100;
+  if (result.teto_dia == null) result.teto_dia = 1000;
+  return result;
 }
 
 function senderValidationError(email: unknown): string | null {
   return typeof email === "string" && isVerifiedSenderEmail(email)
     ? null
     : senderDomainValidationMessage();
+}
+
+function replyToValidationError(email: unknown): string | null {
+  return email == null || (typeof email === "string" && isValidReplyToEmail(email))
+    ? null
+    : "Campo inválido: Reply-To precisa ser um endereço de e-mail válido.";
+}
+
+async function withSendMetrics<T extends Record<string, unknown>>(campaign: T): Promise<T> {
+  const client = supabaseAdminClient();
+  const now = Date.now();
+  const hourStart = new Date(now - 60 * 60 * 1000).toISOString();
+  const day = new Date(now);
+  day.setHours(0, 0, 0, 0);
+  const dayStart = day.toISOString();
+  const [hour, dayResult] = await Promise.all([
+    client
+      .from("destinatario")
+      .select("id", { count: "exact", head: true })
+      .eq("campanha_id", campaign.id)
+      .gte("enviado_em", hourStart),
+    client
+      .from("destinatario")
+      .select("id", { count: "exact", head: true })
+      .eq("campanha_id", campaign.id)
+      .gte("enviado_em", dayStart),
+  ]);
+  if (hour.error) throw hour.error;
+  if (dayResult.error) throw dayResult.error;
+  return {
+    ...campaign,
+    enviados_hora: hour.count ?? 0,
+    enviados_dia: dayResult.count ?? 0,
+  };
 }
 
 function safeAssetFileName(fileName: string, mimeType: string): string {
@@ -282,7 +329,7 @@ router.get("/campaigns/:campaignId", async (req, res) => {
       res.status(404).json({ error: "Campanha não encontrada." });
       return;
     }
-    res.json(GetCampaignResponse.parse(data));
+    res.json(GetCampaignResponse.parse(await withSendMetrics(data)));
   } catch (error) {
     logSupabaseError(req, "Campaign lookup failed", error);
     res.status(502).json({ error: "Não foi possível consultar a campanha." });
@@ -390,6 +437,13 @@ router.patch("/campaigns/:campaignId", async (req, res) => {
     const senderError = senderValidationError(parsed.data.remetente_email);
     if (senderError) {
       res.status(422).json({ error: senderError });
+      return;
+    }
+  }
+  if (parsed.success && "reply_to" in parsed.data) {
+    const replyToError = replyToValidationError(parsed.data.reply_to);
+    if (replyToError) {
+      res.status(422).json({ error: replyToError });
       return;
     }
   }

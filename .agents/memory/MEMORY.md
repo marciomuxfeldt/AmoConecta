@@ -5,3 +5,4 @@
 - [Technical error persistence](technical-error-persistence.md) — persist structured technical failures while masking them at the HTTP boundary.
 - [Import count semantics](import-count-semantics.md) — “Salvos” counts only new records; existing and in-file duplicates are separate outcomes.
 - [E-mail HTML sanitization](email-template-sanitization.md) — allowlisted rich-text sanitizers must preserve both opening and closing tags.
+- [PostgREST advisory locks](postgrest-advisory-lock.md) — separate RPC requests may use different sessions; pair advisory locks with a tokenized expiring lease.

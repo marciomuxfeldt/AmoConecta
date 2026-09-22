@@ -8,4 +8,10 @@
 
 export interface CampaignDefaults {
   remetente_email: string;
+  remetente_nome: string;
+  reply_to: string;
+  /** @minimum 0 */
+  teto_hora: number;
+  /** @minimum 0 */
+  teto_dia: number;
 }

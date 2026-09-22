@@ -27,6 +27,8 @@ export interface UpdateCampaignInput {
   remetente_nome?: string;
   remetente_email?: string;
   /** @nullable */
+  reply_to?: string | null;
+  /** @nullable */
   valor_credito?: number | null;
   /** @nullable */
   validade_credito?: Date | null;

@@ -2,7 +2,9 @@ import { Router, type IRouter } from "express";
 import { getSupabaseUser } from "./auth";
 import { getSafetyMode } from "../lib/safety-mode";
 import {
+  configuredReplyToEmail,
   configuredSenderEmail,
+  configuredSenderName,
   isVerifiedSenderEmail,
   VERIFIED_SENDER_DOMAIN,
 } from "../lib/sender-config";
@@ -31,7 +33,13 @@ router.get("/campaign-defaults", async (req, res) => {
     });
     return;
   }
-  res.json({ remetente_email: senderEmail });
+   res.json({
+     remetente_email: senderEmail,
+     remetente_nome: configuredSenderName(),
+     reply_to: configuredReplyToEmail(),
+     teto_hora: 100,
+     teto_dia: 1000,
+   });
 });
 
 export default router;

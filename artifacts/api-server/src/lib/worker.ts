@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   normalizeEmailBlocks,
   renderEmailHtml,
@@ -14,16 +14,25 @@ import {
 } from "./resend-sender";
 import {
   configuredSenderEmail,
+  configuredReplyToEmail,
+  configuredSenderName,
+  DEFAULT_REPLY_TO,
+  DEFAULT_SENDER_NAME,
+  isValidReplyToEmail,
   isVerifiedSenderEmail,
 } from "./sender-config";
+import { logger } from "./logger";
 
 const RESEND_BATCH_SIZE = 100;
 const MAX_RETRIES = 3;
-const DEFAULT_SENDER_NAME = "Amo Ofertas";
-const DEFAULT_REPLY_TO = "contato@marketing.amo.delivery";
 const WORKER_RPC = "reservar_destinatarios";
 const RECOVERY_RPC = "recuperar_destinatarios_travados";
 const RECOVERY_BATCH_SIZE = 1000;
+const WORKER_LOCK_ACQUIRE_RPC = "tentar_adquirir_lock_worker";
+const WORKER_LOCK_RELEASE_RPC = "liberar_lock_worker";
+// Fixed database-wide lock key. It must remain stable across worker processes.
+const WORKER_LOCK_KEY = 4_782_913_421;
+const WORKER_LOCK_TOKEN = randomUUID();
 
 type Campaign = {
   id: string;
@@ -38,6 +47,9 @@ type Campaign = {
   agendada_para?: string | null;
   teto_hora?: number | null;
   teto_dia?: number | null;
+  pausa_motivo?: string | null;
+  pausa_taxa_bounce?: number | null;
+  pausa_taxa_reclamacao?: number | null;
 };
 
 export type WorkerRecipient = {
@@ -148,6 +160,47 @@ async function recoverStuckRecipients(limit = RECOVERY_BATCH_SIZE): Promise<Work
   return (data ?? []) as WorkerRecipient[];
 }
 
+function isMissingWorkerLockRpc(error: { code?: string } | null): boolean {
+  return error?.code === "PGRST202" || error?.code === "42883";
+}
+
+async function acquireWorkerLock(): Promise<boolean> {
+  const { data, error } = await supabaseAdminClient().rpc(
+    WORKER_LOCK_ACQUIRE_RPC,
+    { p_chave: WORKER_LOCK_KEY, p_token: WORKER_LOCK_TOKEN },
+  );
+  if (error) {
+    if (isMissingWorkerLockRpc(error)) {
+      throw new WorkerConfigurationError(
+        `A RPC ${WORKER_LOCK_ACQUIRE_RPC} não existe. Aplique a migração SQL do lock global do worker.`,
+      );
+    }
+    throw error;
+  }
+  return data === true;
+}
+
+async function releaseWorkerLock(): Promise<void> {
+  const { data, error } = await supabaseAdminClient().rpc(
+    WORKER_LOCK_RELEASE_RPC,
+    { p_chave: WORKER_LOCK_KEY, p_token: WORKER_LOCK_TOKEN },
+  );
+  if (error) {
+    if (isMissingWorkerLockRpc(error)) {
+      throw new WorkerConfigurationError(
+        `A RPC ${WORKER_LOCK_RELEASE_RPC} não existe. Aplique a migração SQL do lock global do worker.`,
+      );
+    }
+    throw error;
+  }
+  if (data !== true) {
+    logger.warn(
+      { lockKey: WORKER_LOCK_KEY },
+      "AmoConecta worker lock was not held by this database session",
+    );
+  }
+}
+
 async function loadCampaign(campaignId: string): Promise<Campaign | null> {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
@@ -185,10 +238,14 @@ async function updateRecipient(
   if (error) throw error;
 }
 
-async function updateCampaignStatus(campaignId: string, status: string): Promise<void> {
+async function updateCampaignStatus(
+  campaignId: string,
+  status: string,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
   const { error } = await supabaseAdminClient()
     .from("campanha")
-    .update({ status })
+    .update({ status, ...extra })
     .eq("id", campaignId);
   if (error) throw error;
 }
@@ -205,9 +262,9 @@ function sender(campaign: Campaign): string {
 
 function replyTo(campaign: Campaign): string | undefined {
   const value = normalize(
-    campaign.reply_to ?? process.env.REPLY_TO_EMAIL ?? DEFAULT_REPLY_TO,
+    campaign.reply_to ?? configuredReplyToEmail() ?? DEFAULT_REPLY_TO,
   );
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value) ? value : undefined;
+  return isValidReplyToEmail(value) ? value : undefined;
 }
 
 function emailPayload(
@@ -330,7 +387,7 @@ async function sendWithRetries(
   );
 }
 
-async function maybePauseCampaign(campaignId: string): Promise<void> {
+async function maybePauseCampaign(campaignId: string): Promise<boolean> {
   const client = supabaseAdminClient();
   const { count: sent, error: sentError } = await client
     .from("destinatario")
@@ -338,7 +395,7 @@ async function maybePauseCampaign(campaignId: string): Promise<void> {
     .eq("campanha_id", campaignId)
     .in("status", ["enviado", "entregue", "aberto", "clicado", "bounce"]);
   if (sentError) throw sentError;
-  if (!sent || sent < 1000) return;
+  if (!sent || sent < 1000) return false;
   const { count: bounces, error: bounceError } = await client
     .from("destinatario")
     .select("id", { count: "exact", head: true })
@@ -351,12 +408,19 @@ async function maybePauseCampaign(campaignId: string): Promise<void> {
     .eq("origem", `campanha:${campaignId}`)
     .eq("motivo", "complaint");
   if (complaintError) throw complaintError;
-  if (
-    (bounces ?? 0) / sent > 0.02 ||
-    (complaints ?? 0) / sent > 0.002
-  ) {
-    await updateCampaignStatus(campaignId, "pausada");
-  }
+  const bounceRate = (bounces ?? 0) / sent;
+  const complaintRate = (complaints ?? 0) / sent;
+  const reasons: string[] = [];
+  if (bounceRate > 0.02) reasons.push("bounce acima de 2%");
+  if (complaintRate > 0.002) reasons.push("reclamações acima de 0,2%");
+  if (reasons.length === 0) return false;
+  await updateCampaignStatus(campaignId, "pausada", {
+    pausa_motivo: `Pausa automática: ${reasons.join(" e ")}.`,
+    pausa_taxa_bounce: bounceRate,
+    pausa_taxa_reclamacao: complaintRate,
+    pausada_em: new Date().toISOString(),
+  });
+  return true;
 }
 
 async function quotaRemaining(campaign: Campaign): Promise<number> {
@@ -409,6 +473,7 @@ export async function processCampaign(campaignId: string): Promise<number> {
   }
   let processed = 0;
   while (true) {
+    if (await maybePauseCampaign(campaignId)) break;
     const remaining = await quotaRemaining(campaign);
     if (remaining <= 0) break;
     const reserved = await reserveRecipients(campaignId, remaining);
@@ -430,23 +495,43 @@ export async function processCampaign(campaignId: string): Promise<number> {
 }
 
 export async function processDueCampaigns(): Promise<number> {
-  await recoverStuckRecipients();
-  const { data, error } = await supabaseAdminClient()
-    .from("campanha")
-    .select("id,status,agendada_para")
-    .in("status", ["agendada", "enviando"]);
-  if (error) throw error;
-  let processed = 0;
-  for (const campaign of data ?? []) {
-    if (
-      campaign.status === "enviando" ||
-      !campaign.agendada_para ||
-      new Date(campaign.agendada_para).getTime() <= Date.now()
-    ) {
-      processed += await processCampaign(campaign.id);
+  const lockAcquired = await acquireWorkerLock();
+  if (!lockAcquired) {
+    logger.info(
+      { lockKey: WORKER_LOCK_KEY },
+      "AmoConecta worker skipped because another execution is still running",
+    );
+    return 0;
+  }
+
+  try {
+    await recoverStuckRecipients();
+    const { data, error } = await supabaseAdminClient()
+      .from("campanha")
+      .select("id,status,agendada_para")
+      .in("status", ["agendada", "enviando"]);
+    if (error) throw error;
+    let processed = 0;
+    for (const campaign of data ?? []) {
+      if (
+        campaign.status === "enviando" ||
+        !campaign.agendada_para ||
+        new Date(campaign.agendada_para).getTime() <= Date.now()
+      ) {
+        processed += await processCampaign(campaign.id);
+      }
+    }
+    return processed;
+  } finally {
+    try {
+      await releaseWorkerLock();
+    } catch (error) {
+      logger.error(
+        { error, lockKey: WORKER_LOCK_KEY },
+        "AmoConecta worker failed to release the global lock",
+      );
     }
   }
-  return processed;
 }
 
 export async function sendTestEmail(
@@ -493,13 +578,35 @@ export async function addSuppression(
   email: string,
   campaignId: string | null,
 ): Promise<void> {
-  const { error } = await supabaseAdminClient().from("supressao").upsert(
-    {
-      email: normalize(email),
-      motivo: "descadastro",
-      origem: campaignId ? `campanha:${campaignId}` : "publico",
-    },
-    { onConflict: "email" },
-  );
-  if (error) throw error;
+  const client = supabaseAdminClient();
+  const normalizedEmail = normalize(email);
+  const payload = {
+    email: normalizedEmail,
+    motivo: "descadastro",
+    origem: campaignId ? `campanha:${campaignId}` : "publico",
+  };
+  const { data: existing, error: lookupError } = await client
+    .from("supressao")
+    .select("id")
+    .eq("email", normalizedEmail)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  if (existing) {
+    const { error } = await client
+      .from("supressao")
+      .update({ motivo: payload.motivo, origem: payload.origem })
+      .eq("id", existing.id);
+    if (error) throw error;
+    return;
+  }
+  const { error: insertError } = await client.from("supressao").insert(payload);
+  if (!insertError) return;
+  // A second request can insert the same e-mail between the lookup and
+  // insert. In that case, update the row it won.
+  if (insertError.code !== "23505") throw insertError;
+  const { error: retryError } = await client
+    .from("supressao")
+    .update({ motivo: payload.motivo, origem: payload.origem })
+    .eq("email", normalizedEmail);
+  if (retryError) throw retryError;
 }

@@ -548,8 +548,23 @@ components:
         remetente_email:
           type: string
           format: email
+        remetente_nome:
+          type: string
+        reply_to:
+          type: string
+          format: email
+        teto_hora:
+          type: integer
+          minimum: 0
+        teto_dia:
+          type: integer
+          minimum: 0
       required:
         - remetente_email
+        - remetente_nome
+        - reply_to
+        - teto_hora
+        - teto_dia
     Error:
       type: object
       properties:
@@ -658,6 +673,9 @@ components:
         remetente_email:
           type: string
           format: email
+        reply_to:
+          type: ["string", "null"]
+          format: email
         valor_credito:
           type: ["number", "null"]
         validade_credito:
@@ -674,6 +692,21 @@ components:
           minimum: 0
         teto_dia:
           type: ["integer", "null"]
+          minimum: 0
+        pausa_motivo:
+          type: ["string", "null"]
+        pausa_taxa_bounce:
+          type: ["number", "null"]
+        pausa_taxa_reclamacao:
+          type: ["number", "null"]
+        pausada_em:
+          type: ["string", "null"]
+          format: date-time
+        enviados_hora:
+          type: integer
+          minimum: 0
+        enviados_dia:
+          type: integer
           minimum: 0
         status:
           $ref: "#/components/schemas/CampaignStatus"
@@ -702,6 +735,7 @@ components:
         - assunto_lembrete
         - remetente_nome
         - remetente_email
+        - reply_to
         - valor_credito
         - validade_credito
         - url_deeplink
@@ -734,6 +768,9 @@ components:
           minLength: 1
         remetente_email:
           type: string
+          format: email
+        reply_to:
+          type: ["string", "null"]
           format: email
         valor_credito:
           type: ["number", "null"]
@@ -793,6 +830,9 @@ components:
           minLength: 1
         remetente_email:
           type: string
+          format: email
+        reply_to:
+          type: ["string", "null"]
           format: email
         valor_credito:
           type: ["number", "null"]

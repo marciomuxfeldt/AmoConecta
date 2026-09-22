@@ -35,8 +35,18 @@ export const GetSafetyModeResponse = zod.object({
 /**
  * @summary Retorna os padrões seguros para novas campanhas
  */
+export const getCampaignDefaultsResponseTetoHoraMin = 0;
+
+export const getCampaignDefaultsResponseTetoDiaMin = 0;
+
+
+
 export const GetCampaignDefaultsResponse = zod.object({
-  "remetente_email": zod.string().email()
+  "remetente_email": zod.string().email(),
+  "remetente_nome": zod.string(),
+  "reply_to": zod.string().email(),
+  "teto_hora": zod.number().int().min(getCampaignDefaultsResponseTetoHoraMin),
+  "teto_dia": zod.number().int().min(getCampaignDefaultsResponseTetoDiaMin)
 })
 
 
@@ -125,6 +135,7 @@ export const CreateCampaignBody = zod.object({
   "assunto_lembrete": zod.string().nullish(),
   "remetente_nome": zod.string().min(1),
   "remetente_email": zod.string().email(),
+  "reply_to": zod.string().email().nullish(),
   "valor_credito": zod.number().nullish(),
   "validade_credito": zod.coerce.date().nullish(),
   "url_deeplink": zod.string().url().nullish(),
@@ -163,6 +174,10 @@ export const createCampaignResponseTetoHoraMin = 0;
 
 export const createCampaignResponseTetoDiaMin = 0;
 
+export const createCampaignResponseEnviadosHoraMin = 0;
+
+export const createCampaignResponseEnviadosDiaMin = 0;
+
 
 
 
@@ -182,12 +197,19 @@ export const CreateCampaignResponse = zod.object({
   "assunto_lembrete": zod.string().nullable(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
+  "reply_to": zod.string().email().nullable(),
   "valor_credito": zod.number().nullable(),
   "validade_credito": zod.coerce.date().nullable(),
   "url_deeplink": zod.string().url().nullable(),
   "url_landing": zod.string().url().nullable(),
   "teto_hora": zod.number().int().min(createCampaignResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(createCampaignResponseTetoDiaMin).nullable(),
+  "pausa_motivo": zod.string().nullish(),
+  "pausa_taxa_bounce": zod.number().nullish(),
+  "pausa_taxa_reclamacao": zod.number().nullish(),
+  "pausada_em": zod.coerce.date().nullish(),
+  "enviados_hora": zod.number().int().min(createCampaignResponseEnviadosHoraMin).optional(),
+  "enviados_dia": zod.number().int().min(createCampaignResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida']),
   "agendada_para": zod.coerce.date().nullable(),
   "lembrete_ativo": zod.boolean(),
@@ -229,6 +251,10 @@ export const getCampaignResponseTetoHoraMin = 0;
 
 export const getCampaignResponseTetoDiaMin = 0;
 
+export const getCampaignResponseEnviadosHoraMin = 0;
+
+export const getCampaignResponseEnviadosDiaMin = 0;
+
 
 
 
@@ -248,12 +274,19 @@ export const GetCampaignResponse = zod.object({
   "assunto_lembrete": zod.string().nullable(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
+  "reply_to": zod.string().email().nullable(),
   "valor_credito": zod.number().nullable(),
   "validade_credito": zod.coerce.date().nullable(),
   "url_deeplink": zod.string().url().nullable(),
   "url_landing": zod.string().url().nullable(),
   "teto_hora": zod.number().int().min(getCampaignResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(getCampaignResponseTetoDiaMin).nullable(),
+  "pausa_motivo": zod.string().nullish(),
+  "pausa_taxa_bounce": zod.number().nullish(),
+  "pausa_taxa_reclamacao": zod.number().nullish(),
+  "pausada_em": zod.coerce.date().nullish(),
+  "enviados_hora": zod.number().int().min(getCampaignResponseEnviadosHoraMin).optional(),
+  "enviados_dia": zod.number().int().min(getCampaignResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida']),
   "agendada_para": zod.coerce.date().nullable(),
   "lembrete_ativo": zod.boolean(),
@@ -316,6 +349,7 @@ export const UpdateCampaignBody = zod.object({
   "assunto_lembrete": zod.string().nullish(),
   "remetente_nome": zod.string().min(1).optional(),
   "remetente_email": zod.string().email().optional(),
+  "reply_to": zod.string().email().nullish(),
   "valor_credito": zod.number().nullish(),
   "validade_credito": zod.coerce.date().nullish(),
   "url_deeplink": zod.string().url().nullish(),
@@ -354,6 +388,10 @@ export const updateCampaignResponseTetoHoraMin = 0;
 
 export const updateCampaignResponseTetoDiaMin = 0;
 
+export const updateCampaignResponseEnviadosHoraMin = 0;
+
+export const updateCampaignResponseEnviadosDiaMin = 0;
+
 
 
 
@@ -373,12 +411,19 @@ export const UpdateCampaignResponse = zod.object({
   "assunto_lembrete": zod.string().nullable(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
+  "reply_to": zod.string().email().nullable(),
   "valor_credito": zod.number().nullable(),
   "validade_credito": zod.coerce.date().nullable(),
   "url_deeplink": zod.string().url().nullable(),
   "url_landing": zod.string().url().nullable(),
   "teto_hora": zod.number().int().min(updateCampaignResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(updateCampaignResponseTetoDiaMin).nullable(),
+  "pausa_motivo": zod.string().nullish(),
+  "pausa_taxa_bounce": zod.number().nullish(),
+  "pausa_taxa_reclamacao": zod.number().nullish(),
+  "pausada_em": zod.coerce.date().nullish(),
+  "enviados_hora": zod.number().int().min(updateCampaignResponseEnviadosHoraMin).optional(),
+  "enviados_dia": zod.number().int().min(updateCampaignResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida']),
   "agendada_para": zod.coerce.date().nullable(),
   "lembrete_ativo": zod.boolean(),
