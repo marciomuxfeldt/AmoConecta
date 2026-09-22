@@ -37,6 +37,7 @@ export type EmailPreviewOptions = {
 
 const ALLOWED_TAGS = new Set(["strong", "b", "em", "i", "a", "br"]);
 const DEFAULT_UNSUBSCRIBE_URL = "#descadastro";
+const PREHEADER_PADDING = "&zwnj;&nbsp;".repeat(40);
 const DEFAULT_REASON =
   "Você está recebendo este e-mail porque se cadastrou para receber comunicações da AmoConecta.";
 
@@ -126,7 +127,7 @@ export function renderEmailHtml(
   const reason = escapeHtml(options.reason?.trim() || DEFAULT_REASON);
   const preheader = options.preheader?.trim().slice(0, 100);
   const hiddenPreheader = preheader
-    ? `<div style="display:none!important;font-size:1px;line-height:1px;color:#f4f0e9;max-height:0;max-width:0;opacity:0;overflow:hidden;">${escapeHtml(preheader)}&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;</div>`
+    ? `<div style="display:none!important;font-size:1px;line-height:1px;color:#f4f0e9;max-height:0;max-width:0;opacity:0;overflow:hidden;">${escapeHtml(preheader)}${PREHEADER_PADDING}</div>`
     : "";
   const body = blocks.map((block) => renderBlock(block, options.name)).join("");
 

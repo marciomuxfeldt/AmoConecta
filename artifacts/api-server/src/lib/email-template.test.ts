@@ -39,6 +39,8 @@ test("renders an optional hidden inbox preheader before the email content", () =
   assert.ok(
     html.indexOf("Resumo da oferta", bodyStart) < html.indexOf("<table", bodyStart),
   );
+  const hidden = html.match(/display:none!important[^>]*>([^<]*)<\/div>/iu)?.[1];
+  assert.ok((hidden?.match(/&zwnj;&nbsp;/gu)?.length ?? 0) >= 30);
 });
 
 test("limits rendered preheaders to 100 characters", () => {
