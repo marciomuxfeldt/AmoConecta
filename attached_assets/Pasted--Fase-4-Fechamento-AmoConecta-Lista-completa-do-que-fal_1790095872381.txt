@@ -1,0 +1,81 @@
+# Fase 4 — Fechamento (AmoConecta)
+
+Lista completa do que falta para encerrar a fase. Implemente tudo antes de me devolver, e me entregue ao final: o SQL de qualquer migração nova em bloco de código, e a lista do que precisa de configuração manual minha.
+
+## 1. Trava contra execuções sobrepostas do worker
+
+Use `pg_try_advisory_lock` com uma constante fixa no início de cada execução. Se o lock não for obtido, significa que a execução anterior ainda está rodando: registre no log e encerre imediatamente, sem processar nada. Libere o lock ao final, inclusive em caso de erro ou exceção.
+
+Motivo: o limitador de taxa é global dentro do processo. Duas execuções simultâneas teriam limitadores independentes e somariam 16 requisições por segundo, acima do limite de 10 por time do Resend.
+
+## 2. Remetente e Reply-To
+
+- Toda campanha nova nasce com `remetente_email` preenchido a partir do Secret `SENDER_EMAIL`, `remetente_nome` a partir de `SENDER_NAME`, e `reply_to` a partir de `REPLY_TO_EMAIL`.
+- A validação de que o remetente pertence a `marketing.amo.delivery` acontece **ao salvar a campanha**, não no envio. Hoje o operador monta o e-mail inteiro e só descobre o erro ao tentar enviar.
+- O campo de remetente aceita apenas endereços do domínio verificado. Campo livre aqui não dá liberdade útil — só permite errar de um jeito que o Resend recusa.
+
+## 3. Pausa automática por reputação
+
+Verifique se já existe; se não, implemente.
+
+- Função que avalia, para uma campanha em andamento: taxa de reclamação (limite 0,2%) e taxa de bounce (limite 2%), calculadas sobre o total já enviado.
+- Só avalia acima de 1.000 enviados, para evitar falso positivo com amostra pequena.
+- Ao ultrapassar qualquer um dos limites: muda o status da campanha para `pausada`, registra o motivo e a taxa apurada, e para o envio.
+- Os eventos que alimentam essas taxas chegam na Fase 5. Aqui o mecanismo precisa existir e ser chamado a cada execução do worker.
+- Botão de pausar e retomar manualmente no painel, sempre visível durante o envio.
+
+## 4. Tetos de envio no painel
+
+- Os campos `teto_hora` e `teto_dia` precisam ser editáveis na tela da campanha, com valores padrão sugeridos.
+- Mostre no painel quanto já foi enviado na hora corrente e no dia, contra o teto.
+- Sem isso o operador não tem como conduzir a rampa de aquecimento, que é o principal motivo de esses campos existirem.
+
+## 5. Scheduled Deployment
+
+Configure o worker como Scheduled Deployment do Replit, em processo separado, rodando a cada 1 minuto. Confirme que nenhum workflow web inicia o worker.
+
+Me diga exatamente o que preciso configurar no painel do Replit e com quais valores.
+
+## 6. Teste de concorrência
+
+Este é o critério que decide a fase.
+
+Rode duas execuções do worker em paralelo, com destinatários pendentes na fila, e comprove que:
+
+- Nenhum destinatário é processado duas vezes.
+- Nenhum destinatário fica preso em `processando`.
+- A soma dos enviados pelas duas execuções é igual ao total de linhas reservadas.
+
+Me mostre o resultado com números, não apenas "passou".
+
+## 7. Recuperação de linhas travadas
+
+Comprove que funciona: marque manualmente alguns destinatários como `processando` com `processando_em` antigo, rode o worker, e mostre que voltaram para `pendente`. Comprove também que, acima de 3 tentativas, vão para `erro` com a causa registrada.
+
+## 8. Verificação dos cabeçalhos
+
+No e-mail de teste recebido, comprove que chegam:
+
+- `List-Unsubscribe` com a URL de descadastro
+- `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
+- `Reply-To` com o valor da campanha
+
+Me mostre os cabeçalhos brutos da mensagem enviada.
+
+## 9. Descadastro ponta a ponta
+
+Comprove o fluxo completo: clicar no link do e-mail, a página resolver em um clique, o endereço entrar em `supressao` com `origem` preenchida, e o mesmo endereço ser bloqueado numa importação ou envio seguinte.
+
+Teste também o `POST` sem interface, que é o que o Gmail usa no botão nativo.
+
+## Fora do escopo desta fase
+
+Não implemente webhooks, lembrete nem exportação — são as Fases 5 e 6. Não mude `ENVIO_LIBERADO` para `true`.
+
+## Itens registrados para depois
+
+Não faça agora, apenas mantenha registrado:
+
+- Coordenação de limite de taxa entre múltiplos processos (Task #26).
+- Troca da checagem de e-mails existentes na importação: hoje carrega toda a campanha em páginas de 1.000; para 500 mil linhas, passar a consultar por bloco de 5.000.
+- Aumento do teto de 100 por reserva na RPC, quando pedirmos aumento de limite ao Resend.
