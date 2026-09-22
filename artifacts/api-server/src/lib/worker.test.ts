@@ -132,7 +132,7 @@ test("defaults to 125ms and waits for a low remaining window", async () => {
       call === 1
         ? {
             "ratelimit-remaining": "0",
-            "ratelimit-reset": String(startedAt + 60),
+            "ratelimit-reset": String(startedAt + 220),
           }
         : undefined;
     return new Response(JSON.stringify({ id: `resend-${call}` }), {
@@ -147,5 +147,5 @@ test("defaults to 125ms and waits for a low remaining window", async () => {
   ]);
 
   assert.ok(DEFAULT_RESEND_MIN_INTERVAL_MS === 125);
-  assert.ok(starts[1] - starts[0] >= 55);
+  assert.ok(starts[1] - starts[0] >= 200);
 });

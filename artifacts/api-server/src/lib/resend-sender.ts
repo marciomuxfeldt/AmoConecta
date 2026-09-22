@@ -73,7 +73,10 @@ class ResendRateLimiter {
   private adaptiveIntervalMs = 0;
   private adaptiveUntil = 0;
 
-  async waitForStart(): Promise<void> {
+  async run<T>(
+    operation: () => Promise<T>,
+    onResult: (result: T) => void,
+  ): Promise<T> {
     const previous = this.queue;
     let release!: () => void;
     this.queue = new Promise<void>((resolve) => {
@@ -81,14 +84,43 @@ class ResendRateLimiter {
     });
     await previous;
 
+    let released = false;
+    const releaseOnce = (): void => {
+      if (released) return;
+      released = true;
+      release();
+    };
+
     try {
       const now = Date.now();
       const startAt = Math.max(now, this.nextStartAt);
       const delay = startAt - now;
-      this.nextStartAt = startAt + this.intervalAt(now);
       if (delay > 0) await sleep(delay);
+      const actualStartAt = Date.now();
+      this.nextStartAt =
+        actualStartAt + this.intervalAt(actualStartAt);
+
+      let request: Promise<T>;
+      try {
+        request = operation();
+      } catch (error) {
+        releaseOnce();
+        throw error;
+      }
+      request.then(
+        (result) => {
+          try {
+            onResult(result);
+          } catch {
+            // The request result must not break the global scheduling queue.
+          }
+        },
+        () => undefined,
+      );
+      releaseOnce();
+      return request;
     } finally {
-      release();
+      releaseOnce();
     }
   }
 
@@ -134,17 +166,19 @@ async function sendOne(
   message: PreparedResendMessage,
 ): Promise<ResendResult> {
   const { _idempotencyKey, ...payload } = message;
-  await resendRateLimiter.waitForStart();
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": _idempotencyKey,
-    },
-    body: JSON.stringify(payload),
-  });
-  resendRateLimiter.observe(response);
+  const response = await resendRateLimiter.run(
+    () =>
+      fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": _idempotencyKey,
+        },
+        body: JSON.stringify(payload),
+      }),
+    (result) => resendRateLimiter.observe(result),
+  );
   const body = (await response.json().catch(() => null)) as
     | { id?: string; message?: string; error?: string }
     | null;
