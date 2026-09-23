@@ -2,6 +2,8 @@ import { Router, type IRouter, type Request } from "express";
 import {
   CreateCampaignBody,
   CreateCampaignResponse,
+  ClearCampaignRecipientsResponse,
+  GetCampaignRecipientSummaryResponse,
   GetCampaignParams,
   GetCampaignResponse,
   ListCampaignsResponse,
@@ -34,6 +36,14 @@ const CAMPAIGN_COLUMNS =
 const EMAIL_ASSET_BUCKET = "amoconecta-assets";
 const MAX_EMAIL_IMAGE_BYTES = 5 * 1024 * 1024;
 const EMAIL_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
+const RECENCY_BUCKETS = [
+  "até 30 dias",
+  "31 a 90 dias",
+  "91 a 180 dias",
+  "181 a 365 dias",
+  "mais de 365 dias",
+  "sem data",
+] as const;
 
 function logSupabaseError(
   req: Request,
@@ -167,6 +177,83 @@ async function withSendMetrics<T extends Record<string, unknown>>(campaign: T): 
   };
 }
 
+async function countMainRecipients(
+  campaignId: string,
+  query?: {
+    gte?: string;
+    lt?: string;
+    lte?: string;
+    isNull?: boolean;
+    statuses?: readonly string[];
+  },
+): Promise<number> {
+  let request = supabaseAdminClient()
+    .from("destinatario")
+    .select("id", { count: "exact", head: true })
+    .eq("campanha_id", campaignId)
+    .eq("is_lembrete", false);
+
+  if (query?.gte) request = request.gte("data_ultima_compra", query.gte);
+  if (query?.lt) request = request.lt("data_ultima_compra", query.lt);
+  if (query?.lte) request = request.lte("data_ultima_compra", query.lte);
+  if (query?.isNull) request = request.is("data_ultima_compra", null);
+  if (query?.statuses) request = request.in("status", query.statuses);
+
+  const { count, error } = await request;
+  if (error) throw error;
+  return count ?? 0;
+}
+
+function dateOnlyDaysAgo(days: number): string {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function recipientSummary(campaignId: string) {
+  const today = dateOnlyDaysAgo(0);
+  const statusQueries = [
+    ["pendente", ["pendente", "processando"]],
+    ["enviado", ["enviado"]],
+    ["entregue", ["entregue", "aberto", "clicado"]],
+    ["bloqueado", ["bloqueado_modo_teste"]],
+    ["suprimido", ["suprimido"]],
+    ["erro", ["erro", "bounce"]],
+  ] as const;
+  const statusCounts = await Promise.all(
+    statusQueries.map(async ([, statuses]) => countMainRecipients(campaignId, { statuses })),
+  );
+  const recencyQueries = [
+    { gte: dateOnlyDaysAgo(30), lte: today },
+    { gte: dateOnlyDaysAgo(90), lt: dateOnlyDaysAgo(30) },
+    { gte: dateOnlyDaysAgo(180), lt: dateOnlyDaysAgo(90) },
+    { gte: dateOnlyDaysAgo(365), lt: dateOnlyDaysAgo(180) },
+    { lt: dateOnlyDaysAgo(365) },
+    { isNull: true },
+  ];
+  const recencyCounts = await Promise.all(
+    recencyQueries.map((query) => countMainRecipients(campaignId, query)),
+  );
+  const total = await countMainRecipients(campaignId);
+
+  return GetCampaignRecipientSummaryResponse.parse({
+    campanha_id: campaignId,
+    total,
+    status: {
+      pendente: statusCounts[0],
+      enviado: statusCounts[1],
+      entregue: statusCounts[2],
+      bloqueado: statusCounts[3],
+      suprimido: statusCounts[4],
+      erro: statusCounts[5],
+    },
+    recencia: RECENCY_BUCKETS.map((faixa, index) => ({
+      faixa,
+      quantidade: recencyCounts[index],
+    })),
+  });
+}
+
 function safeAssetFileName(fileName: string, mimeType: string): string {
   const base = fileName
     .normalize("NFD")
@@ -236,17 +323,17 @@ router.get("/campaigns", async (req, res) => {
       return;
     }
 
-    res.json(
-      ListCampaignsResponse.parse(
-        (campaigns ?? []).map((campaign) => ({
-          ...campaign,
-          enviados: 0,
-          entregues: 0,
-          abertos: 0,
-          clicados: 0,
-        })),
-      ),
+    const campaignsWithRecipientCounts = await Promise.all(
+      (campaigns ?? []).map(async (campaign) => ({
+        ...campaign,
+        enviados: 0,
+        entregues: 0,
+        abertos: 0,
+        clicados: 0,
+        destinatarios_total: await countMainRecipients(campaign.id),
+      })),
     );
+    res.json(ListCampaignsResponse.parse(campaignsWithRecipientCounts));
   } catch (error) {
     logSupabaseError(req, "Campaign listing failed", error);
     res.status(502).json({ error: "Não foi possível carregar as campanhas." });
@@ -333,6 +420,75 @@ router.get("/campaigns/:campaignId", async (req, res) => {
   } catch (error) {
     logSupabaseError(req, "Campaign lookup failed", error);
     res.status(502).json({ error: "Não foi possível consultar a campanha." });
+  }
+});
+
+router.get("/campaigns/:campaignId/recipients/summary", async (req, res) => {
+  const params = GetCampaignParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(422).json({ error: "Identificador de campanha inválido." });
+    return;
+  }
+  try {
+    const session = await getSupabaseUser(req, res);
+    if (!session) {
+      res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+    const campaign = await findCampaign(params.data.campaignId);
+    if (!campaign) {
+      res.status(404).json({ error: "Campanha não encontrada." });
+      return;
+    }
+    res.json(await recipientSummary(params.data.campaignId));
+  } catch (error) {
+    logSupabaseError(req, "Campaign recipient summary failed", error);
+    res.status(502).json({ error: "Não foi possível consultar os destinatários." });
+  }
+});
+
+router.delete("/campaigns/:campaignId/recipients", async (req, res) => {
+  const params = GetCampaignParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(422).json({ error: "Identificador de campanha inválido." });
+    return;
+  }
+  try {
+    const session = await getSupabaseUser(req, res);
+    if (!session) {
+      res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+    const { data: campaign, error: campaignError } = await supabaseAdminClient()
+      .from("campanha")
+      .select("id,status")
+      .eq("id", params.data.campaignId)
+      .maybeSingle();
+    if (campaignError) throw campaignError;
+    if (!campaign) {
+      res.status(404).json({ error: "Campanha não encontrada." });
+      return;
+    }
+    if (campaign.status === "agendada" || campaign.status === "enviando") {
+      res.status(409).json({
+        error: "Não é possível limpar os destinatários enquanto a campanha está agendada ou enviando.",
+      });
+      return;
+    }
+    const { count, error } = await supabaseAdminClient()
+      .from("destinatario")
+      .delete({ count: "exact" })
+      .eq("campanha_id", params.data.campaignId);
+    if (error) throw error;
+    res.json(
+      ClearCampaignRecipientsResponse.parse({
+        campanha_id: params.data.campaignId,
+        destinatarios_removidos: count ?? 0,
+      }),
+    );
+  } catch (error) {
+    logSupabaseError(req, "Campaign recipient clearing failed", error);
+    res.status(502).json({ error: "Não foi possível limpar os destinatários." });
   }
 });
 

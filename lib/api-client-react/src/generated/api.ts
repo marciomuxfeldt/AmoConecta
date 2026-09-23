@@ -24,6 +24,8 @@ import type {
   Campaign,
   CampaignDefaults,
   CampaignListItem,
+  CampaignRecipientSummary,
+  CampaignRecipientsCleared,
   CreateCampaignInput,
   EmailImageUploadUrl,
   Error,
@@ -1015,6 +1017,157 @@ export const useSendCampaignTest = <TError = ErrorType<Error>,
         TContext
       > => {
       return useMutation(getSendCampaignTestMutationOptions(options));
+    }
+
+export const getGetCampaignRecipientSummaryUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/recipients/summary`
+}
+
+/**
+ * @summary Consulta o resumo de destinatários de uma campanha
+ */
+export const getCampaignRecipientSummary = async (campaignId: string, options?: Parameters<typeof customFetch>[1]): Promise<CampaignRecipientSummary> => {
+
+  return customFetch<CampaignRecipientSummary>(getGetCampaignRecipientSummaryUrl(campaignId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCampaignRecipientSummaryQueryKey = (campaignId: string,) => {
+    return [
+    `/api/campaigns/${campaignId}/recipients/summary`
+    ] as const;
+    }
+
+
+export const getGetCampaignRecipientSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getCampaignRecipientSummary>>, TError = ErrorType<Error>>(campaignId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCampaignRecipientSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCampaignRecipientSummaryQueryKey(campaignId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCampaignRecipientSummary>>> = ({ signal }) => getCampaignRecipientSummary(campaignId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: campaignId !== null && campaignId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCampaignRecipientSummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCampaignRecipientSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getCampaignRecipientSummary>>>
+export type GetCampaignRecipientSummaryQueryError = ErrorType<Error>
+
+
+/**
+ * @summary Consulta o resumo de destinatários de uma campanha
+ */
+
+export function useGetCampaignRecipientSummary<TData = Awaited<ReturnType<typeof getCampaignRecipientSummary>>, TError = ErrorType<Error>>(
+ campaignId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCampaignRecipientSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCampaignRecipientSummaryQueryOptions(campaignId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getClearCampaignRecipientsUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/recipients`
+}
+
+/**
+ * @summary Limpa os destinatários de uma campanha
+ */
+export const clearCampaignRecipients = async (campaignId: string, options?: Parameters<typeof customFetch>[1]): Promise<CampaignRecipientsCleared> => {
+
+  return customFetch<CampaignRecipientsCleared>(getClearCampaignRecipientsUrl(campaignId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getClearCampaignRecipientsMutationKey = () => ['clearCampaignRecipients'] as const;
+
+export const getClearCampaignRecipientsMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearCampaignRecipients>>, TError,ClearCampaignRecipientsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearCampaignRecipients>>, TError,ClearCampaignRecipientsMutationVariables, TContext> => {
+
+const mutationKey = getClearCampaignRecipientsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearCampaignRecipients>>, ClearCampaignRecipientsMutationVariables> = (props) => {
+          const {campaignId} = props ?? {};
+
+          return  clearCampaignRecipients(campaignId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClearCampaignRecipientsMutationResult = NonNullable<Awaited<ReturnType<typeof clearCampaignRecipients>>>
+
+    export type ClearCampaignRecipientsMutationError = ErrorType<Error>
+    export type ClearCampaignRecipientsMutationVariables = {campaignId: string}
+
+    /**
+ * @summary Limpa os destinatários de uma campanha
+ */
+export const useClearCampaignRecipients = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearCampaignRecipients>>, TError,ClearCampaignRecipientsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof clearCampaignRecipients>>,
+        TError,
+        ClearCampaignRecipientsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getClearCampaignRecipientsMutationOptions(options));
     }
 
 export const getRequestCampaignAssetUploadUrlUrl = (campaignId: string,) => {

@@ -91,6 +91,10 @@ export const LogoutResponse = zod.void()
 /**
  * @summary Lista campanhas da conta autenticada
  */
+export const listCampaignsResponseDestinatariosTotalMin = 0;
+
+
+
 export const ListCampaignsResponseItem = zod.object({
   "id": zod.string().uuid(),
   "nome": zod.string(),
@@ -99,6 +103,7 @@ export const ListCampaignsResponseItem = zod.object({
   "entregues": zod.number().int(),
   "abertos": zod.number().int(),
   "clicados": zod.number().int(),
+  "destinatarios_total": zod.number().int().min(listCampaignsResponseDestinatariosTotalMin),
   "agendada_para": zod.coerce.date().nullable(),
   "criado_em": zod.coerce.date()
 })
@@ -472,6 +477,66 @@ export const SendCampaignTestParams = zod.object({
 export const SendCampaignTestResponse = zod.object({
   "sent": zod.boolean(),
   "resend_email_id": zod.string()
+})
+
+
+/**
+ * @summary Consulta o resumo de destinatários de uma campanha
+ */
+export const GetCampaignRecipientSummaryParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const getCampaignRecipientSummaryResponseTotalMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusPendenteMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusEnviadoMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusEntregueMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusBloqueadoMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusSuprimidoMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusErroMin = 0;
+
+export const getCampaignRecipientSummaryResponseRecenciaItemQuantidadeMin = 0;
+
+
+
+export const GetCampaignRecipientSummaryResponse = zod.object({
+  "campanha_id": zod.string().uuid(),
+  "total": zod.number().int().min(getCampaignRecipientSummaryResponseTotalMin),
+  "status": zod.object({
+  "pendente": zod.number().int().min(getCampaignRecipientSummaryResponseStatusPendenteMin),
+  "enviado": zod.number().int().min(getCampaignRecipientSummaryResponseStatusEnviadoMin),
+  "entregue": zod.number().int().min(getCampaignRecipientSummaryResponseStatusEntregueMin),
+  "bloqueado": zod.number().int().min(getCampaignRecipientSummaryResponseStatusBloqueadoMin),
+  "suprimido": zod.number().int().min(getCampaignRecipientSummaryResponseStatusSuprimidoMin),
+  "erro": zod.number().int().min(getCampaignRecipientSummaryResponseStatusErroMin)
+}),
+  "recencia": zod.array(zod.object({
+  "faixa": zod.string(),
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseRecenciaItemQuantidadeMin)
+}))
+})
+
+
+/**
+ * @summary Limpa os destinatários de uma campanha
+ */
+export const ClearCampaignRecipientsParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const clearCampaignRecipientsResponseDestinatariosRemovidosMin = 0;
+
+
+
+export const ClearCampaignRecipientsResponse = zod.object({
+  "campanha_id": zod.string().uuid(),
+  "destinatarios_removidos": zod.number().int().min(clearCampaignRecipientsResponseDestinatariosRemovidosMin)
 })
 
 

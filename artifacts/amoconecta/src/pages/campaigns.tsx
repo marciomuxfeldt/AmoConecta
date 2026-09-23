@@ -27,20 +27,24 @@ import { Link, useLocation } from 'wouter';
 import {
   CampaignStatus,
   type Campaign,
+  type CampaignRecipientSummary,
   type CampaignListItem,
   type CreateCampaignInput,
   type ImportValidationJob,
   type ImportValidationSummary,
   type UpdateCampaignInput,
   getGetCampaignQueryKey,
+  getGetCampaignRecipientSummaryQueryKey,
   getGetCampaignImportQueryKey,
   getGetAuthSessionQueryKey,
   getListCampaignsQueryKey,
   getGetSafetyModeQueryKey,
   useGetCampaignDefaults,
   useCreateCampaign,
+  useClearCampaignRecipients,
   useDeleteCampaign,
   useGetCampaign,
+  useGetCampaignRecipientSummary,
   useGetCampaignImport,
   useListCampaigns,
   useGetSafetyMode,
@@ -302,16 +306,17 @@ function CampaignSkeleton() {
 function CampaignTable({ campaigns }: { campaigns: CampaignListItem[] }) {
   return (
     <div className="panel overflow-hidden" data-testid="campaign-list">
-      <div className="hidden grid-cols-[2fr_1fr_.8fr_.8fr_1.2fr] gap-4 border-b border-[#eee7dc] bg-[#f7f2eb] px-6 py-3 font-mono text-[9px] uppercase tracking-[0.14em] text-[#8b8d96] md:grid">
-        <span>Campanha</span><span>Status</span><span>Enviados</span><span>Entregues</span><span>Próximo passo</span>
+      <div className="hidden grid-cols-[2fr_1fr_.8fr_.8fr_.8fr_1.2fr] gap-4 border-b border-[#eee7dc] bg-[#f7f2eb] px-6 py-3 font-mono text-[9px] uppercase tracking-[0.14em] text-[#8b8d96] md:grid">
+        <span>Campanha</span><span>Status</span><span>Destinatários</span><span>Enviados</span><span>Entregues</span><span>Próximo passo</span>
       </div>
       {campaigns.map((campaign) => (
-        <Link href={`/campaigns/${campaign.id}`} key={campaign.id} className="grid grid-cols-2 gap-x-4 gap-y-3 border-b border-[#eee7dc] px-5 py-5 transition-colors last:border-0 hover:bg-[#f8f3ec] md:grid-cols-[2fr_1fr_.8fr_.8fr_1.2fr] md:items-center md:px-6" data-testid={`row-campaign-${campaign.id}`}>
+        <Link href={`/campaigns/${campaign.id}`} key={campaign.id} className="grid grid-cols-2 gap-x-4 gap-y-3 border-b border-[#eee7dc] px-5 py-5 transition-colors last:border-0 hover:bg-[#f8f3ec] md:grid-cols-[2fr_1fr_.8fr_.8fr_.8fr_1.2fr] md:items-center md:px-6" data-testid={`row-campaign-${campaign.id}`}>
           <div className="min-w-0">
             <p className="truncate text-sm font-extrabold text-[#263044]" data-testid={`text-campaign-name-${campaign.id}`}>{campaign.nome}</p>
             <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.08em] text-[#99959a]">Criada em {formatDate(campaign.criado_em)}</p>
           </div>
           <div><StatusPill status={campaign.status} /></div>
+          <div><span className="text-sm font-bold tabular-nums text-[#263044]">{formatNumber(campaign.destinatarios_total)}</span><span className="mt-1 block font-mono text-[9px] uppercase text-[#aaa3a1] md:hidden">destinatários</span></div>
           <div><span className="text-sm font-bold tabular-nums text-[#42495b]">{formatNumber(campaign.enviados)}</span><span className="mt-1 block font-mono text-[9px] uppercase text-[#aaa3a1] md:hidden">enviados</span></div>
           <div><span className="text-sm font-bold tabular-nums text-[#42495b]">{formatNumber(campaign.entregues)}</span><span className="mt-1 block font-mono text-[9px] uppercase text-[#aaa3a1] md:hidden">entregues</span></div>
           <div className="col-span-2 border-t border-[#f0e9e0] pt-3 md:col-span-1 md:border-0 md:pt-0">
@@ -464,6 +469,8 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 function CampaignForm({
   campaign,
+  recipientSummary,
+  recipientSummaryError,
   onSaved,
   onSendTest,
   testPending,
@@ -471,6 +478,8 @@ function CampaignForm({
   testSent,
 }: {
   campaign?: Campaign;
+  recipientSummary?: CampaignRecipientSummary;
+  recipientSummaryError?: string | null;
   onSaved: (campaign: Campaign) => void;
   onSendTest?: () => void;
   testPending?: boolean;
@@ -495,6 +504,8 @@ function CampaignForm({
   const emailSubject = form.watch('assunto');
   const preheader = form.watch('preheader');
   const [uploadingBlockIds, setUploadingBlockIds] = useState<Set<string>>(() => new Set());
+  const [scheduleDraft, setScheduleDraft] = useState<CreateCampaignInput | null>(null);
+  const [scheduleConfirmation, setScheduleConfirmation] = useState('');
   const isUploadPending = uploadingBlockIds.size > 0;
 
   const handleUploadingChange = (blockId: string, uploading: boolean) => {
@@ -527,6 +538,14 @@ function CampaignForm({
     defaultsQuery.data?.teto_dia,
     form,
   ]);
+
+  const savePayload = (payload: CreateCampaignInput) => {
+    if (campaign) {
+      update.mutate({ campaignId: campaign.id, data: payload as UpdateCampaignInput }, { onSuccess: onSaved });
+    } else {
+      create.mutate({ data: payload }, { onSuccess: onSaved });
+    }
+  };
 
   const submit = (values: CampaignFormValues) => {
     if (isUploadPending) {
@@ -575,12 +594,19 @@ function CampaignForm({
       teste_enviado: values.teste_enviado,
       corpo,
     };
-    if (campaign) {
-      update.mutate({ campaignId: campaign.id, data: payload as UpdateCampaignInput }, { onSuccess: onSaved });
-    } else {
-      create.mutate({ data: payload as CreateCampaignInput }, { onSuccess: onSaved });
+    if (campaign && values.status === 'agendada' && campaign.status !== 'agendada') {
+      setScheduleDraft(payload as CreateCampaignInput);
+      setScheduleConfirmation('');
+      return;
     }
+    savePayload(payload as CreateCampaignInput);
   };
+
+  const recipientTotal = recipientSummary?.total;
+  const requiresTypedScheduleConfirmation = (recipientTotal ?? 0) > 5000;
+  const scheduleConfirmationReady =
+    recipientTotal != null &&
+    (!requiresTypedScheduleConfirmation || scheduleConfirmation.trim() === String(recipientTotal));
 
   const isPending = create.isPending || update.isPending;
   const error = create.error ?? update.error;
@@ -647,6 +673,31 @@ function CampaignForm({
       </section>
 
       {error && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-save-error"><div className="flex items-start gap-3"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{getErrorMessage(error, 'Não foi possível salvar a campanha.')}</span></div></div>}
+      {scheduleDraft && (
+        <div className="rounded-2xl border-2 border-[#d35f2a] bg-[#fff8ef] p-5 sm:p-6" role="dialog" aria-labelledby="schedule-confirmation-title" data-testid="dialog-schedule-confirmation">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e96527] text-[#fffdf9]"><Mail size={17} /></div>
+            <div>
+              <p className="section-kicker text-[#a64220]">Confirmação de agendamento</p>
+              <h3 id="schedule-confirmation-title" className="mt-2 text-lg font-extrabold text-[#263044]">Revise o tamanho do disparo antes de continuar.</h3>
+              <p className="mt-2 text-sm leading-6 text-[#6d7180]">Esta campanha vai enviar o e-mail para <strong className="text-2xl font-extrabold tabular-nums text-[#a64220]">{recipientTotal == null ? '…' : formatNumber(recipientTotal)}</strong> pessoas.</p>
+            </div>
+          </div>
+          {recipientSummaryError ? (
+            <p className="mt-5 flex items-center gap-2 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs text-[#a64220]"><CircleAlert size={14} /> {recipientSummaryError}</p>
+          ) : recipientTotal == null ? (
+            <p className="mt-5 flex items-center gap-2 rounded-xl border border-[#e5ddd0] bg-[#fffdf9] px-4 py-3 text-xs text-[#6d7180]"><LoaderCircle size={14} className="animate-spin text-[#d35f2a]" /> Consultando a lista de destinatários...</p>
+          ) : requiresTypedScheduleConfirmation ? (
+            <label className="mt-5 block text-xs font-bold text-[#565c6a]">Digite {formatNumber(recipientTotal)} para confirmar<input value={scheduleConfirmation} onChange={(event) => setScheduleConfirmation(event.target.value)} inputMode="numeric" className="field-control mt-2" placeholder={String(recipientTotal)} data-testid="input-schedule-confirmation" /></label>
+          ) : (
+            <p className="mt-5 rounded-xl border border-[#e5ddd0] bg-[#fffdf9] px-4 py-3 text-xs leading-5 text-[#6d7180]">Confira se a base foi importada corretamente. O agendamento não inicia um novo processamento desta lista.</p>
+          )}
+          <div className="mt-5 flex flex-col-reverse justify-end gap-3 sm:flex-row">
+            <button type="button" onClick={() => setScheduleDraft(null)} className="action-button action-button-secondary" data-testid="button-cancel-schedule-confirmation">Voltar</button>
+            <button type="button" onClick={() => { if (scheduleConfirmationReady && scheduleDraft) { setScheduleDraft(null); savePayload(scheduleDraft); } }} disabled={!scheduleConfirmationReady || isPending} className="action-button action-button-primary" data-testid="button-confirm-schedule">{isPending ? <><LoaderCircle size={16} className="animate-spin" /> Agendando...</> : <><CheckCircle2 size={16} /> Confirmar agendamento</>}</button>
+          </div>
+        </div>
+      )}
        <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row"><Link href={campaign ? `/campaigns/${campaign.id}` : '/'} className="action-button action-button-secondary" data-testid="link-cancel-campaign">Cancelar</Link><button type="submit" disabled={isPending || isUploadPending} className="action-button action-button-primary" data-testid="button-save-campaign">{isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando...</> : isUploadPending ? <><LoaderCircle size={16} className="animate-spin" /> Aguardando upload...</> : <><Save size={16} /> {isEditing ? 'Salvar alterações' : 'Criar campanha'}</>}</button></div>
     </form>
   );
@@ -694,8 +745,15 @@ function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
 }
 
 function ImportPanel({ campaignId }: { campaignId: string }) {
+  const queryClient = useQueryClient();
   const requestUpload = useRequestCampaignImportUploadUrl();
   const validateImport = useValidateCampaignImport();
+  const recipientSummaryQuery = useGetCampaignRecipientSummary(campaignId, {
+    query: {
+      enabled: Boolean(campaignId),
+      queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId),
+    },
+  });
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -704,6 +762,7 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
   const [importJobId, setImportJobId] = useState<string | null>(null);
   const [phase, setPhase] = useState<'idle' | 'requesting' | 'uploading' | 'processing'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [importConfirmed, setImportConfirmed] = useState(false);
   const importJobQuery = useGetCampaignImport(campaignId, importJobId ?? '', {
     query: {
       enabled: Boolean(importJobId),
@@ -719,6 +778,8 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
       setSummary(job.resultado);
       setImportJobId(null);
       setPhase('idle');
+      queryClient.invalidateQueries({ queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId) });
+      queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
       return;
     }
     if (job.status === 'erro') {
@@ -745,6 +806,7 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
     setError(null);
     setSummary(null);
     setImportJobId(null);
+    setImportConfirmed(false);
     setFile(nextFile);
   };
   const onDrop = (event: DragEvent<HTMLLabelElement>) => {
@@ -755,6 +817,15 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
   const validate = async () => {
     if (!file) {
       setError('Selecione um CSV antes de validar.');
+      return;
+    }
+    if (recipientSummaryQuery.isLoading || recipientSummaryQuery.isError) {
+      setError('Aguarde a consulta da lista de destinatários terminar antes de validar.');
+      return;
+    }
+    const existingRecipients = recipientSummaryQuery.data?.total ?? 0;
+    if (existingRecipients > 0 && !importConfirmed) {
+      setError('Confirme que a nova base deve ser somada aos destinatários atuais.');
       return;
     }
     setError(null);
@@ -776,6 +847,7 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
     }
   };
   const isBusy = phase !== 'idle';
+  const existingRecipients = recipientSummaryQuery.data?.total ?? 0;
   const job = importJobQuery.data;
   const progress = job?.total_linhas
     ? Math.min(100, Math.round((job.linhas_processadas / job.total_linhas) * 100))
@@ -802,9 +874,21 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
           <input ref={inputRef} id="campaign-csv" type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => chooseFile(event.target.files?.[0])} data-testid="input-import-csv" />
         </label>
       </div>
+      {file && existingRecipients > 0 && (
+        <div className="mt-5 flex flex-col gap-3 rounded-xl border-2 border-[#e8c56f] bg-[#fff7dc] px-4 py-4 text-sm leading-6 text-[#74561c] sm:flex-row sm:items-center sm:justify-between" role="alert" data-testid="status-existing-recipients-warning">
+          <p><strong>Esta campanha já contém {formatNumber(existingRecipients)} destinatários. A importação vai somar a eles.</strong></p>
+          <button type="button" onClick={() => setImportConfirmed(true)} disabled={importConfirmed} className="action-button action-button-secondary shrink-0 !border-[#d6b95c] !bg-[#fffdf1] !text-[#74561c] disabled:opacity-60" data-testid="button-confirm-import-sum">{importConfirmed ? <><CheckCircle2 size={14} /> Soma confirmada</> : 'Continuar e somar'}</button>
+        </div>
+      )}
+      {recipientSummaryQuery.isError && (
+        <div className="mt-5 flex items-start justify-between gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" data-testid="status-recipient-count-import-error">
+          <span>Não foi possível consultar os destinatários atuais. A validação fica bloqueada até essa contagem ser confirmada.</span>
+          <button type="button" onClick={() => recipientSummaryQuery.refetch()} className="font-bold underline" data-testid="button-retry-recipient-count">Tentar novamente</button>
+        </div>
+      )}
       <div className="mt-5 flex flex-col justify-between gap-4 border-t border-[#eee7dc] pt-5 sm:flex-row sm:items-center">
         <label className="flex items-start gap-3 text-xs text-[#626876]"><input type="checkbox" checked={deduplicatePhone} onChange={(event) => setDeduplicatePhone(event.target.checked)} className="mt-0.5 accent-[#e96527]" data-testid="checkbox-deduplicate-phone" /><span><strong className="block text-[#263044]">Deduplicar por telefone</strong><span className="mt-1 block leading-5">Além do e-mail, considera o telefone na validação.</span></span></label>
-        <button onClick={validate} disabled={!file || isBusy} className="action-button action-button-primary" data-testid="button-validate-import">{isBusy ? <><LoaderCircle size={16} className="animate-spin" /> {phaseLabel}</> : <><FileCheck2 size={16} /> {phaseLabel}</>}</button>
+         <button onClick={validate} disabled={!file || isBusy || recipientSummaryQuery.isLoading || recipientSummaryQuery.isError || (existingRecipients > 0 && !importConfirmed)} className="action-button action-button-primary" data-testid="button-validate-import">{isBusy ? <><LoaderCircle size={16} className="animate-spin" /> {phaseLabel}</> : <><FileCheck2 size={16} /> {phaseLabel}</>}</button>
       </div>
       {phase === 'processing' && job && <div className="mt-5 rounded-xl border border-[#d9e3e0] bg-[#f1f7f5] p-4" data-testid="import-progress">
         <div className="flex items-center justify-between gap-3 text-xs font-bold text-[#247b79]">
@@ -818,6 +902,91 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
       </div>}
       {error && <div className="mt-5 flex items-start gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-import-error"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{error}</span><button onClick={() => setError(null)} className="ml-auto rounded p-1" aria-label="Fechar erro de importação" data-testid="button-dismiss-import-error"><X size={14} /></button></div>}
       {summary && <ImportSummary summary={summary} />}
+    </section>
+  );
+}
+
+function RecipientSummaryPanel({
+  summary,
+  loading,
+  onClear,
+  confirmClear,
+  onCancelClear,
+  canClear,
+  clearPending,
+  error,
+  clearError,
+}: {
+  summary?: CampaignRecipientSummary;
+  loading: boolean;
+  onClear: () => void;
+  confirmClear: boolean;
+  onCancelClear: () => void;
+  canClear: boolean;
+  clearPending: boolean;
+  error?: string | null;
+  clearError?: string | null;
+}) {
+  const statusRows = [
+    { key: 'pendente', label: 'Pendente', tone: 'text-[#9b6b17]', dot: 'bg-[#d5a42e]' },
+    { key: 'enviado', label: 'Enviado', tone: 'text-[#247b79]', dot: 'bg-[#247b79]' },
+    { key: 'entregue', label: 'Entregue', tone: 'text-[#417846]', dot: 'bg-[#63a76f]' },
+    { key: 'bloqueado', label: 'Bloqueado', tone: 'text-[#8e3a20]', dot: 'bg-[#d35f2a]' },
+    { key: 'suprimido', label: 'Suprimido', tone: 'text-[#6d7180]', dot: 'bg-[#8f9299]' },
+    { key: 'erro', label: 'Erro', tone: 'text-[#a64220]', dot: 'bg-[#bd4f26]' },
+  ] as const;
+  const maxRecency = Math.max(...(summary?.recencia.map((item) => item.quantidade) ?? [1]), 1);
+
+  return (
+    <section className="panel sticky top-4 z-10 p-5 shadow-[0_12px_34px_rgba(38,48,68,.08)] sm:p-7" data-testid="panel-recipient-summary">
+      <div className="flex flex-col justify-between gap-4 border-b border-[#eee7dc] pb-5 sm:flex-row sm:items-start">
+        <div>
+          <p className="section-kicker">Gestão da base</p>
+          <h2 className="mt-2 text-xl font-extrabold tracking-[-.05em] text-[#263044]">Destinatários desta campanha</h2>
+          <p className="mt-1 text-xs text-[#7d7e87]">A contagem considera a lista principal, sem os destinatários de lembrete.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl border border-[#d9e3e0] bg-[#f1f7f5] px-4 py-3 text-right">
+            <span className="block font-mono text-[9px] uppercase tracking-[.12em] text-[#6d7f7c]">Total</span>
+            <strong className="mt-1 block text-3xl font-extrabold tabular-nums tracking-[-.07em] text-[#247b79]" data-testid="text-recipient-total">{loading ? '…' : error ? '—' : formatNumber(summary?.total)}</strong>
+          </div>
+          <button type="button" onClick={onClear} disabled={clearPending || loading || !canClear || !summary?.total} className="action-button action-button-secondary !px-3 !text-[#a64220] disabled:opacity-50" title={canClear ? 'Limpar destinatários' : 'A campanha está em operação'} data-testid="button-clear-recipients"><Trash2 size={15} /> <span className="hidden sm:inline">{confirmClear ? 'Confirmar limpeza' : 'Limpar lista'}</span></button>
+        </div>
+      </div>
+      {error ? (
+        <div className="mt-5 flex items-start gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-recipient-summary-error"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{error}</span></div>
+      ) : loading ? (
+        <div className="mt-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="skeleton h-16 rounded-xl" />)}</div>
+      ) : (
+        <>
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {statusRows.map((row) => (
+              <div key={row.key} className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3" data-testid={`recipient-status-${row.key}`}>
+                <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${row.dot}`} /><span className="text-[11px] font-bold text-[#6d7180]">{row.label}</span></div>
+                <strong className={`mt-2 block text-xl font-extrabold tabular-nums tracking-[-.05em] ${row.tone}`}>{formatNumber(summary?.status[row.key])}</strong>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4">
+            <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-extrabold text-[#263044]">Recência da base</h3><p className="mt-1 text-xs text-[#7d7e87]">Distribuição por data da última compra.</p></div><Clock3 size={16} className="text-[#247b79]" /></div>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {summary?.recencia.map((bucket) => (
+                <div key={bucket.faixa}>
+                  <div className="mb-1.5 flex justify-between gap-3 font-mono text-[9px] uppercase tracking-[.08em] text-[#7d7e87]"><span>{bucket.faixa}</span><span>{formatNumber(bucket.quantidade)}</span></div>
+                  <div className="h-2 overflow-hidden rounded-full bg-[#e6ded3]"><div className="h-full rounded-full bg-[#247b79] transition-[width] duration-500" style={{ width: `${Math.max(bucket.quantidade > 0 ? 4 : 0, (bucket.quantidade / maxRecency) * 100)}%` }} /></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+      {clearError && <div className="mt-4 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs text-[#a64220]" data-testid="status-clear-recipients-error">{clearError}</div>}
+      {confirmClear && (
+        <div className="mt-4 flex flex-col gap-3 rounded-xl border-2 border-[#efc9ba] bg-[#fff3ee] px-4 py-4 text-xs leading-5 text-[#8e3a20] sm:flex-row sm:items-center sm:justify-between" role="alert" data-testid="status-clear-recipients-confirmation">
+          <p><strong>Remover os {formatNumber(summary?.total)} destinatários desta campanha?</strong> Esta ação não pode ser desfeita.</p>
+          <button type="button" onClick={onCancelClear} className="action-button action-button-secondary shrink-0 !px-3" data-testid="button-cancel-clear-recipients">Cancelar</button>
+        </div>
+      )}
     </section>
   );
 }
@@ -895,13 +1064,35 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
   const [, setLocation] = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmClearRecipients, setConfirmClearRecipients] = useState(false);
   const campaignQuery = useGetCampaign(campaignId, { query: { enabled: Boolean(campaignId), queryKey: getGetCampaignQueryKey(campaignId) } });
+  const recipientSummaryQuery = useGetCampaignRecipientSummary(campaignId, {
+    query: { enabled: Boolean(campaignId), queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId) },
+  });
   const deleteCampaign = useDeleteCampaign();
+  const clearRecipients = useClearCampaignRecipients();
   const updateCampaign = useUpdateCampaign();
   const sendTest = useSendCampaignTest();
   const [testSent, setTestSent] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const campaign = campaignQuery.data;
+
+  const clearCurrentRecipients = () => {
+    if (!confirmClearRecipients) {
+      setConfirmClearRecipients(true);
+      return;
+    }
+    clearRecipients.mutate(
+      { campaignId },
+      {
+        onSuccess: () => {
+          setConfirmClearRecipients(false);
+          queryClient.invalidateQueries({ queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId) });
+          queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+        },
+      },
+    );
+  };
 
   const deleteCurrent = () => {
     deleteCampaign.mutate({ campaignId }, {
@@ -968,8 +1159,21 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
         </div>
         {deleteCampaign.isError && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm text-[#a64220]" data-testid="status-delete-error">Não foi possível excluir a campanha. Tente novamente.</div>}
          {operationError && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm text-[#a64220]" data-testid="status-campaign-operation-error">{operationError}</div>}
+          <RecipientSummaryPanel
+            summary={recipientSummaryQuery.data}
+            loading={recipientSummaryQuery.isLoading}
+            onClear={clearCurrentRecipients}
+            confirmClear={confirmClearRecipients}
+            onCancelClear={() => setConfirmClearRecipients(false)}
+            canClear={campaign.status !== 'agendada' && campaign.status !== 'enviando'}
+            clearPending={clearRecipients.isPending}
+            error={recipientSummaryQuery.error ? getErrorMessage(recipientSummaryQuery.error, 'Não foi possível carregar o resumo dos destinatários.') : null}
+            clearError={clearRecipients.error ? getErrorMessage(clearRecipients.error, 'Não foi possível limpar os destinatários.') : null}
+          />
           <CampaignForm
             campaign={campaign}
+             recipientSummary={recipientSummaryQuery.data}
+             recipientSummaryError={recipientSummaryQuery.error ? getErrorMessage(recipientSummaryQuery.error, 'Não foi possível carregar o resumo dos destinatários.') : null}
             onSaved={(updated) => {
               queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
               queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });

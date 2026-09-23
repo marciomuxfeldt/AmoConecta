@@ -66,9 +66,46 @@ export interface CampaignListItem {
   entregues: number;
   abertos: number;
   clicados: number;
+  /** @minimum 0 */
+  destinatarios_total: number;
   /** @nullable */
   agendada_para: string | null;
   criado_em: string;
+}
+
+export interface RecipientStatusSummary {
+  /** @minimum 0 */
+  pendente: number;
+  /** @minimum 0 */
+  enviado: number;
+  /** @minimum 0 */
+  entregue: number;
+  /** @minimum 0 */
+  bloqueado: number;
+  /** @minimum 0 */
+  suprimido: number;
+  /** @minimum 0 */
+  erro: number;
+}
+
+export interface RecipientRecencyBucket {
+  faixa: string;
+  /** @minimum 0 */
+  quantidade: number;
+}
+
+export interface CampaignRecipientSummary {
+  campanha_id: string;
+  /** @minimum 0 */
+  total: number;
+  status: RecipientStatusSummary;
+  recencia: RecipientRecencyBucket[];
+}
+
+export interface CampaignRecipientsCleared {
+  campanha_id: string;
+  /** @minimum 0 */
+  destinatarios_removidos: number;
 }
 
 export type CampaignStatus = typeof CampaignStatus[keyof typeof CampaignStatus];

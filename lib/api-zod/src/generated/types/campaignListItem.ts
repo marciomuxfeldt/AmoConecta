@@ -15,6 +15,8 @@ export interface CampaignListItem {
   entregues: number;
   abertos: number;
   clicados: number;
+  /** @minimum 0 */
+  destinatarios_total: number;
   /** @nullable */
   agendada_para: Date | null;
   criado_em: Date;

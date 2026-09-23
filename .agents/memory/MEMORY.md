@@ -6,3 +6,4 @@
 - [Import count semantics](import-count-semantics.md) — “Salvos” counts only new records; existing and in-file duplicates are separate outcomes.
 - [E-mail HTML sanitization](email-template-sanitization.md) — allowlisted rich-text sanitizers must preserve both opening and closing tags.
 - [PostgREST worker lease](postgrest-advisory-lock.md) — separate RPC requests need an atomic tokenized lease with a short expiry.
+- [Orval response naming](orval-response-naming.md) — response components must avoid names Orval derives from operation IDs to prevent generated barrel collisions.

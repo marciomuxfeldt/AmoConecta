@@ -322,6 +322,90 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/recipients/summary:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getCampaignRecipientSummary
+      tags: [campaigns]
+      summary: Consulta o resumo de destinatários de uma campanha
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Resumo de destinatários
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignRecipientSummary"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao consultar os destinatários
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/recipients:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: clearCampaignRecipients
+      tags: [campaigns]
+      summary: Limpa os destinatários de uma campanha
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Destinatários removidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignRecipientsCleared"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Campanha em operação e não pode ser limpa
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao limpar os destinatários
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /campaigns/{campaignId}/assets/upload-url:
     parameters:
       - name: campaignId
@@ -626,6 +710,9 @@ components:
           type: integer
         clicados:
           type: integer
+        destinatarios_total:
+          type: integer
+          minimum: 0
         agendada_para:
           type: ["string", "null"]
           format: date-time
@@ -640,8 +727,66 @@ components:
         - entregues
         - abertos
         - clicados
+        - destinatarios_total
         - agendada_para
         - criado_em
+    RecipientStatusSummary:
+      type: object
+      properties:
+        pendente:
+          type: integer
+          minimum: 0
+        enviado:
+          type: integer
+          minimum: 0
+        entregue:
+          type: integer
+          minimum: 0
+        bloqueado:
+          type: integer
+          minimum: 0
+        suprimido:
+          type: integer
+          minimum: 0
+        erro:
+          type: integer
+          minimum: 0
+      required: [pendente, enviado, entregue, bloqueado, suprimido, erro]
+    RecipientRecencyBucket:
+      type: object
+      properties:
+        faixa:
+          type: string
+        quantidade:
+          type: integer
+          minimum: 0
+      required: [faixa, quantidade]
+    CampaignRecipientSummary:
+      type: object
+      properties:
+        campanha_id:
+          type: string
+          format: uuid
+        total:
+          type: integer
+          minimum: 0
+        status:
+          $ref: "#/components/schemas/RecipientStatusSummary"
+        recencia:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecipientRecencyBucket"
+      required: [campanha_id, total, status, recencia]
+    CampaignRecipientsCleared:
+      type: object
+      properties:
+        campanha_id:
+          type: string
+          format: uuid
+        destinatarios_removidos:
+          type: integer
+          minimum: 0
+      required: [campanha_id, destinatarios_removidos]
     CampaignStatus:
       type: string
       enum: [rascunho, agendada, enviando, pausada, concluida]
