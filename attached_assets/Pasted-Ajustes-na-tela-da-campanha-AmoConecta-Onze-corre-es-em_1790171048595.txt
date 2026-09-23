@@ -1,0 +1,81 @@
+Ajustes na tela da campanha — AmoConecta
+
+Onze correções, em ordem de gravidade. Implemente todas.
+
+Travas que hoje podem ser burladas
+1. teste_enviado é uma caixa que o operador marca
+
+A regra é: não se agenda campanha sem ter enviado um teste de verdade. Hoje basta clicar numa caixa, e o rótulo ainda convida a isso — "Registra que uma mensagem de teste foi disparada fora deste fluxo".
+
+Torne o campo somente leitura. Ele só é marcado pelo sistema, quando um envio de teste é efetivamente concluído com sucesso. Mostre como indicador: "Teste enviado em DD/MM às HH:MM" ou "Nenhum teste enviado ainda". Nunca como caixa marcável, nem no frontend nem pela API.
+
+2. O status é um campo editável
+
+Hoje existe um seletor de status com as opções de rascunho, agendada, enviando, pausada e concluída. Isso permite pular o agendamento, a confirmação por digitação acima de 5.000 destinatários e a checagem do teste obrigatório — basta escolher "enviando" na lista.
+
+O status passa a ser somente leitura na tela. Ele muda apenas por ações explícitas, cada uma com suas validações: Agendar, Pausar, Retomar, Cancelar. Bloqueie também no backend qualquer alteração direta do campo status por requisição de atualização de campanha.
+
+Padrões perigosos
+3. Tetos vazios significam "sem limite"
+
+teto_hora e teto_dia nascem vazios, exibindo "Sem limite". Uma campanha criada assim dispara na velocidade máxima do worker, sem rampa de aquecimento. A dica sugere 100 e 1.000, mas sugestão que não preenche nada não protege ninguém.
+
+Preencha os dois com os valores sugeridos em toda campanha nova. O operador pode aumentar conscientemente; o que não pode é herdar "sem limite" por omissão.
+
+4. O agendamento aceita data no passado
+
+O campo está com 21/09/2026 12:00, dois dias atrás. Agendar para o passado dispara imediatamente, que é o oposto de agendar.
+
+Valide no frontend e no backend: recuse data e hora anteriores ao momento atual, com mensagem clara.
+
+5. O lembrete padrão está em 24 horas
+
+A regra definida é entre 48 e 72 horas. Vinte e quatro horas é cedo demais — muita gente ainda nem abriu o primeiro e-mail, e o reenvio rápido aumenta marcação de spam.
+
+Mude o padrão para 48 e valide o intervalo aceito entre 24 e 168 horas.
+
+Campos que não servem para nada
+6. Valor e validade do crédito não chegam ao e-mail
+
+A campanha guarda valor_credito e validade_credito, mas o editor só oferece a variável {{nome}}. Na prática o operador digita "R$5" no texto à mão, e nada garante que bate com o valor cadastrado. São dois campos que não fazem nada.
+
+Disponibilize como variáveis no corpo e no assunto:
+
+{{valor_credito}} — formatado como moeda brasileira, por exemplo R$ 5,00
+{{validade_credito}} — formatado como data brasileira, por exemplo 30/09/2026
+
+Mostre as três variáveis disponíveis na barra do editor, não apenas {{nome}}. E avise na prévia quando uma variável usada no texto estiver com o campo correspondente vazio.
+
+Validações que faltam
+7. Assunto do lembrete igual ao principal
+
+A regra é que o assunto do lembrete seja obrigatoriamente diferente do original — assunto repetido é o que mais gera marcação de spam no reenvio.
+
+Se o lembrete estiver ativo, valide que os dois assuntos são diferentes antes de permitir o agendamento.
+
+8. Destino do clique vazio
+
+Deep link e landing page podem ficar em branco. Uma campanha com botão sem destino é um disparo desperdiçado.
+
+Se o corpo do e-mail contiver ao menos um bloco de botão, exija os dois campos preenchidos antes de agendar.
+
+Interface
+9. O painel de destinatários está no fim da página
+
+O total de destinatários, a quebra por status, os sinais de reputação e a distribuição de recência aparecem depois do editor e da importação. O operador monta o e-mail inteiro antes de descobrir para quantas pessoas vai.
+
+Mova esse painel para o topo, antes da seção de identidade. É a informação que decide se a campanha deve ser disparada.
+
+10. Os contadores não se atualizam sozinhos
+
+O painel de rampa diz "contagem atualizada ao abrir". Durante um envio em andamento, o operador fica olhando um número parado e precisa recarregar a página para saber o que está acontecendo.
+
+Enquanto a campanha estiver em enviando, atualize os contadores e os sinais de reputação automaticamente a cada 15 segundos. Quando estiver em qualquer outro estado, mantenha como está.
+
+11. A versão em texto puro começa com lixo
+
+O preenchimento invisível do preheader — os &zwnj;&nbsp; repetidos — está sendo incluído também na versão de texto puro do e-mail. Em clientes que só leem texto, isso aparece como uma sequência de caracteres estranhos antes do conteúdo.
+
+O preenchimento deve existir apenas na versão HTML. Na de texto, inclua o preheader sem os caracteres de espaçamento.
+
+Ao final, me diga se alguma dessas mudanças exige migração no banco, e me entregue o SQL em bloco de código para eu aplicar à mão.
