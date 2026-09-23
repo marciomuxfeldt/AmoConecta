@@ -285,7 +285,6 @@ function emailPayload(
     html,
     ...(replyTo(campaign) ? { reply_to: replyTo(campaign) } : {}),
     headers: {
-      "Idempotency-Key": key,
       "List-Unsubscribe": `<${unsubscribe}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     },

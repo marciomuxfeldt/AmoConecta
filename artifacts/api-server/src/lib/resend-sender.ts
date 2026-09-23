@@ -165,7 +165,13 @@ async function sendOne(
   apiKey: string,
   message: PreparedResendMessage,
 ): Promise<ResendResult> {
-  const { _idempotencyKey, ...payload } = message;
+  const { _idempotencyKey, headers: messageHeaders, ...messagePayload } = message;
+  const headers = Object.fromEntries(
+    Object.entries(messageHeaders).filter(
+      ([name]) => name.toLowerCase() !== "idempotency-key",
+    ),
+  );
+  const payload = { ...messagePayload, headers };
   const response = await resendRateLimiter.run(
     () =>
       fetch("https://api.resend.com/emails", {

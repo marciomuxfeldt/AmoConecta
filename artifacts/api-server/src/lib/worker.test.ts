@@ -48,7 +48,7 @@ test("sends one deterministic idempotency key per Resend request", async () => {
       to: ["primeira@example.com"],
       subject: "Oferta",
       html: "<p>Olá</p>",
-      headers: {},
+      headers: { "X-Internal-Test": "preserve", "Idempotency-Key": "must-not-leak" },
       _idempotencyKey: idempotencyKey("campaign-1", "primeira@example.com", false),
     },
     {
@@ -82,6 +82,11 @@ test("sends one deterministic idempotency key per Resend request", async () => {
   assert.equal(keys[0], messages[0]._idempotencyKey);
   assert.equal(keys[1], messages[1]._idempotencyKey);
   assert.equal(keys[5], idempotencyKey("campaign-1", "terceira@example.com", false));
+  const firstPayload = JSON.parse(String(calls[0].init.body)) as {
+    headers: Record<string, string>;
+  };
+  assert.equal(firstPayload.headers["Idempotency-Key"], undefined);
+  assert.equal(firstPayload.headers["X-Internal-Test"], "preserve");
   assert.ok(
     calls.every((call) =>
       /primeira|segunda|terceira/u.test(String(call.init.body)),
