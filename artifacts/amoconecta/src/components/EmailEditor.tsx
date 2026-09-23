@@ -33,6 +33,7 @@ type EmailEditorProps = {
   onChange: (blocks: EmailBlock[]) => void;
   campaignId?: string;
   subject: string;
+  disabled?: boolean;
   onUploadingChange?: (blockId: string, uploading: boolean) => void;
   onSendTest?: () => void;
   testPending?: boolean;
@@ -201,9 +202,11 @@ function insertLink() {
 function RichTextBlock({
   block,
   onChange,
+  disabled = false,
 }: {
   block: Extract<EmailBlock, { type: "text" }>;
   onChange: (html: string) => void;
+  disabled?: boolean;
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
   const initialHtmlRef = useRef(sanitizeRichTextHtml(block.html));
@@ -218,11 +221,12 @@ function RichTextBlock({
     }
   };
   const syncState = () => {
-    if (editorRef.current) {
+    if (!disabled && editorRef.current) {
       onChangeRef.current(sanitizeRichTextHtml(editorRef.current.innerHTML));
     }
   };
   const command = (name: string, value?: string) => {
+    if (disabled) return;
     editorRef.current?.focus();
     document.execCommand(name, false, value);
     syncState();
@@ -232,19 +236,19 @@ function RichTextBlock({
     <div className="overflow-hidden rounded-[1rem] border border-[#ded5c8] bg-[#fffdf9] shadow-[0_5px_16px_rgba(38,48,68,.035)]">
       <div className="flex flex-wrap items-center gap-1 border-b border-[#eee7dc] bg-[#f8f3ec] px-2.5 py-2">
         <span className="mr-1 px-1.5 font-mono text-[9px] uppercase tracking-[.14em] text-[#99959a]">Formatação</span>
-        <button type="button" onMouseDown={(event) => { event.preventDefault(); command("bold"); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044]" aria-label="Aplicar negrito" title="Negrito" data-testid={`button-bold-${block.id}`}><Bold size={14} /></button>
-        <button type="button" onMouseDown={(event) => { event.preventDefault(); command("italic"); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044]" aria-label="Aplicar itálico" title="Itálico" data-testid={`button-italic-${block.id}`}><Italic size={14} /></button>
-        <button type="button" onMouseDown={(event) => { event.preventDefault(); insertLink(); if (editorRef.current) onChange(sanitizeRichTextHtml(editorRef.current.innerHTML)); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044]" aria-label="Adicionar link ao texto" title="Adicionar link" data-testid={`button-link-${block.id}`}><Link2 size={14} /></button>
+        <button type="button" disabled={disabled} onMouseDown={(event) => { event.preventDefault(); command("bold"); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Aplicar negrito" title="Negrito" data-testid={`button-bold-${block.id}`}><Bold size={14} /></button>
+        <button type="button" disabled={disabled} onMouseDown={(event) => { event.preventDefault(); command("italic"); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Aplicar itálico" title="Itálico" data-testid={`button-italic-${block.id}`}><Italic size={14} /></button>
+        <button type="button" disabled={disabled} onMouseDown={(event) => { event.preventDefault(); insertLink(); if (editorRef.current) onChange(sanitizeRichTextHtml(editorRef.current.innerHTML)); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Adicionar link ao texto" title="Adicionar link" data-testid={`button-link-${block.id}`}><Link2 size={14} /></button>
         <span className="ml-auto font-mono text-[9px] uppercase tracking-[.1em] text-[#99959a]">Use {"{{nome}}"} na saudação</span>
       </div>
       <div
         ref={setEditorRef}
-        contentEditable
+        contentEditable={!disabled}
         suppressContentEditableWarning
         onInput={syncState}
         onBlur={syncState}
         aria-label="Conteúdo do bloco de texto"
-        className="min-h-28 px-4 py-4 text-sm leading-6 text-[#42495b] outline-none empty:before:text-[#a7a7aa] empty:before:content-['Escreva_a_mensagem...'] focus:bg-[#fffefa]"
+        className={`min-h-28 px-4 py-4 text-sm leading-6 text-[#42495b] outline-none empty:before:text-[#a7a7aa] empty:before:content-['Escreva_a_mensagem...'] focus:bg-[#fffefa] ${disabled ? "bg-[#f8f3ec] opacity-75" : ""}`}
         data-testid={`editor-text-${block.id}`}
       />
     </div>
@@ -253,7 +257,10 @@ function RichTextBlock({
 
 const MemoizedRichTextBlock = memo(
   RichTextBlock,
-  (previous, next) => previous.block.id === next.block.id && previous.onChange === next.onChange,
+  (previous, next) =>
+    previous.block.id === next.block.id &&
+    previous.onChange === next.onChange &&
+    previous.disabled === next.disabled,
 );
 
 function BlockCard({
@@ -269,6 +276,7 @@ function BlockCard({
   campaignId,
   resetKey,
   onUploadingChange,
+  disabled = false,
 }: {
   block: EmailBlock;
   index: number;
@@ -282,6 +290,7 @@ function BlockCard({
   campaignId?: string;
   resetKey: string;
   onUploadingChange?: (blockId: string, uploading: boolean) => void;
+  disabled?: boolean;
 }) {
   const upload = useRequestCampaignAssetUploadUrl();
   const [imageUpload, setImageUpload] = useState<ImageUploadState>(idleImageUploadState);
@@ -305,7 +314,9 @@ function BlockCard({
     };
   }, [imageUpload.previewUrl]);
 
-  const update = (next: EmailBlock) => onChange(updateBlock(blocks, block.id, () => next));
+  const update = (next: EmailBlock) => {
+    if (!disabled) onChange(updateBlock(blocks, block.id, () => next));
+  };
   const updateText = useMemo(
     () => (html: string) => {
       const currentBlock = blocksRef.current.find((candidate) => candidate.id === block.id);
@@ -318,7 +329,7 @@ function BlockCard({
   );
   const uploadImage = async (selectedFile?: File) => {
     const file = selectedFile ?? retryFileRef.current;
-    if (!file || block.type !== "image") return;
+    if (disabled || !file || block.type !== "image") return;
     if (!campaignId) {
       setImageUpload({ ...idleImageUploadState, phase: "error", error: "Salve a campanha antes de enviar uma imagem." });
       return;
@@ -378,25 +389,25 @@ function BlockCard({
 
   return (
     <div
-      draggable
-      onDragStart={onDragStart}
+      draggable={!disabled}
+      onDragStart={disabled ? undefined : onDragStart}
       onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => { event.preventDefault(); onDrop(); }}
-      onDragEnd={onDragEnd}
+      onDrop={(event) => { event.preventDefault(); if (!disabled) onDrop(); }}
+      onDragEnd={disabled ? undefined : onDragEnd}
       aria-label={`Bloco ${index + 1}: ${blockLabels[block.type]}`}
       className={`group rounded-[1.1rem] border bg-[#fbf9f5] p-3.5 transition-[border-color,box-shadow,transform] duration-200 ${dragging ? "border-[#e96527] shadow-[0_0_0_3px_rgba(233,101,39,.14),0_12px_24px_rgba(38,48,68,.08)]" : "border-[#e5ddd0] hover:-translate-y-px hover:border-[#d4c7b7] hover:shadow-[0_8px_20px_rgba(38,48,68,.045)]"}`}
       data-testid={`email-block-${block.type}-${index}`}
     >
       <div className="mb-3.5 flex items-center gap-2">
-        <button type="button" className="focus-ring cursor-grab rounded-lg p-1.5 text-[#92939a] transition-colors hover:bg-[#eee7dc] hover:text-[#263044] active:cursor-grabbing" aria-label={`Arrastar bloco ${index + 1}, ${blockLabels[block.type]}`} aria-grabbed={dragging} title="Arrastar para reordenar" data-testid={`button-drag-${block.id}`}><GripVertical size={16} /></button>
+        <button type="button" disabled={disabled} className="focus-ring cursor-grab rounded-lg p-1.5 text-[#92939a] transition-colors hover:bg-[#eee7dc] hover:text-[#263044] active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Arrastar bloco ${index + 1}, ${blockLabels[block.type]}`} aria-grabbed={dragging} title="Arrastar para reordenar" data-testid={`button-drag-${block.id}`}><GripVertical size={16} /></button>
         <div className="flex h-8 w-8 items-center justify-center rounded-[.65rem] bg-[#d7ef56] text-[#263044] shadow-[2px_2px_0_rgba(233,101,39,.35)]">
           {block.type === "text" ? <Type size={14} /> : block.type === "image" ? <ImagePlus size={14} /> : block.type === "button" ? <MousePointer2 size={14} /> : <Minus size={14} />}
         </div>
         <div className="min-w-0"><div className="flex items-center gap-2"><p className="text-xs font-extrabold text-[#263044]">{blockLabels[block.type]}</p><span className="font-mono text-[9px] text-[#b0a9a1]">{String(index + 1).padStart(2, "0")}</span></div><p className="mt-0.5 text-[10px] text-[#92939a]">{blockDescriptions[block.type]}</p></div>
-        <button type="button" onClick={onRemove} className="focus-ring ml-auto rounded-lg p-2 text-[#a64220] opacity-75 transition-colors hover:bg-[#fff0e9] hover:opacity-100" aria-label={`Remover bloco ${index + 1}, ${blockLabels[block.type]}`} title="Remover bloco" data-testid={`button-remove-${block.id}`}><Trash2 size={14} /></button>
+        <button type="button" disabled={disabled} onClick={onRemove} className="focus-ring ml-auto rounded-lg p-2 text-[#a64220] opacity-75 transition-colors hover:bg-[#fff0e9] hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Remover bloco ${index + 1}, ${blockLabels[block.type]}`} title="Remover bloco" data-testid={`button-remove-${block.id}`}><Trash2 size={14} /></button>
       </div>
 
-      {block.type === "text" && <MemoizedRichTextBlock key={`${block.id}:${resetKey}`} block={block} onChange={updateText} />}
+      {block.type === "text" && <MemoizedRichTextBlock key={`${block.id}:${resetKey}`} block={block} onChange={updateText} disabled={disabled} />}
 
       {block.type === "image" && (
         <div className="space-y-3">
@@ -412,19 +423,19 @@ function BlockCard({
           ) : block.src ? <div className="relative overflow-hidden rounded-xl border border-[#e5ddd0] bg-white"><img src={block.src} alt={block.alt} className="max-h-56 w-full object-contain" /><span className="absolute bottom-2 left-2 rounded-full bg-[#263044]/85 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[.08em] text-[#fbf9f5]">Imagem pronta</span></div> : <div className="rounded-xl border border-dashed border-[#d8cdbd] bg-[#f8f3ec] px-4 py-9 text-center"><ImagePlus size={20} className="mx-auto mb-2 text-[#c3b6a7]" /><p className="text-xs font-bold text-[#6d7180]">Nenhuma imagem adicionada</p><p className="mt-1 text-[10px] text-[#99959a]">JPG, PNG, GIF ou WEBP</p></div>}
           {imageUpload.warning && <p className="rounded-lg border border-[#f1dfb8] bg-[#fff9e9] px-3 py-2 text-xs text-[#8b671c]" role="status">{imageUpload.warning}</p>}
           <div className="grid gap-3 sm:grid-cols-2">
-             <label className="action-button action-button-secondary focus-within:ring-2 focus-within:ring-[#d7ef56] focus-within:ring-offset-2 cursor-pointer text-center"><ImagePlus size={14} /> {imageUpload.phase === "error" ? "Escolher outra imagem" : "Escolher imagem"}<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="sr-only" disabled={imageUpload.phase === "processing" || imageUpload.phase === "uploading" || upload.isPending} onChange={(event) => { void uploadImage(event.target.files?.[0]); event.currentTarget.value = ""; }} data-testid={`input-image-upload-${block.id}`} /></label>
-             {imageUpload.phase === "error" ? <button type="button" onClick={() => { void uploadImage(); }} className="action-button action-button-secondary !border-[#efc9ba] !text-[#a64220]" data-testid={`button-retry-image-upload-${block.id}`}><RefreshCw size={14} /> Tentar novamente</button> : <div />}
-            <div><label htmlFor={`image-alt-${block.id}`} className="field-label">Texto alternativo</label><input id={`image-alt-${block.id}`} value={block.alt} onChange={(event) => update({ ...block, alt: event.target.value.slice(0, 160) })} className="field-control" placeholder="Descreva a imagem" aria-label="Texto alternativo da imagem" data-testid={`input-image-alt-${block.id}`} /></div>
+             <label className="action-button action-button-secondary focus-within:ring-2 focus-within:ring-[#d7ef56] focus-within:ring-offset-2 cursor-pointer text-center"><ImagePlus size={14} /> {imageUpload.phase === "error" ? "Escolher outra imagem" : "Escolher imagem"}<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="sr-only" disabled={disabled || imageUpload.phase === "processing" || imageUpload.phase === "uploading" || upload.isPending} onChange={(event) => { void uploadImage(event.target.files?.[0]); event.currentTarget.value = ""; }} data-testid={`input-image-upload-${block.id}`} /></label>
+             {imageUpload.phase === "error" ? <button type="button" disabled={disabled} onClick={() => { void uploadImage(); }} className="action-button action-button-secondary !border-[#efc9ba] !text-[#a64220] disabled:cursor-not-allowed disabled:opacity-40" data-testid={`button-retry-image-upload-${block.id}`}><RefreshCw size={14} /> Tentar novamente</button> : <div />}
+            <div><label htmlFor={`image-alt-${block.id}`} className="field-label">Texto alternativo</label><input id={`image-alt-${block.id}`} disabled={disabled} value={block.alt} onChange={(event) => update({ ...block, alt: event.target.value.slice(0, 160) })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Descreva a imagem" aria-label="Texto alternativo da imagem" data-testid={`input-image-alt-${block.id}`} /></div>
           </div>
-          <div><label htmlFor={`image-href-${block.id}`} className="field-label">Link da imagem <span className="font-normal text-[#99959a]">· opcional</span></label><input id={`image-href-${block.id}`} value={block.href ?? ""} onChange={(event) => update({ ...block, href: event.target.value })} className="field-control" placeholder="https://..." aria-label="Link opcional da imagem" data-testid={`input-image-link-${block.id}`} /></div>
+        <div><label htmlFor={`image-href-${block.id}`} className="field-label">Link da imagem <span className="font-normal text-[#99959a]">· opcional</span></label><input id={`image-href-${block.id}`} disabled={disabled} value={block.href ?? ""} onChange={(event) => update({ ...block, href: event.target.value })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="https://..." aria-label="Link opcional da imagem" data-testid={`input-image-link-${block.id}`} /></div>
            {imageUpload.phase === "error" && imageUpload.error && <p className="rounded-lg border border-[#efc9ba] bg-[#fff0e9] px-3 py-2 text-xs text-[#a64220]" role="alert">{imageUpload.error}</p>}
         </div>
       )}
 
       {block.type === "button" && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <div><label htmlFor={`button-label-${block.id}`} className="field-label">Texto do botão</label><input id={`button-label-${block.id}`} value={block.label} onChange={(event) => update({ ...block, label: event.target.value.slice(0, 120) })} className="field-control" placeholder="Ex.: Ver oferta" aria-label="Rótulo do botão" data-testid={`input-button-label-${block.id}`} /></div>
-          <div><label htmlFor={`button-href-${block.id}`} className="field-label">Destino do clique</label><input id={`button-href-${block.id}`} value={block.href} onChange={(event) => update({ ...block, href: event.target.value })} className="field-control" placeholder="https://..." aria-label="Destino do botão" data-testid={`input-button-link-${block.id}`} /></div>
+          <div><label htmlFor={`button-label-${block.id}`} className="field-label">Texto do botão</label><input id={`button-label-${block.id}`} disabled={disabled} value={block.label} onChange={(event) => update({ ...block, label: event.target.value.slice(0, 120) })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Ex.: Ver oferta" aria-label="Rótulo do botão" data-testid={`input-button-label-${block.id}`} /></div>
+          <div><label htmlFor={`button-href-${block.id}`} className="field-label">Destino do clique</label><input id={`button-href-${block.id}`} disabled={disabled} value={block.href} onChange={(event) => update({ ...block, href: event.target.value })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="https://..." aria-label="Destino do botão" data-testid={`input-button-link-${block.id}`} /></div>
         </div>
       )}
 
@@ -443,6 +454,7 @@ export function EmailEditor({
   testPending = false,
   testError = null,
   testSent = false,
+  disabled = false,
 }: EmailEditorProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
@@ -454,8 +466,12 @@ export function EmailEditor({
   );
   const editorSessionKey = campaignId ?? "new-campaign";
 
-  const addBlock = (type: EmailBlock["type"]) => onChange([...blocks, newBlock(type)]);
-  const removeBlock = (id: string) => onChange(blocks.filter((block) => block.id !== id));
+  const addBlock = (type: EmailBlock["type"]) => {
+    if (!disabled) onChange([...blocks, newBlock(type)]);
+  };
+  const removeBlock = (id: string) => {
+    if (!disabled) onChange(blocks.filter((block) => block.id !== id));
+  };
   const reorder = (targetId: string) => {
     if (!draggingId || draggingId === targetId) return;
     const from = blocks.findIndex((block) => block.id === draggingId);
@@ -480,11 +496,11 @@ export function EmailEditor({
         <div>
           <div className="mb-4 flex items-end justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-[.13em] text-[#d35f2a]">Composição</p><p className="mt-1 text-sm font-extrabold text-[#263044]">Blocos editáveis</p><p className="mt-1 text-[11px] text-[#92939a]">{blocks.length} {blocks.length === 1 ? "bloco" : "blocos"} · arraste para reordenar</p></div><span className="rounded-full bg-[#f1f7f5] px-3 py-1.5 font-mono text-[9px] uppercase tracking-[.1em] text-[#247b79]">Sem limite</span></div>
           <div className="space-y-3">
-            {blocks.map((block, index) => <BlockCard key={block.id} block={block} index={index} blocks={blocks} onChange={onChange} onRemove={() => removeBlock(block.id)} onDragStart={() => setDraggingId(block.id)} onDrop={() => { reorder(block.id); setDraggingId(null); }} onDragEnd={() => setDraggingId(null)} dragging={draggingId === block.id} campaignId={campaignId} resetKey={editorSessionKey} onUploadingChange={onUploadingChange} />)}
+             {blocks.map((block, index) => <BlockCard key={block.id} block={block} index={index} blocks={blocks} onChange={onChange} onRemove={() => removeBlock(block.id)} onDragStart={() => setDraggingId(block.id)} onDrop={() => { reorder(block.id); setDraggingId(null); }} onDragEnd={() => setDraggingId(null)} dragging={draggingId === block.id} campaignId={campaignId} resetKey={editorSessionKey} onUploadingChange={onUploadingChange} disabled={disabled} />)}
             {blocks.length === 0 && <div className="rounded-2xl border border-dashed border-[#d8cdbd] bg-[#f8f3ec] px-5 py-12 text-center"><div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-[#d7ef56] text-[#263044]"><Plus size={18} /></div><p className="mt-4 text-sm font-bold text-[#42495b]">Comece pelo primeiro bloco</p><p className="mt-1 text-xs leading-5 text-[#85858b]">A prévia já mostra o rodapé fixo enquanto você cria.</p></div>}
           </div>
           <div className="mt-5 rounded-2xl border border-[#eee7dc] bg-[#f8f3ec] p-3"><p className="mb-2 px-1 font-mono text-[9px] uppercase tracking-[.12em] text-[#99959a]">Adicionar ao e-mail</p><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {(["text", "image", "button", "divider"] as const).map((type) => <button key={type} type="button" onClick={() => addBlock(type)} className="action-button action-button-secondary !min-h-10 !px-2 text-[11px] shadow-[0_2px_0_rgba(38,48,68,.04)]" data-testid={`button-add-${type}`}><Plus size={13} className="text-[#e96527]" /> {blockLabels[type]}</button>)}
+             {(["text", "image", "button", "divider"] as const).map((type) => <button key={type} type="button" disabled={disabled} onClick={() => addBlock(type)} className="action-button action-button-secondary !min-h-10 !px-2 text-[11px] shadow-[0_2px_0_rgba(38,48,68,.04)] disabled:cursor-not-allowed disabled:opacity-40" data-testid={`button-add-${type}`}><Plus size={13} className="text-[#e96527]" /> {blockLabels[type]}</button>)}
           </div></div>
         </div>
         <div className="min-w-0">

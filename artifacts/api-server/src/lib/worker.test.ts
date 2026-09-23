@@ -6,6 +6,7 @@ import {
   idempotencyKey,
   RESEND_MIN_INTERVAL_ENV,
   sendResendMessages,
+  testIdempotencyKey,
   type PreparedResendMessage,
 } from "./resend-sender";
 
@@ -29,6 +30,22 @@ test("keeps recipient keys stable when a recovered batch is recomposed", () => {
   assert.equal(originalBatchKey, batchIdempotencyKey([first, second]));
   assert.notEqual(originalBatchKey, batchIdempotencyKey([first, third]));
   assert.notEqual(first, second);
+});
+
+test("uses a different idempotency key for every test attempt", () => {
+  const firstAttempt = testIdempotencyKey(
+    "campaign-1",
+    "pessoa@example.com",
+    "attempt-1",
+  );
+  const secondAttempt = testIdempotencyKey(
+    "campaign-1",
+    "pessoa@example.com",
+    "attempt-2",
+  );
+
+  assert.notEqual(firstAttempt, secondAttempt);
+  assert.notEqual(firstAttempt, idempotencyKey("campaign-1", "pessoa@example.com", false));
 });
 
 test("sends one deterministic idempotency key per Resend request", async () => {

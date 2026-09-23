@@ -496,6 +496,10 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return <div><label className="field-label">{label}</label>{children}{hint && <p className="field-hint">{hint}</p>}</div>;
 }
 
+function campaignContentIsLocked(status?: string): boolean {
+  return status === 'agendada' || status === 'enviando' || status === 'pausada';
+}
+
 function CampaignForm({
   campaign,
   recipientSummary,
@@ -529,6 +533,7 @@ function CampaignForm({
     ),
   });
   const isEditing = Boolean(campaign);
+  const contentLocked = campaignContentIsLocked(campaign?.status);
   const emailBlocks = form.watch('corpo');
   const emailSubject = form.watch('assunto');
   const preheader = form.watch('preheader');
@@ -646,9 +651,9 @@ function CampaignForm({
         <div className="mb-6 flex items-start justify-between gap-4"><div><p className="section-kicker">01 · Identidade</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Como esta campanha será reconhecida?</h2></div><span className="font-mono text-[9px] uppercase tracking-[.12em] text-[#aaa3a1]">Obrigatório</span></div>
         <div className="grid gap-5 md:grid-cols-2">
           <Field label="Nome interno"><input {...form.register('nome')} className="field-control" placeholder="Ex.: Ofertas de sexta — eletrônicos" data-testid="input-campaign-name" /></Field>
-           <Field label="Assunto principal"><input {...form.register('assunto')} className="field-control" placeholder="Ex.: As melhores ofertas chegaram" data-testid="input-campaign-subject" /></Field>
-           <div className="md:col-span-2"><Field label="Prévia na caixa de entrada" hint="Opcional. Resumo curto exibido ao lado do assunto em alguns clientes de e-mail."><input {...form.register('preheader')} maxLength={100} className="field-control" placeholder="Ex.: Aproveite as ofertas escolhidas para você" data-testid="input-campaign-preheader" /><p className="mt-1 text-right font-mono text-[10px] text-[#99959a]">{(preheader?.length ?? 0)}/100</p></Field></div>
-          <div className="md:col-span-2"><Field label="Assunto do lembrete" hint="Opcional. Usado para identificar uma eventual mensagem de lembrete."><input {...form.register('assunto_lembrete')} className="field-control" placeholder="Ex.: Você ainda pode aproveitar estas ofertas" data-testid="input-campaign-reminder-subject" /></Field></div>
+            <Field label="Assunto principal"><input {...form.register('assunto')} disabled={contentLocked} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Ex.: As melhores ofertas chegaram" data-testid="input-campaign-subject" /></Field>
+            <div className="md:col-span-2"><Field label="Prévia na caixa de entrada" hint="Opcional. Resumo curto exibido ao lado do assunto em alguns clientes de e-mail."><input {...form.register('preheader')} disabled={contentLocked} maxLength={100} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Ex.: Aproveite as ofertas escolhidas para você" data-testid="input-campaign-preheader" /><p className="mt-1 text-right font-mono text-[10px] text-[#99959a]">{(preheader?.length ?? 0)}/100</p></Field></div>
+           <div className="md:col-span-2"><Field label="Assunto do lembrete" hint="Opcional. Usado para identificar uma eventual mensagem de lembrete."><input {...form.register('assunto_lembrete')} disabled={contentLocked} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Ex.: Você ainda pode aproveitar estas ofertas" data-testid="input-campaign-reminder-subject" /></Field></div>
         </div>
         {form.formState.errors.nome && <p className="mt-4 flex items-center gap-2 text-xs font-bold text-[#bd4f26]" data-testid="error-campaign-form"><CircleAlert size={14} /> {form.formState.errors.nome.message}</p>}
       </section>
@@ -656,9 +661,9 @@ function CampaignForm({
       <section className="panel p-5 sm:p-7">
         <div className="mb-6"><p className="section-kicker">02 · Remetente</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">De quem a mensagem chega?</h2></div>
         <div className="grid gap-5 md:grid-cols-2">
-          <Field label="Nome do remetente"><div className="relative"><UserRound size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_nome')} className="field-control pl-10" placeholder="Amo Ofertas" data-testid="input-sender-name" /></div></Field>
+          <Field label="Nome do remetente"><div className="relative"><UserRound size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_nome')} disabled={contentLocked} className="field-control pl-10 disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Amo Ofertas" data-testid="input-sender-name" /></div></Field>
            <Field label="E-mail do remetente" hint="Somente endereços do domínio verificado marketing.amo.delivery."><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_email')} type="email" readOnly aria-readonly="true" className="field-control bg-[#f3eee7] pl-10 text-[#6d7180]" placeholder="Carregando remetente seguro…" data-testid="input-sender-email" /></div>{form.formState.errors.remetente_email && <p className="mt-2 text-xs font-bold text-[#bd4f26]" data-testid="error-sender-email">{form.formState.errors.remetente_email.message}</p>}</Field>
-           <Field label="Reply-To" hint="Respostas dos destinatários serão encaminhadas para este endereço."><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('reply_to')} type="email" className="field-control pl-10" placeholder="contato@marketing.amo.delivery" data-testid="input-reply-to" /></div>{form.formState.errors.reply_to && <p className="mt-2 text-xs font-bold text-[#bd4f26]" data-testid="error-reply-to">{form.formState.errors.reply_to.message}</p>}</Field>
+           <Field label="Reply-To" hint="Respostas dos destinatários serão encaminhadas para este endereço."><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('reply_to')} disabled={contentLocked} type="email" className="field-control pl-10 disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="contato@marketing.amo.delivery" data-testid="input-reply-to" /></div>{form.formState.errors.reply_to && <p className="mt-2 text-xs font-bold text-[#bd4f26]" data-testid="error-reply-to">{form.formState.errors.reply_to.message}</p>}</Field>
         </div>
       </section>
 
@@ -669,8 +674,8 @@ function CampaignForm({
           <Field label="Validade do crédito" hint="Data limite do crédito."><input {...form.register('validade_credito')} type="date" className="field-control" data-testid="input-credit-expiry" /></Field>
            <Field label="Teto por hora" hint="Sugestão inicial para a rampa: 100."><input {...form.register('teto_hora')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-hour-cap" /></Field>
            <Field label="Teto por dia" hint="Sugestão inicial para a rampa: 1.000."><input {...form.register('teto_dia')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-day-cap" /></Field>
-          <div className="sm:col-span-2 lg:col-span-2"><Field label="Deep link"><div className="relative"><Link2 size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('url_deeplink')} type="url" className="field-control pl-10" placeholder="https://..." data-testid="input-deeplink" /></div></Field></div>
-          <div className="sm:col-span-2 lg:col-span-2"><Field label="Landing page"><div className="relative"><Link2 size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('url_landing')} type="url" className="field-control pl-10" placeholder="https://..." data-testid="input-landing-page" /></div></Field></div>
+           <div className="sm:col-span-2 lg:col-span-2"><Field label="Deep link"><div className="relative"><Link2 size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('url_deeplink')} disabled={contentLocked} type="url" className="field-control pl-10 disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="https://..." data-testid="input-deeplink" /></div></Field></div>
+           <div className="sm:col-span-2 lg:col-span-2"><Field label="Landing page"><div className="relative"><Link2 size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('url_landing')} disabled={contentLocked} type="url" className="field-control pl-10 disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="https://..." data-testid="input-landing-page" /></div></Field></div>
         </div>
       </section>
 
@@ -679,12 +684,14 @@ function CampaignForm({
         onChange={(blocks) => form.setValue('corpo', blocks, { shouldDirty: true })}
         campaignId={campaign?.id}
         subject={emailSubject}
+         disabled={contentLocked}
         onUploadingChange={handleUploadingChange}
         onSendTest={onSendTest}
         testPending={testPending}
         testError={testError}
         testSent={testSent}
       />
+       {contentLocked && <p className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] px-4 py-3 text-xs leading-5 text-[#6d7180]" role="status" data-testid="campaign-content-locked">O corpo, assunto, remetente e links ficam bloqueados enquanto a campanha está agendada, enviando ou pausada.</p>}
       {form.formState.errors.corpo?.message && <p className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" data-testid="error-email-content">{form.formState.errors.corpo.message}</p>}
       {isUploadPending && <p className="flex items-center gap-2 rounded-xl border border-[#d4e5df] bg-[#f1f7f5] px-4 py-3 text-xs text-[#247b79]" role="status" data-testid="status-image-upload-blocking"><LoaderCircle size={14} className="animate-spin" /> Aguarde o upload das imagens terminar para salvar a campanha.</p>}
 

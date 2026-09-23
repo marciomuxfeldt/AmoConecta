@@ -8,3 +8,4 @@
 - [PostgREST worker lease](postgrest-advisory-lock.md) — separate RPC requests need an atomic tokenized lease with a short expiry.
 - [Orval response naming](orval-response-naming.md) — response components must avoid names Orval derives from operation IDs to prevent generated barrel collisions.
 - [Resend idempotency header](resend-idempotency-header.md) — keep internal deduplication keys on the HTTP request, never in delivered email headers.
+- [Campaign content lock](campaign-content-lock.md) — scheduled, sending, and paused campaigns keep message content immutable until completion.

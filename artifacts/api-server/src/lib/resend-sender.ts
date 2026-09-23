@@ -29,6 +29,16 @@ export function idempotencyKey(
     .digest("hex");
 }
 
+export function testIdempotencyKey(
+  campaignId: string,
+  email: string,
+  attemptId: string,
+): string {
+  return createHash("sha256")
+    .update(`${campaignId}:${email.trim().toLowerCase()}:teste:${attemptId}`)
+    .digest("hex");
+}
+
 export function batchIdempotencyKey(messageKeys: string[]): string {
   return createHash("sha256").update(messageKeys.join(",")).digest("hex");
 }

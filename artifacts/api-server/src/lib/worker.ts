@@ -9,6 +9,7 @@ import { isRecipientAllowed } from "./safety-mode";
 import {
   idempotencyKey,
   sendResendMessages,
+  testIdempotencyKey,
   type PreparedResendMessage,
   type ResendResult,
 } from "./resend-sender";
@@ -270,8 +271,11 @@ function replyTo(campaign: Campaign): string | undefined {
 function emailPayload(
   campaign: Campaign,
   recipient: WorkerRecipient,
+  testAttemptId?: string,
 ): PreparedResendMessage {
-  const key = idempotencyKey(campaign.id, recipient.email, false);
+  const key = testAttemptId
+    ? testIdempotencyKey(campaign.id, recipient.email, testAttemptId)
+    : idempotencyKey(campaign.id, recipient.email, false);
   const unsubscribe = unsubscribeUrl(recipient.email, campaign.id);
   const html = renderEmailHtml(normalizeEmailBlocks(campaign.corpo) as EmailBlock[], {
     name: recipient.nome,
@@ -295,9 +299,12 @@ function emailPayload(
 export async function sendBatch(
   campaign: Campaign,
   recipients: WorkerRecipient[],
+  options: { testAttemptId?: string } = {},
 ): Promise<ResendResult[]> {
   const apiKey = requiredEnv("RESEND_API_KEY");
-  const messages = recipients.map((recipient) => emailPayload(campaign, recipient));
+  const messages = recipients.map((recipient) =>
+    emailPayload(campaign, recipient, options.testAttemptId),
+  );
   return sendResendMessages(apiKey, messages);
 }
 
@@ -562,6 +569,7 @@ export async function sendTestEmail(
     [
     { ...testRecipient, email: normalizedEmail },
     ],
+    { testAttemptId: `${Date.now()}-${randomUUID()}` },
   );
   const resendId = result[0]?.id;
   if (!resendId) throw new Error("Resend não retornou o ID do e-mail de teste.");

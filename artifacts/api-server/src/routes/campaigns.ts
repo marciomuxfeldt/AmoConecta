@@ -21,6 +21,10 @@ import { sendTestEmail } from "../lib/worker";
 import { getTestSendErrorResponse } from "../lib/test-send-error";
 import { formatValidationError } from "../lib/validation";
 import {
+  campaignContentLockMessage,
+  changedLockedCampaignFields,
+} from "../lib/campaign-edit-lock";
+import {
   configuredSenderEmail,
   configuredReplyToEmail,
   configuredSenderName,
@@ -345,7 +349,9 @@ function campaignParams(campaignId: string) {
 async function findCampaign(campaignId: string) {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
-    .select("id")
+    .select(
+      "id,status,assunto,preheader,assunto_lembrete,remetente_nome,remetente_email,reply_to,url_deeplink,url_landing,corpo",
+    )
     .eq("id", campaignId)
     .maybeSingle();
   if (error) throw error;
@@ -675,9 +681,15 @@ router.patch("/campaigns/:campaignId", async (req, res) => {
       res.status(404).json({ error: "Campanha não encontrada." });
       return;
     }
+    const updatePayload = campaignPayload(parsed.data as Record<string, unknown>, true);
+    const lockedFields = changedLockedCampaignFields(existing, updatePayload);
+    if (lockedFields.length > 0) {
+      res.status(409).json({ error: campaignContentLockMessage(lockedFields) });
+      return;
+    }
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
-      .update(campaignPayload(parsed.data as Record<string, unknown>, true))
+      .update(updatePayload)
       .eq("id", params.data.campaignId)
       .select(CAMPAIGN_COLUMNS)
       .single();
