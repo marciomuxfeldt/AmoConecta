@@ -636,7 +636,7 @@ function CampaignForm({
     savePayload(payload as CreateCampaignInput);
   };
 
-  const recipientTotal = recipientSummary?.total;
+  const recipientTotal = recipientSummary?.receberao_de_fato;
   const requiresTypedScheduleConfirmation = (recipientTotal ?? 0) > 5000;
   const scheduleConfirmationReady =
     recipientTotal != null &&
@@ -748,7 +748,7 @@ function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
     ['Telefones inválidos', summary.telefones_invalidos],
     ['Duplicados no arquivo', summary.duplicados_no_arquivo],
     ['Duplicados por telefone', summary.duplicados_telefone],
-    ['Suprimidos', summary.suprimidos],
+    ['Suprimidos na validação', summary.suprimidos],
   ];
   return (
     <div className="mt-6 border-t border-[#eee7dc] pt-6" data-testid="import-validation-summary">
@@ -760,8 +760,17 @@ function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
          <div className="metric-tile border-[#cfe4c7] bg-[#f2f8ee]"><strong className="text-[#417846]">{formatNumber(summary.novos)}</strong><span>Salvos</span></div>
          <div className="metric-tile"><strong>{formatNumber(summary.atualizados)}</strong><span>Atualizados</span></div>
          <div className="metric-tile border-[#f1dfb8] bg-[#fff9e9]"><strong className="text-[#9b6b17]">{formatNumber(summary.duplicados_no_arquivo)}</strong><span>Duplicados</span></div>
-        <div className="metric-tile"><strong>{formatNumber(summary.suprimidos)}</strong><span>Suprimidos</span></div>
+         <div className="metric-tile"><strong>{formatNumber(summary.suprimidos)}</strong><span>Suprimidos na validação</span></div>
       </div>
+       <div className="mt-6 rounded-xl border border-[#d9e3e0] bg-[#f1f7f5] p-4" data-testid="import-current-delivery-summary">
+         <div className="flex items-center justify-between gap-3"><h4 className="text-sm font-extrabold text-[#263044]">Situação atual da lista</h4><ShieldCheck size={15} className="text-[#247b79]" /></div>
+         <p className="mt-1 text-xs leading-5 text-[#6d7180]">Esses números cruzam a lista atual com a tabela de supressão, inclusive alterações feitas depois desta importação.</p>
+         <div className="mt-4 grid gap-3 sm:grid-cols-3">
+           <div className="rounded-xl border border-[#d9e3e0] bg-white/70 p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#263044]">{formatNumber(summary.total_na_lista)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Total na lista</span></div>
+           <div className="rounded-xl border border-[#efc9ba] bg-[#fff3ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(summary.suprimidos_no_envio)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Serão suprimidos no envio</span></div>
+           <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#417846]">{formatNumber(summary.receberao_de_fato)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Receberão de fato</span></div>
+         </div>
+       </div>
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <div className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4">
           <div className="flex items-center justify-between"><h4 className="text-sm font-extrabold text-[#263044]">Pontos de atenção</h4><CircleAlert size={15} className="text-[#d35f2a]" /></div>
@@ -859,7 +868,10 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
       setError('Aguarde a consulta da lista de destinatários terminar antes de validar.');
       return;
     }
-    const existingRecipients = recipientSummaryQuery.data?.total ?? 0;
+    const existingRecipients =
+      recipientSummaryQuery.data?.total_na_lista ??
+      recipientSummaryQuery.data?.total ??
+      0;
     if (existingRecipients > 0 && !importConfirmed) {
       setError('Confirme que a nova base deve ser somada aos destinatários atuais.');
       return;
@@ -883,7 +895,10 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
     }
   };
   const isBusy = phase !== 'idle';
-  const existingRecipients = recipientSummaryQuery.data?.total ?? 0;
+  const existingRecipients =
+    recipientSummaryQuery.data?.total_na_lista ??
+    recipientSummaryQuery.data?.total ??
+    0;
   const job = importJobQuery.data;
   const progress = job?.total_linhas
     ? Math.min(100, Math.round((job.linhas_processadas / job.total_linhas) * 100))
@@ -968,7 +983,7 @@ function RecipientSummaryPanel({
     { key: 'enviado', label: 'Enviado', tone: 'text-[#247b79]', dot: 'bg-[#247b79]' },
     { key: 'entregue', label: 'Entregue', tone: 'text-[#417846]', dot: 'bg-[#63a76f]' },
     { key: 'bloqueado', label: 'Bloqueado', tone: 'text-[#8e3a20]', dot: 'bg-[#d35f2a]' },
-    { key: 'suprimido', label: 'Suprimido', tone: 'text-[#6d7180]', dot: 'bg-[#8f9299]' },
+    { key: 'suprimido', label: 'Suprimido (processado)', tone: 'text-[#6d7180]', dot: 'bg-[#8f9299]' },
     { key: 'erro', label: 'Erro', tone: 'text-[#a64220]', dot: 'bg-[#bd4f26]' },
   ] as const;
   const maxRecency = Math.max(...(summary?.recencia.map((item) => item.quantidade) ?? [1]), 1);
@@ -997,12 +1012,20 @@ function RecipientSummaryPanel({
           <h2 className="mt-2 text-xl font-extrabold tracking-[-.05em] text-[#263044]">Destinatários desta campanha</h2>
           <p className="mt-1 text-xs text-[#7d7e87]">A contagem considera a lista principal, sem os destinatários de lembrete.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="rounded-xl border border-[#d9e3e0] bg-[#f1f7f5] px-4 py-3 text-right">
-            <span className="block font-mono text-[9px] uppercase tracking-[.12em] text-[#6d7f7c]">Total</span>
-            <strong className="mt-1 block text-3xl font-extrabold tabular-nums tracking-[-.07em] text-[#247b79]" data-testid="text-recipient-total">{loading ? '…' : error ? '—' : formatNumber(summary?.total)}</strong>
+        <div className="flex flex-wrap items-stretch justify-end gap-2">
+          <div className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] px-3 py-2.5 text-right">
+            <span className="block font-mono text-[9px] uppercase tracking-[.1em] text-[#6d7180]">Total na lista</span>
+            <strong className="mt-1 block text-2xl font-extrabold tabular-nums tracking-[-.06em] text-[#263044]" data-testid="text-recipient-list-total">{loading ? '…' : error ? '—' : formatNumber(summary?.total_na_lista)}</strong>
           </div>
-          <button type="button" onClick={onClear} disabled={clearPending || loading || !canClear || !summary?.total} className="action-button action-button-secondary !px-3 !text-[#a64220] disabled:opacity-50" title={canClear ? 'Limpar destinatários' : 'A campanha está em operação'} data-testid="button-clear-recipients"><Trash2 size={15} /> <span className="hidden sm:inline">{confirmClear ? 'Confirmar limpeza' : 'Limpar lista'}</span></button>
+          <div className="rounded-xl border border-[#efc9ba] bg-[#fff3ee] px-3 py-2.5 text-right">
+            <span className="block font-mono text-[9px] uppercase tracking-[.1em] text-[#a64220]">Serão suprimidos no envio</span>
+            <strong className="mt-1 block text-2xl font-extrabold tabular-nums tracking-[-.06em] text-[#a64220]" data-testid="text-recipient-suppressed">{loading ? '…' : error ? '—' : formatNumber(summary?.suprimidos_no_envio)}</strong>
+          </div>
+          <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] px-3 py-2.5 text-right">
+            <span className="block font-mono text-[9px] uppercase tracking-[.1em] text-[#417846]">Receberão de fato</span>
+            <strong className="mt-1 block text-3xl font-extrabold tabular-nums tracking-[-.07em] text-[#247b79]" data-testid="text-recipient-total">{loading ? '…' : error ? '—' : formatNumber(summary?.receberao_de_fato)}</strong>
+          </div>
+          <button type="button" onClick={onClear} disabled={clearPending || loading || !canClear || !summary?.total_na_lista} className="action-button action-button-secondary !px-3 !text-[#a64220] disabled:opacity-50" title={canClear ? 'Limpar destinatários' : 'A campanha está em operação'} data-testid="button-clear-recipients"><Trash2 size={15} /> <span className="hidden sm:inline">{confirmClear ? 'Confirmar limpeza' : 'Limpar lista'}</span></button>
         </div>
       </div>
       {error ? (

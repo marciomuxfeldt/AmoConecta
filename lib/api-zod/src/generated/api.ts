@@ -489,6 +489,12 @@ export const GetCampaignRecipientSummaryParams = zod.object({
 
 export const getCampaignRecipientSummaryResponseTotalMin = 0;
 
+export const getCampaignRecipientSummaryResponseTotalNaListaMin = 0;
+
+export const getCampaignRecipientSummaryResponseSuprimidosNoEnvioMin = 0;
+
+export const getCampaignRecipientSummaryResponseReceberaoDeFatoMin = 0;
+
 export const getCampaignRecipientSummaryResponseStatusPendenteMin = 0;
 
 export const getCampaignRecipientSummaryResponseStatusEnviadoMin = 0;
@@ -522,6 +528,9 @@ export const getCampaignRecipientSummaryResponseRecenciaItemQuantidadeMin = 0;
 export const GetCampaignRecipientSummaryResponse = zod.object({
   "campanha_id": zod.string().uuid(),
   "total": zod.number().int().min(getCampaignRecipientSummaryResponseTotalMin),
+  "total_na_lista": zod.number().int().min(getCampaignRecipientSummaryResponseTotalNaListaMin).describe('Total atual de destinatários na lista principal.'),
+  "suprimidos_no_envio": zod.number().int().min(getCampaignRecipientSummaryResponseSuprimidosNoEnvioMin).describe('Destinatários atualmente presentes na tabela de supressão.'),
+  "receberao_de_fato": zod.number().int().min(getCampaignRecipientSummaryResponseReceberaoDeFatoMin).describe('Total atual da lista menos as supressões atuais.'),
   "status": zod.object({
   "pendente": zod.number().int().min(getCampaignRecipientSummaryResponseStatusPendenteMin),
   "enviado": zod.number().int().min(getCampaignRecipientSummaryResponseStatusEnviadoMin),
@@ -636,6 +645,12 @@ export const validateCampaignImportResponseLinhasProcessadasMin = 0;
 
 export const validateCampaignImportResponseTotalLinhasMin = 0;
 
+export const validateCampaignImportResponseResultadoOneTotalNaListaMin = 0;
+
+export const validateCampaignImportResponseResultadoOneSuprimidosNoEnvioMin = 0;
+
+export const validateCampaignImportResponseResultadoOneReceberaoDeFatoMin = 0;
+
 
 
 export const ValidateCampaignImportResponse = zod.object({
@@ -656,6 +671,9 @@ export const ValidateCampaignImportResponse = zod.object({
   "duplicados_email": zod.number().int(),
   "duplicados_telefone": zod.number().int(),
   "suprimidos": zod.number().int(),
+  "total_na_lista": zod.number().int().min(validateCampaignImportResponseResultadoOneTotalNaListaMin).describe('Total atual de destinatários na lista da campanha após a importação.'),
+  "suprimidos_no_envio": zod.number().int().min(validateCampaignImportResponseResultadoOneSuprimidosNoEnvioMin).describe('Destinatários da lista atualmente presentes na tabela de supressão.'),
+  "receberao_de_fato": zod.number().int().min(validateCampaignImportResponseResultadoOneReceberaoDeFatoMin).describe('Total atual da lista menos as supressões atuais.'),
   "emails_invalidos": zod.number().int(),
   "datas_invalidas": zod.number().int(),
   "nomes_ausentes": zod.number().int(),
@@ -688,6 +706,12 @@ export const getCampaignImportResponseLinhasProcessadasMin = 0;
 
 export const getCampaignImportResponseTotalLinhasMin = 0;
 
+export const getCampaignImportResponseResultadoOneTotalNaListaMin = 0;
+
+export const getCampaignImportResponseResultadoOneSuprimidosNoEnvioMin = 0;
+
+export const getCampaignImportResponseResultadoOneReceberaoDeFatoMin = 0;
+
 
 
 export const GetCampaignImportResponse = zod.object({
@@ -708,6 +732,9 @@ export const GetCampaignImportResponse = zod.object({
   "duplicados_email": zod.number().int(),
   "duplicados_telefone": zod.number().int(),
   "suprimidos": zod.number().int(),
+  "total_na_lista": zod.number().int().min(getCampaignImportResponseResultadoOneTotalNaListaMin).describe('Total atual de destinatários na lista da campanha após a importação.'),
+  "suprimidos_no_envio": zod.number().int().min(getCampaignImportResponseResultadoOneSuprimidosNoEnvioMin).describe('Destinatários da lista atualmente presentes na tabela de supressão.'),
+  "receberao_de_fato": zod.number().int().min(getCampaignImportResponseResultadoOneReceberaoDeFatoMin).describe('Total atual da lista menos as supressões atuais.'),
   "emails_invalidos": zod.number().int(),
   "datas_invalidas": zod.number().int(),
   "nomes_ausentes": zod.number().int(),

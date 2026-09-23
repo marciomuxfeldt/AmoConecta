@@ -19,6 +19,7 @@ import {
   getTechnicalError,
   getTechnicalErrorText,
 } from "../lib/technical-error";
+import { recipientDeliveryProjection } from "../lib/recipient-delivery-projection";
 
 const router: IRouter = Router();
 const IMPORT_BUCKET = "amoconecta-imports";
@@ -293,9 +294,15 @@ router.get("/campaigns/:campaignId/imports/:importId", async (req, res) => {
       res.status(404).json({ error: "Importação não encontrada." });
       return;
     }
+    const currentProjection = data.resultado
+      ? await recipientDeliveryProjection(supabaseAdminClient(), params.data.campaignId)
+      : null;
     res.json(
       GetCampaignImportResponse.parse({
         ...data,
+        resultado: data.resultado
+          ? { ...data.resultado, ...currentProjection }
+          : null,
         erro:
           data.status === "erro"
             ? "Não foi possível validar o arquivo."

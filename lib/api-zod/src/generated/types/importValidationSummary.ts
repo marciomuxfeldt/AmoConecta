@@ -19,6 +19,21 @@ export interface ImportValidationSummary {
   duplicados_email: number;
   duplicados_telefone: number;
   suprimidos: number;
+  /**
+     * Total atual de destinatários na lista da campanha após a importação.
+     * @minimum 0
+     */
+  total_na_lista: number;
+  /**
+     * Destinatários da lista atualmente presentes na tabela de supressão.
+     * @minimum 0
+     */
+  suprimidos_no_envio: number;
+  /**
+     * Total atual da lista menos as supressões atuais.
+     * @minimum 0
+     */
+  receberao_de_fato: number;
   emails_invalidos: number;
   datas_invalidas: number;
   nomes_ausentes: number;

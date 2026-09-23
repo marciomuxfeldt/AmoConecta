@@ -24,6 +24,7 @@ import {
   campaignContentLockMessage,
   changedLockedCampaignFields,
 } from "../lib/campaign-edit-lock";
+import { recipientDeliveryProjection } from "../lib/recipient-delivery-projection";
 import {
   configuredSenderEmail,
   configuredReplyToEmail,
@@ -264,7 +265,10 @@ async function recipientSummary(campaignId: string) {
   const recencyCounts = await Promise.all(
     recencyQueries.map((query) => countMainRecipients(campaignId, query)),
   );
-  const total = await countMainRecipients(campaignId);
+  const deliveryProjection = await recipientDeliveryProjection(
+    supabaseAdminClient(),
+    campaignId,
+  );
   const [totalSent, bounces, complaints] = await Promise.all([
     countMainRecipients(campaignId, {
       statuses: ["enviado", "entregue", "aberto", "clicado", "bounce"],
@@ -277,7 +281,10 @@ async function recipientSummary(campaignId: string) {
 
   return GetCampaignRecipientSummaryResponse.parse({
     campanha_id: campaignId,
-    total,
+    total: deliveryProjection.total_na_lista,
+    total_na_lista: deliveryProjection.total_na_lista,
+    suprimidos_no_envio: deliveryProjection.suprimidos_no_envio,
+    receberao_de_fato: deliveryProjection.receberao_de_fato,
     status: {
       pendente: statusCounts[0],
       enviado: statusCounts[1],

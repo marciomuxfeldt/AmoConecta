@@ -795,6 +795,18 @@ components:
         total:
           type: integer
           minimum: 0
+        total_na_lista:
+          type: integer
+          minimum: 0
+          description: Total atual de destinatários na lista principal.
+        suprimidos_no_envio:
+          type: integer
+          minimum: 0
+          description: Destinatários atualmente presentes na tabela de supressão.
+        receberao_de_fato:
+          type: integer
+          minimum: 0
+          description: Total atual da lista menos as supressões atuais.
         status:
           $ref: "#/components/schemas/RecipientStatusSummary"
         reputacao:
@@ -803,7 +815,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RecipientRecencyBucket"
-      required: [campanha_id, total, status, reputacao, recencia]
+      required: [campanha_id, total, total_na_lista, suprimidos_no_envio, receberao_de_fato, status, reputacao, recencia]
     CampaignRecipientsCleared:
       type: object
       properties:
@@ -1260,6 +1272,18 @@ components:
           type: integer
         suprimidos:
           type: integer
+        total_na_lista:
+          type: integer
+          minimum: 0
+          description: Total atual de destinatários na lista da campanha após a importação.
+        suprimidos_no_envio:
+          type: integer
+          minimum: 0
+          description: Destinatários da lista atualmente presentes na tabela de supressão.
+        receberao_de_fato:
+          type: integer
+          minimum: 0
+          description: Total atual da lista menos as supressões atuais.
         emails_invalidos:
           type: integer
         datas_invalidas:
@@ -1289,6 +1313,9 @@ components:
         - duplicados_email
         - duplicados_telefone
         - suprimidos
+        - total_na_lista
+        - suprimidos_no_envio
+        - receberao_de_fato
         - emails_invalidos
         - datas_invalidas
         - nomes_ausentes
