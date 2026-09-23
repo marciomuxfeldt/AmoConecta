@@ -93,6 +93,35 @@ function formatNumber(value: number | null | undefined) {
   return new Intl.NumberFormat('pt-BR').format(value ?? 0);
 }
 
+function formatPercentage(value: number) {
+  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
+}
+
+function reputationTone(percentual: number, limit: number) {
+  if (percentual >= limit) {
+    return {
+      card: 'border-[#efc9ba] bg-[#fff0e9]',
+      value: 'text-[#a64220]',
+      badge: 'bg-[#bd4f26] text-[#fffaf6]',
+      label: 'No limite de pausa',
+    };
+  }
+  if (percentual >= limit / 2) {
+    return {
+      card: 'border-[#e8c56f] bg-[#fff7dc]',
+      value: 'text-[#8a651c]',
+      badge: 'bg-[#d5a42e] text-[#fffaf6]',
+      label: 'Atenção',
+    };
+  }
+  return {
+    card: 'border-[#b9d9bc] bg-[#eef7ee]',
+    value: 'text-[#3f7b46]',
+    badge: 'bg-[#63a76f] text-[#fffaf6]',
+    label: 'Dentro da faixa',
+  };
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
   const date = new Date(value);
@@ -936,6 +965,22 @@ function RecipientSummaryPanel({
     { key: 'erro', label: 'Erro', tone: 'text-[#a64220]', dot: 'bg-[#bd4f26]' },
   ] as const;
   const maxRecency = Math.max(...(summary?.recencia.map((item) => item.quantidade) ?? [1]), 1);
+  const reputationMetrics = summary?.reputacao
+    ? [
+        {
+          key: 'bounce',
+          label: 'Bounce',
+          description: 'Endereços rejeitados pelo provedor.',
+          metric: summary.reputacao.bounce,
+        },
+        {
+          key: 'reclamacao',
+          label: 'Reclamação',
+          description: 'Destinatários que marcaram a mensagem como spam.',
+          metric: summary.reputacao.reclamacao,
+        },
+      ]
+    : [];
 
   return (
     <section className="panel sticky top-4 z-10 p-5 shadow-[0_12px_34px_rgba(38,48,68,.08)] sm:p-7" data-testid="panel-recipient-summary">
@@ -967,6 +1012,38 @@ function RecipientSummaryPanel({
               </div>
             ))}
           </div>
+           <div className="mt-5 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4" data-testid="panel-reputation-metrics">
+             <div className="flex items-start justify-between gap-3">
+               <div>
+                 <h3 className="text-sm font-extrabold text-[#263044]">Sinais de reputação</h3>
+                 <p className="mt-1 text-xs text-[#7d7e87]">Percentuais sobre {formatNumber(summary?.reputacao.total_enviado)} enviados. Estes indicadores orientam a pausa automática.</p>
+               </div>
+               <ShieldCheck size={16} className="text-[#247b79]" />
+             </div>
+             <div className="mt-4 grid gap-3 sm:grid-cols-2">
+               {reputationMetrics.map((item) => {
+                 const tone = reputationTone(item.metric.percentual, item.metric.limite_percentual);
+                 return (
+                   <div key={item.key} className={`rounded-xl border p-4 ${tone.card}`} data-testid={`recipient-reputation-${item.key}`}>
+                     <div className="flex items-start justify-between gap-3">
+                       <div>
+                         <span className="text-xs font-extrabold text-[#263044]">{item.label}</span>
+                         <p className="mt-1 text-[11px] leading-4 text-[#6d7180]">{item.description}</p>
+                       </div>
+                       <span className="shrink-0 rounded-full bg-[#263044] px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-[.08em] text-[#fffaf6]">limite {formatPercentage(item.metric.limite_percentual)}</span>
+                     </div>
+                     <div className="mt-4 flex items-end justify-between gap-3">
+                       <div>
+                         <strong className={`block text-3xl font-extrabold tabular-nums tracking-[-.07em] ${tone.value}`}>{formatPercentage(item.metric.percentual)}</strong>
+                         <span className="mt-1 block text-[11px] text-[#6d7180]">{formatNumber(item.metric.quantidade)} ocorrência(s) em {formatNumber(summary?.reputacao.total_enviado)} enviados</span>
+                       </div>
+                       <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${tone.badge}`}>{tone.label}</span>
+                     </div>
+                   </div>
+                 );
+               })}
+             </div>
+           </div>
           <div className="mt-5 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4">
             <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-extrabold text-[#263044]">Recência da base</h3><p className="mt-1 text-xs text-[#7d7e87]">Distribuição por data da última compra.</p></div><Clock3 size={16} className="text-[#247b79]" /></div>
             <div className="mt-5 grid gap-4 md:grid-cols-2">

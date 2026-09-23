@@ -36,6 +36,8 @@ export * from './importValidationSummary';
 export * from './loginInput';
 export * from './recencyBucket';
 export * from './recipientRecencyBucket';
+export * from './recipientReputationMetric';
+export * from './recipientReputationSummary';
 export * from './recipientStatusSummary';
 export * from './requestEmailImageUploadInput';
 export * from './requestEmailImageUploadInputMimeType';

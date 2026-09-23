@@ -752,6 +752,31 @@ components:
           type: integer
           minimum: 0
       required: [pendente, enviado, entregue, bloqueado, suprimido, erro]
+    RecipientReputationMetric:
+      type: object
+      properties:
+        quantidade:
+          type: integer
+          minimum: 0
+        percentual:
+          type: number
+          minimum: 0
+          description: Percentual real sobre o total enviado, de 0 a 100.
+        limite_percentual:
+          type: number
+          minimum: 0
+      required: [quantidade, percentual, limite_percentual]
+    RecipientReputationSummary:
+      type: object
+      properties:
+        total_enviado:
+          type: integer
+          minimum: 0
+        bounce:
+          $ref: "#/components/schemas/RecipientReputationMetric"
+        reclamacao:
+          $ref: "#/components/schemas/RecipientReputationMetric"
+      required: [total_enviado, bounce, reclamacao]
     RecipientRecencyBucket:
       type: object
       properties:
@@ -772,11 +797,13 @@ components:
           minimum: 0
         status:
           $ref: "#/components/schemas/RecipientStatusSummary"
+        reputacao:
+          $ref: "#/components/schemas/RecipientReputationSummary"
         recencia:
           type: array
           items:
             $ref: "#/components/schemas/RecipientRecencyBucket"
-      required: [campanha_id, total, status, recencia]
+      required: [campanha_id, total, status, reputacao, recencia]
     CampaignRecipientsCleared:
       type: object
       properties:

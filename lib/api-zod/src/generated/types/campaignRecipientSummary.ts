@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { RecipientRecencyBucket } from './recipientRecencyBucket';
+import type { RecipientReputationSummary } from './recipientReputationSummary';
 import type { RecipientStatusSummary } from './recipientStatusSummary';
 
 export interface CampaignRecipientSummary {
@@ -13,5 +14,6 @@ export interface CampaignRecipientSummary {
   /** @minimum 0 */
   total: number;
   status: RecipientStatusSummary;
+  reputacao: RecipientReputationSummary;
   recencia: RecipientRecencyBucket[];
 }

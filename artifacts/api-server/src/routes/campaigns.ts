@@ -204,6 +204,16 @@ async function countMainRecipients(
   return count ?? 0;
 }
 
+async function countCampaignComplaints(campaignId: string): Promise<number> {
+  const { count, error } = await supabaseAdminClient()
+    .from("supressao")
+    .select("email", { count: "exact", head: true })
+    .eq("origem", `campanha:${campaignId}`)
+    .eq("motivo", "complaint");
+  if (error) throw error;
+  return count ?? 0;
+}
+
 function dateOnlyDaysAgo(days: number): string {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() - days);
@@ -218,7 +228,7 @@ async function recipientSummary(campaignId: string) {
     ["entregue", ["entregue", "aberto", "clicado"]],
     ["bloqueado", ["bloqueado_modo_teste"]],
     ["suprimido", ["suprimido"]],
-    ["erro", ["erro", "bounce"]],
+    ["erro", ["erro"]],
   ] as const;
   const statusCounts = await Promise.all(
     statusQueries.map(async ([, statuses]) => countMainRecipients(campaignId, { statuses })),
@@ -235,6 +245,15 @@ async function recipientSummary(campaignId: string) {
     recencyQueries.map((query) => countMainRecipients(campaignId, query)),
   );
   const total = await countMainRecipients(campaignId);
+  const [totalSent, bounces, complaints] = await Promise.all([
+    countMainRecipients(campaignId, {
+      statuses: ["enviado", "entregue", "aberto", "clicado", "bounce"],
+    }),
+    countMainRecipients(campaignId, { statuses: ["bounce"] }),
+    countCampaignComplaints(campaignId),
+  ]);
+  const bounceRate = totalSent > 0 ? (bounces / totalSent) * 100 : 0;
+  const complaintRate = totalSent > 0 ? (complaints / totalSent) * 100 : 0;
 
   return GetCampaignRecipientSummaryResponse.parse({
     campanha_id: campaignId,
@@ -246,6 +265,19 @@ async function recipientSummary(campaignId: string) {
       bloqueado: statusCounts[3],
       suprimido: statusCounts[4],
       erro: statusCounts[5],
+    },
+    reputacao: {
+      total_enviado: totalSent,
+      bounce: {
+        quantidade: bounces,
+        percentual: bounceRate,
+        limite_percentual: 2,
+      },
+      reclamacao: {
+        quantidade: complaints,
+        percentual: complaintRate,
+        limite_percentual: 0.2,
+      },
     },
     recencia: RECENCY_BUCKETS.map((faixa, index) => ({
       faixa,

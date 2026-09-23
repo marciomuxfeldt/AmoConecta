@@ -88,6 +88,25 @@ export interface RecipientStatusSummary {
   erro: number;
 }
 
+export interface RecipientReputationMetric {
+  /** @minimum 0 */
+  quantidade: number;
+  /**
+     * Percentual real sobre o total enviado, de 0 a 100.
+     * @minimum 0
+     */
+  percentual: number;
+  /** @minimum 0 */
+  limite_percentual: number;
+}
+
+export interface RecipientReputationSummary {
+  /** @minimum 0 */
+  total_enviado: number;
+  bounce: RecipientReputationMetric;
+  reclamacao: RecipientReputationMetric;
+}
+
 export interface RecipientRecencyBucket {
   faixa: string;
   /** @minimum 0 */
@@ -99,6 +118,7 @@ export interface CampaignRecipientSummary {
   /** @minimum 0 */
   total: number;
   status: RecipientStatusSummary;
+  reputacao: RecipientReputationSummary;
   recencia: RecipientRecencyBucket[];
 }
 

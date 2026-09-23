@@ -501,6 +501,20 @@ export const getCampaignRecipientSummaryResponseStatusSuprimidoMin = 0;
 
 export const getCampaignRecipientSummaryResponseStatusErroMin = 0;
 
+export const getCampaignRecipientSummaryResponseReputacaoTotalEnviadoMin = 0;
+
+export const getCampaignRecipientSummaryResponseReputacaoBounceQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseReputacaoBouncePercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseReputacaoBounceLimitePercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseReputacaoReclamacaoQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseReputacaoReclamacaoPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseReputacaoReclamacaoLimitePercentualMin = 0;
+
 export const getCampaignRecipientSummaryResponseRecenciaItemQuantidadeMin = 0;
 
 
@@ -515,6 +529,19 @@ export const GetCampaignRecipientSummaryResponse = zod.object({
   "bloqueado": zod.number().int().min(getCampaignRecipientSummaryResponseStatusBloqueadoMin),
   "suprimido": zod.number().int().min(getCampaignRecipientSummaryResponseStatusSuprimidoMin),
   "erro": zod.number().int().min(getCampaignRecipientSummaryResponseStatusErroMin)
+}),
+  "reputacao": zod.object({
+  "total_enviado": zod.number().int().min(getCampaignRecipientSummaryResponseReputacaoTotalEnviadoMin),
+  "bounce": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseReputacaoBounceQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseReputacaoBouncePercentualMin).describe('Percentual real sobre o total enviado, de 0 a 100.'),
+  "limite_percentual": zod.number().min(getCampaignRecipientSummaryResponseReputacaoBounceLimitePercentualMin)
+}),
+  "reclamacao": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseReputacaoReclamacaoQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseReputacaoReclamacaoPercentualMin).describe('Percentual real sobre o total enviado, de 0 a 100.'),
+  "limite_percentual": zod.number().min(getCampaignRecipientSummaryResponseReputacaoReclamacaoLimitePercentualMin)
+})
 }),
   "recencia": zod.array(zod.object({
   "faixa": zod.string(),
