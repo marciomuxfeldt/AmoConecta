@@ -15,4 +15,5 @@ export const CampaignStatus = {
   enviando: 'enviando',
   pausada: 'pausada',
   concluida: 'concluida',
+  cancelada: 'cancelada',
 } as const;

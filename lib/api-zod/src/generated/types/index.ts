@@ -43,6 +43,7 @@ export * from './requestEmailImageUploadInput';
 export * from './requestEmailImageUploadInputMimeType';
 export * from './requestImportUploadInput';
 export * from './safetyMode';
+export * from './scheduleCampaignInput';
 export * from './sendTestResponse';
 export * from './updateCampaignInput';
 export * from './validateImportInput';

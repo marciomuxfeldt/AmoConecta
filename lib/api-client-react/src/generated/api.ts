@@ -36,6 +36,7 @@ import type {
   RequestEmailImageUploadInput,
   RequestImportUploadInput,
   SafetyMode,
+  ScheduleCampaignInput,
   SendTestResponse,
   UpdateCampaignInput,
   ValidateImportInput
@@ -943,6 +944,317 @@ export const useDeleteCampaign = <TError = ErrorType<Error>,
         TContext
       > => {
       return useMutation(getDeleteCampaignMutationOptions(options));
+    }
+
+export const getScheduleCampaignUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/agendar`
+}
+
+/**
+ * @summary Agenda uma campanha após validar o envio
+ */
+export const scheduleCampaign = async (campaignId: string,
+    scheduleCampaignInput: ScheduleCampaignInput, options?: Parameters<typeof customFetch>[1]): Promise<Campaign> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<Campaign>(getScheduleCampaignUrl(campaignId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(scheduleCampaignInput)
+  }
+);}
+
+
+
+
+
+export const getScheduleCampaignMutationKey = () => ['scheduleCampaign'] as const;
+
+export const getScheduleCampaignMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleCampaign>>, TError,ScheduleCampaignMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof scheduleCampaign>>, TError,ScheduleCampaignMutationVariables, TContext> => {
+
+const mutationKey = getScheduleCampaignMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof scheduleCampaign>>, ScheduleCampaignMutationVariables> = (props) => {
+          const {campaignId,data} = props ?? {};
+
+          return  scheduleCampaign(campaignId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ScheduleCampaignMutationResult = NonNullable<Awaited<ReturnType<typeof scheduleCampaign>>>
+    export type ScheduleCampaignMutationBody = BodyType<ScheduleCampaignInput>
+    export type ScheduleCampaignMutationError = ErrorType<Error>
+    export type ScheduleCampaignMutationVariables = {campaignId: string;data: BodyType<ScheduleCampaignInput>}
+
+    /**
+ * @summary Agenda uma campanha após validar o envio
+ */
+export const useScheduleCampaign = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleCampaign>>, TError,ScheduleCampaignMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof scheduleCampaign>>,
+        TError,
+        ScheduleCampaignMutationVariables,
+        TContext
+      > => {
+      return useMutation(getScheduleCampaignMutationOptions(options));
+    }
+
+export const getPauseCampaignUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/pausar`
+}
+
+/**
+ * @summary Pausa uma campanha em envio
+ */
+export const pauseCampaign = async (campaignId: string, options?: Parameters<typeof customFetch>[1]): Promise<Campaign> => {
+
+  return customFetch<Campaign>(getPauseCampaignUrl(campaignId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getPauseCampaignMutationKey = () => ['pauseCampaign'] as const;
+
+export const getPauseCampaignMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseCampaign>>, TError,PauseCampaignMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof pauseCampaign>>, TError,PauseCampaignMutationVariables, TContext> => {
+
+const mutationKey = getPauseCampaignMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pauseCampaign>>, PauseCampaignMutationVariables> = (props) => {
+          const {campaignId} = props ?? {};
+
+          return  pauseCampaign(campaignId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PauseCampaignMutationResult = NonNullable<Awaited<ReturnType<typeof pauseCampaign>>>
+
+    export type PauseCampaignMutationError = ErrorType<Error>
+    export type PauseCampaignMutationVariables = {campaignId: string}
+
+    /**
+ * @summary Pausa uma campanha em envio
+ */
+export const usePauseCampaign = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseCampaign>>, TError,PauseCampaignMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof pauseCampaign>>,
+        TError,
+        PauseCampaignMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPauseCampaignMutationOptions(options));
+    }
+
+export const getResumeCampaignUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/retomar`
+}
+
+/**
+ * @summary Retoma uma campanha pausada
+ */
+export const resumeCampaign = async (campaignId: string, options?: Parameters<typeof customFetch>[1]): Promise<Campaign> => {
+
+  return customFetch<Campaign>(getResumeCampaignUrl(campaignId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getResumeCampaignMutationKey = () => ['resumeCampaign'] as const;
+
+export const getResumeCampaignMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeCampaign>>, TError,ResumeCampaignMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resumeCampaign>>, TError,ResumeCampaignMutationVariables, TContext> => {
+
+const mutationKey = getResumeCampaignMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resumeCampaign>>, ResumeCampaignMutationVariables> = (props) => {
+          const {campaignId} = props ?? {};
+
+          return  resumeCampaign(campaignId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResumeCampaignMutationResult = NonNullable<Awaited<ReturnType<typeof resumeCampaign>>>
+
+    export type ResumeCampaignMutationError = ErrorType<Error>
+    export type ResumeCampaignMutationVariables = {campaignId: string}
+
+    /**
+ * @summary Retoma uma campanha pausada
+ */
+export const useResumeCampaign = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeCampaign>>, TError,ResumeCampaignMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resumeCampaign>>,
+        TError,
+        ResumeCampaignMutationVariables,
+        TContext
+      > => {
+      return useMutation(getResumeCampaignMutationOptions(options));
+    }
+
+export const getCancelCampaignUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/cancelar`
+}
+
+/**
+ * @summary Cancela uma campanha operacional
+ */
+export const cancelCampaign = async (campaignId: string, options?: Parameters<typeof customFetch>[1]): Promise<Campaign> => {
+
+  return customFetch<Campaign>(getCancelCampaignUrl(campaignId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCancelCampaignMutationKey = () => ['cancelCampaign'] as const;
+
+export const getCancelCampaignMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelCampaign>>, TError,CancelCampaignMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelCampaign>>, TError,CancelCampaignMutationVariables, TContext> => {
+
+const mutationKey = getCancelCampaignMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelCampaign>>, CancelCampaignMutationVariables> = (props) => {
+          const {campaignId} = props ?? {};
+
+          return  cancelCampaign(campaignId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelCampaignMutationResult = NonNullable<Awaited<ReturnType<typeof cancelCampaign>>>
+
+    export type CancelCampaignMutationError = ErrorType<Error>
+    export type CancelCampaignMutationVariables = {campaignId: string}
+
+    /**
+ * @summary Cancela uma campanha operacional
+ */
+export const useCancelCampaign = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelCampaign>>, TError,CancelCampaignMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelCampaign>>,
+        TError,
+        CancelCampaignMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCancelCampaignMutationOptions(options));
     }
 
 export const getSendCampaignTestUrl = (campaignId: string,) => {

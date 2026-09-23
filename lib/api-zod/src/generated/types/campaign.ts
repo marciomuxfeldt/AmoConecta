@@ -60,6 +60,8 @@ export interface Campaign {
   /** @minimum 1 */
   lembrete_horas: number;
   teste_enviado: boolean;
+  /** @nullable */
+  teste_enviado_em: Date | null;
   corpo: EmailBlock[];
   criado_em: Date;
 }

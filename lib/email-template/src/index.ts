@@ -30,6 +30,8 @@ export type EmailBlock = TextBlock | ImageBlock | ButtonBlock | DividerBlock;
 
 export type EmailPreviewOptions = {
   name?: string | null;
+  valorCredito?: number | null;
+  validadeCredito?: string | null;
   unsubscribeUrl?: string;
   reason?: string;
   preheader?: string | null;
@@ -37,7 +39,6 @@ export type EmailPreviewOptions = {
 
 const ALLOWED_TAGS = new Set(["strong", "b", "em", "i", "a", "br"]);
 const DEFAULT_UNSUBSCRIBE_URL = "#descadastro";
-const PREHEADER_PADDING = "&zwnj;&nbsp;".repeat(40);
 const DEFAULT_REASON =
   "Você está recebendo este e-mail porque se cadastrou para receber comunicações da AmoConecta.";
 
@@ -79,14 +80,52 @@ export function sanitizeRichTextHtml(value: string): string {
   return html;
 }
 
-function replaceNameToken(value: string, name: string | null | undefined): string {
-  if (name?.trim()) {
-    return value.replace(/\{\{\s*nome\s*\}\}/giu, escapeHtml(name.trim()));
-  }
+function formatCredit(value: number | null | undefined): string {
+  return value == null
+    ? ""
+    : new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      }).format(value);
+}
 
-  return value
-    .replace(/\s*(?:[,;:–—-]\s*)?\{\{\s*nome\s*\}\}/giu, "")
-    .replace(/\{\{\s*nome\s*\}\}/giu, "")
+function formatCreditExpiry(value: string | null | undefined): string {
+  if (!value) return "";
+  const parsed = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime())
+    ? ""
+    : new Intl.DateTimeFormat("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        timeZone: "UTC",
+      }).format(parsed);
+}
+
+function replaceTemplateTokens(
+  value: string,
+  options: EmailPreviewOptions,
+  escapeValues: boolean,
+): string {
+  const replacement = (raw: string): string => (escapeValues ? escapeHtml(raw) : raw);
+  const name = options.name?.trim() ?? "";
+  const credit = formatCredit(options.valorCredito);
+  const expiry = formatCreditExpiry(options.validadeCredito);
+  let result = value
+    .replace(/\{\{\s*nome\s*\}\}/giu, name ? replacement(name) : "{{nome}}")
+    .replace(/\{\{\s*valor_credito\s*\}\}/giu, replacement(credit))
+    .replace(/\{\{\s*validade_credito\s*\}\}/giu, replacement(expiry));
+
+  if (!name) {
+    result = result
+      .replace(/\s*(?:[,;:–—-]\s*)?\{\{\s*nome\s*\}\}/giu, "")
+      .replace(/\{\{\s*nome\s*\}\}/giu, "");
+  }
+  return result;
+}
+
+function replaceNameToken(value: string, name: string | null | undefined): string {
+  return replaceTemplateTokens(value, { name }, true)
     .replace(/\s{2,}/gu, " ")
     .trim();
 }
@@ -95,14 +134,14 @@ export function interpolateName(value: string, name?: string | null): string {
   return replaceNameToken(value, name);
 }
 
-function renderText(block: TextBlock, name?: string | null): string {
+function renderText(block: TextBlock, options: EmailPreviewOptions): string {
   const safeHtml = sanitizeRichTextHtml(block.html);
-  return replaceNameToken(safeHtml, name);
+  return replaceTemplateTokens(safeHtml, options, true);
 }
 
-function renderBlock(block: EmailBlock, name?: string | null): string {
+function renderBlock(block: EmailBlock, options: EmailPreviewOptions): string {
   if (block.type === "text") {
-    return `<tr><td style="padding:0 32px 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.6;color:#263044;">${renderText(block, name)}</td></tr>`;
+    return `<tr><td style="padding:0 32px 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.6;color:#263044;">${renderText(block, options)}</td></tr>`;
   }
 
   if (block.type === "image") {
@@ -113,7 +152,7 @@ function renderBlock(block: EmailBlock, name?: string | null): string {
   }
 
   if (block.type === "button") {
-    return `<tr><td style="padding:0 32px 24px;text-align:center;"><a href="${escapeHtml(safeUrl(block.href))}" style="display:inline-block;background-color:#e96527;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;line-height:20px;padding:12px 22px;text-decoration:none;border-radius:6px;">${escapeHtml(block.label)}</a></td></tr>`;
+    return `<tr><td style="padding:0 32px 24px;text-align:center;"><a href="${escapeHtml(safeUrl(block.href))}" style="display:inline-block;background-color:#e96527;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;line-height:20px;padding:12px 22px;text-decoration:none;border-radius:6px;">${replaceTemplateTokens(block.label, options, true)}</a></td></tr>`;
   }
 
   return '<tr><td style="padding:0 32px 24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid #e5ddd0;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>';
@@ -127,11 +166,59 @@ export function renderEmailHtml(
   const reason = escapeHtml(options.reason?.trim() || DEFAULT_REASON);
   const preheader = options.preheader?.trim().slice(0, 100);
   const hiddenPreheader = preheader
-    ? `<div style="display:none!important;font-size:1px;line-height:1px;color:#f4f0e9;max-height:0;max-width:0;opacity:0;overflow:hidden;">${escapeHtml(preheader)}${PREHEADER_PADDING}</div>`
+    ? `<div style="display:none!important;font-size:1px;line-height:1px;color:#f4f0e9;max-height:0;max-width:0;opacity:0;overflow:hidden;">${escapeHtml(replaceTemplateTokens(preheader, options, false))}</div>`
     : "";
-  const body = blocks.map((block) => renderBlock(block, options.name)).join("");
+  const body = blocks.map((block) => renderBlock(block, options)).join("");
 
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AmoConecta</title></head><body style="margin:0;padding:0;background-color:#f4f0e9;">${hiddenPreheader}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#f4f0e9;"><tr><td align="center" style="padding:24px 12px;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#fffdf9;"><tr><td style="padding:30px 32px 24px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase;color:#247b79;">AmoConecta</td></tr>${body}<tr><td style="padding:20px 32px 28px;border-top:1px solid #e5ddd0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#777984;text-align:center;">${reason}<br><a href="${escapeHtml(unsubscribeUrl)}" style="color:#247b79;text-decoration:underline;">Descadastrar-se</a></td></tr></table></td></tr></table></body></html>`;
+}
+
+function htmlToPlainText(value: string): string {
+  return value
+    .replace(/<br\s*\/?>/giu, "\n")
+    .replace(/<\/(?:p|div|li|h[1-6])>/giu, "\n")
+    .replace(/<[^>]+>/gu, "")
+    .replace(/&nbsp;/gu, " ")
+    .replace(/&amp;/gu, "&")
+    .replace(/&lt;/gu, "<")
+    .replace(/&gt;/gu, ">")
+    .replace(/&quot;/gu, '"')
+    .replace(/[ \t]+\n/gu, "\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+}
+
+export function interpolateEmailText(
+  value: string,
+  options: EmailPreviewOptions = {},
+): string {
+  return replaceTemplateTokens(value, options, false);
+}
+
+export function renderEmailText(
+  blocks: EmailBlock[],
+  options: EmailPreviewOptions = {},
+): string {
+  const lines: string[] = [];
+  const preheader = options.preheader?.trim();
+  if (preheader) lines.push(interpolateEmailText(preheader.slice(0, 100), options));
+
+  for (const block of blocks) {
+    if (block.type === "text") {
+      const html = sanitizeRichTextHtml(block.html);
+      const text = htmlToPlainText(interpolateEmailText(html, options));
+      if (text) lines.push(text);
+    } else if (block.type === "button") {
+      const label = interpolateEmailText(block.label, options).trim();
+      if (label) lines.push(`${label}: ${block.href}`);
+    } else if (block.type === "image" && block.alt.trim()) {
+      lines.push(interpolateEmailText(block.alt.trim(), options));
+    }
+  }
+
+  lines.push(options.reason?.trim() || DEFAULT_REASON);
+  lines.push(`Descadastrar-se: ${safeUrl(options.unsubscribeUrl, DEFAULT_UNSUBSCRIBE_URL)}`);
+  return lines.join("\n\n");
 }
 
 export function normalizeEmailBlocks(value: unknown): EmailBlock[] {

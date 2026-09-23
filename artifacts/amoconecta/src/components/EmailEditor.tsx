@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import {
   type EmailBlock,
+  interpolateEmailText,
   interpolateName,
   normalizeEmailBlocks,
   renderEmailHtml,
@@ -33,6 +34,8 @@ type EmailEditorProps = {
   onChange: (blocks: EmailBlock[]) => void;
   campaignId?: string;
   subject: string;
+  valorCredito?: number | null;
+  validadeCredito?: string | null;
   disabled?: boolean;
   onUploadingChange?: (blockId: string, uploading: boolean) => void;
   onSendTest?: () => void;
@@ -449,6 +452,8 @@ export function EmailEditor({
   onChange,
   campaignId,
   subject,
+  valorCredito,
+  validadeCredito,
   onUploadingChange,
   onSendTest,
   testPending = false,
@@ -461,9 +466,22 @@ export function EmailEditor({
   const [previewName, setPreviewName] = useState("Marina");
   const normalizedBlocks = useMemo(() => normalizeEmailBlocks(blocks), [blocks]);
   const previewHtml = useMemo(
-    () => renderEmailHtml(normalizedBlocks, { name: previewName || null }),
-    [normalizedBlocks, previewName],
+    () => renderEmailHtml(normalizedBlocks, {
+      name: previewName || null,
+      valorCredito,
+      validadeCredito,
+    }),
+    [normalizedBlocks, previewName, valorCredito, validadeCredito],
   );
+  const missingVariables = useMemo(() => {
+    const source = `${subject}\n${normalizedBlocks.map((block) => (
+      block.type === "text" ? block.html : block.type === "button" ? block.label : block.type === "image" ? block.alt : ""
+    )).join("\n")}`;
+    return [
+      source.match(/\{\{\s*valor_credito\s*\}\}/iu) && valorCredito == null ? "valor do crédito" : null,
+      source.match(/\{\{\s*validade_credito\s*\}\}/iu) && !validadeCredito ? "validade do crédito" : null,
+    ].filter((value): value is string => Boolean(value));
+  }, [normalizedBlocks, subject, valorCredito, validadeCredito]);
   const editorSessionKey = campaignId ?? "new-campaign";
 
   const addBlock = (type: EmailBlock["type"]) => {
@@ -504,12 +522,13 @@ export function EmailEditor({
           </div></div>
         </div>
         <div className="min-w-0">
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><p className="font-mono text-[10px] uppercase tracking-[.13em] text-[#d35f2a]">Verificação</p><span className="h-1.5 w-1.5 rounded-full bg-[#63a76f]" /><span className="font-mono text-[9px] uppercase tracking-[.1em] text-[#63a76f]">Ao vivo</span></div><p className="mt-1 text-sm font-extrabold text-[#263044]">Pré-visualização</p><p className="mt-1 max-w-md text-[11px] leading-5 text-[#92939a]">Assunto: {interpolateName(subject || "Sem assunto", previewName || null)}</p></div><div className="flex rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-1" role="group" aria-label="Tamanho da prévia"><button type="button" onClick={() => setPreviewMode("desktop")} className={`focus-ring rounded-lg p-2.5 transition-colors ${previewMode === "desktop" ? "bg-white text-[#247b79] shadow-sm" : "text-[#92939a] hover:text-[#42495b]"}`} aria-label="Mostrar prévia desktop" aria-pressed={previewMode === "desktop"} title="Desktop" data-testid="button-preview-desktop"><Monitor size={14} /></button><button type="button" onClick={() => setPreviewMode("mobile")} className={`focus-ring rounded-lg p-2.5 transition-colors ${previewMode === "mobile" ? "bg-white text-[#247b79] shadow-sm" : "text-[#92939a] hover:text-[#42495b]"}`} aria-label="Mostrar prévia celular" aria-pressed={previewMode === "mobile"} title="Celular" data-testid="button-preview-mobile"><Smartphone size={14} /></button></div></div>
+           <div className="mb-4 flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><p className="font-mono text-[10px] uppercase tracking-[.13em] text-[#d35f2a]">Verificação</p><span className="h-1.5 w-1.5 rounded-full bg-[#63a76f]" /><span className="font-mono text-[9px] uppercase tracking-[.1em] text-[#63a76f]">Ao vivo</span></div><p className="mt-1 text-sm font-extrabold text-[#263044]">Pré-visualização</p><p className="mt-1 max-w-md text-[11px] leading-5 text-[#92939a]">Assunto: {interpolateEmailText(interpolateName(subject || "Sem assunto", previewName || null), { valorCredito, validadeCredito })}</p></div><div className="flex rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-1" role="group" aria-label="Tamanho da prévia"><button type="button" onClick={() => setPreviewMode("desktop")} className={`focus-ring rounded-lg p-2.5 transition-colors ${previewMode === "desktop" ? "bg-white text-[#247b79] shadow-sm" : "text-[#92939a] hover:text-[#42495b]"}`} aria-label="Mostrar prévia desktop" aria-pressed={previewMode === "desktop"} title="Desktop" data-testid="button-preview-desktop"><Monitor size={14} /></button><button type="button" onClick={() => setPreviewMode("mobile")} className={`focus-ring rounded-lg p-2.5 transition-colors ${previewMode === "mobile" ? "bg-white text-[#247b79] shadow-sm" : "text-[#92939a] hover:text-[#42495b]"}`} aria-label="Mostrar prévia celular" aria-pressed={previewMode === "mobile"} title="Celular" data-testid="button-preview-mobile"><Smartphone size={14} /></button></div></div>
           <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-[#eee7dc] bg-[#f8f3ec] p-2.5"><label className="px-1 text-[10px] font-bold uppercase tracking-[.08em] text-[#85858b]" htmlFor="email-preview-name">Nome do destinatário</label><input id="email-preview-name" value={previewName} onChange={(event) => setPreviewName(event.target.value)} className="field-control !w-40 !py-2 text-xs" placeholder="Vazio = sem nome" data-testid="input-preview-name" /><button type="button" onClick={() => setPreviewName("")} className="focus-ring rounded-lg px-2 py-1 text-[10px] font-bold text-[#247b79] transition-colors hover:bg-[#e5f0ed]" data-testid="button-preview-no-name">Sem nome</button></div>
           <div className="flex min-h-[500px] justify-center overflow-auto rounded-2xl border border-[#dcd3c5] bg-[#e9e1d6] p-3 shadow-inner sm:p-5">
             <iframe title={`Prévia do e-mail em modo ${previewMode === "desktop" ? "desktop" : "celular"}`} srcDoc={previewHtml} className="h-[620px] shrink-0 border-0 bg-white shadow-[0_12px_30px_rgba(38,48,68,.12)] transition-[width] duration-200" style={{ width: previewMode === "desktop" ? 600 : 360, maxWidth: "100%" }} data-testid={`email-preview-${previewMode}`} />
           </div>
-          <p className="mt-3 flex items-start gap-2 text-[10px] leading-5 text-[#92939a]"><span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[#d7ef56]" /> <span>O rodapé é automático, não entra na contagem de blocos e não pode ser editado.</span></p>
+           <p className="mt-3 flex items-start gap-2 text-[10px] leading-5 text-[#92939a]"><span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[#d7ef56]" /> <span>Variáveis disponíveis: <code>{'{{nome}}'}</code>, <code>{'{{valor_credito}}'}</code> e <code>{'{{validade_credito}}'}</code>. O rodapé é automático.</span></p>
+           {missingVariables.length > 0 && <p className="mt-2 rounded-xl border border-[#e8c56f] bg-[#fff7dc] px-3 py-2 text-[10px] leading-5 text-[#74561c]" role="status" data-testid="warning-missing-email-variables">Preencha {missingVariables.join(' e ')} antes de enviar para que as variáveis apareçam corretamente.</p>}
         </div>
       </div>
     </section>

@@ -65,6 +65,7 @@ test("sends one deterministic idempotency key per Resend request", async () => {
       to: ["primeira@example.com"],
       subject: "Oferta",
       html: "<p>Olá</p>",
+      text: "Olá",
       headers: { "X-Internal-Test": "preserve", "Idempotency-Key": "must-not-leak" },
       _idempotencyKey: idempotencyKey("campaign-1", "primeira@example.com", false),
     },
@@ -73,6 +74,7 @@ test("sends one deterministic idempotency key per Resend request", async () => {
       to: ["segunda@example.com"],
       subject: "Oferta",
       html: "<p>Olá</p>",
+      text: "Olá",
       headers: {},
       _idempotencyKey: idempotencyKey("campaign-1", "segunda@example.com", false),
     },
@@ -117,6 +119,7 @@ function testMessage(email: string): PreparedResendMessage {
     to: [email],
     subject: "Oferta",
     html: "<p>Olá</p>",
+    text: "Olá",
     headers: {},
     _idempotencyKey: idempotencyKey("rate-limit-campaign", email, false),
   };

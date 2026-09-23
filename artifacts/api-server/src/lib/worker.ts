@@ -2,6 +2,8 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   normalizeEmailBlocks,
   renderEmailHtml,
+  renderEmailText,
+  interpolateEmailText,
   type EmailBlock,
 } from "@workspace/email-template";
 import { supabaseAdminClient } from "./supabase";
@@ -42,6 +44,8 @@ type Campaign = {
   remetente_nome: string;
   remetente_email: string;
   preheader?: string | null;
+  valor_credito?: number | null;
+  validade_credito?: string | null;
   reply_to?: string | null;
   corpo: unknown;
   status: string;
@@ -206,7 +210,7 @@ async function loadCampaign(campaignId: string): Promise<Campaign | null> {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,nome,assunto,remetente_nome,remetente_email,preheader,reply_to,corpo,status,agendada_para,teto_hora,teto_dia",
+      "id,nome,assunto,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,reply_to,corpo,status,agendada_para,teto_hora,teto_dia",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -279,14 +283,27 @@ function emailPayload(
   const unsubscribe = unsubscribeUrl(recipient.email, campaign.id);
   const html = renderEmailHtml(normalizeEmailBlocks(campaign.corpo) as EmailBlock[], {
     name: recipient.nome,
+    valorCredito: campaign.valor_credito,
+    validadeCredito: campaign.validade_credito,
     unsubscribeUrl: unsubscribe,
     preheader: campaign.preheader,
   });
+  const templateOptions = {
+    name: recipient.nome,
+    valorCredito: campaign.valor_credito,
+    validadeCredito: campaign.validade_credito,
+    unsubscribeUrl: unsubscribe,
+    preheader: campaign.preheader,
+  };
   return {
     from: sender(campaign),
     to: [recipient.email],
-    subject: campaign.assunto,
+    subject: interpolateEmailText(campaign.assunto, templateOptions),
     html,
+    text: renderEmailText(
+      normalizeEmailBlocks(campaign.corpo) as EmailBlock[],
+      templateOptions,
+    ),
     ...(replyTo(campaign) ? { reply_to: replyTo(campaign) } : {}),
     headers: {
       "List-Unsubscribe": `<${unsubscribe}>`,
@@ -575,7 +592,7 @@ export async function sendTestEmail(
   if (!resendId) throw new Error("Resend não retornou o ID do e-mail de teste.");
   const { error } = await supabaseAdminClient()
     .from("campanha")
-    .update({ teste_enviado: true })
+    .update({ teste_enviado: true, teste_enviado_em: new Date().toISOString() })
     .eq("id", campaign.id);
   if (error) throw error;
   return resendId;

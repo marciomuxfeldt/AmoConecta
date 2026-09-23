@@ -289,6 +289,204 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/agendar:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: scheduleCampaign
+      tags: [campaigns]
+      summary: Agenda uma campanha após validar o envio
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleCampaignInput"
+      responses:
+        "200":
+          description: Campanha agendada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Transição não permitida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Dados inválidos ou confirmação incorreta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao salvar no Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/pausar:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: pauseCampaign
+      tags: [campaigns]
+      summary: Pausa uma campanha em envio
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Campanha pausada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Transição não permitida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao salvar no Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/retomar:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: resumeCampaign
+      tags: [campaigns]
+      summary: Retoma uma campanha pausada
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Campanha retomada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Transição não permitida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Campanha bloqueada pelo modo de segurança
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao salvar no Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/cancelar:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: cancelCampaign
+      tags: [campaigns]
+      summary: Cancela uma campanha operacional
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Campanha cancelada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Transição não permitida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao salvar no Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /campaigns/{campaignId}/test:
     parameters:
       - name: campaignId
@@ -828,7 +1026,14 @@ components:
       required: [campanha_id, destinatarios_removidos]
     CampaignStatus:
       type: string
-      enum: [rascunho, agendada, enviando, pausada, concluida]
+      enum: [rascunho, agendada, enviando, pausada, concluida, cancelada]
+    ScheduleCampaignInput:
+      type: object
+      properties:
+        confirmacao_destinatarios:
+          type: ["string", "null"]
+          pattern: "^[0-9]*$"
+          maxLength: 20
     SendTestResponse:
       type: object
       properties:
@@ -904,6 +1109,9 @@ components:
           minimum: 1
         teste_enviado:
           type: boolean
+        teste_enviado_em:
+          type: ["string", "null"]
+          format: date-time
         corpo:
           type: array
           items:
@@ -931,6 +1139,7 @@ components:
         - lembrete_ativo
         - lembrete_horas
         - teste_enviado
+        - teste_enviado_em
         - corpo
         - criado_em
     CreateCampaignInput:
@@ -968,13 +1177,11 @@ components:
           type: ["string", "null"]
           format: uri
         teto_hora:
-          type: ["integer", "null"]
+          type: integer
           minimum: 0
         teto_dia:
-          type: ["integer", "null"]
+          type: integer
           minimum: 0
-        status:
-          $ref: "#/components/schemas/CampaignStatus"
         agendada_para:
           type: ["string", "null"]
           format: date-time
@@ -982,9 +1189,8 @@ components:
           type: boolean
         lembrete_horas:
           type: integer
-          minimum: 1
-        teste_enviado:
-          type: boolean
+          minimum: 24
+          maximum: 168
         corpo:
           type: array
           items:
@@ -1030,13 +1236,11 @@ components:
           type: ["string", "null"]
           format: uri
         teto_hora:
-          type: ["integer", "null"]
+          type: integer
           minimum: 0
         teto_dia:
-          type: ["integer", "null"]
+          type: integer
           minimum: 0
-        status:
-          $ref: "#/components/schemas/CampaignStatus"
         agendada_para:
           type: ["string", "null"]
           format: date-time
@@ -1044,9 +1248,8 @@ components:
           type: boolean
         lembrete_horas:
           type: integer
-          minimum: 1
-        teste_enviado:
-          type: boolean
+          minimum: 24
+          maximum: 168
         corpo:
           type: array
           items:

@@ -152,7 +152,17 @@ export const CampaignStatus = {
   enviando: 'enviando',
   pausada: 'pausada',
   concluida: 'concluida',
+  cancelada: 'cancelada',
 } as const;
+
+export interface ScheduleCampaignInput {
+  /**
+     * @maxLength 20
+     * @nullable
+     * @pattern ^[0-9]*$
+     */
+  confirmacao_destinatarios?: string | null;
+}
 
 export interface SendTestResponse {
   sent: boolean;
@@ -277,6 +287,8 @@ export interface Campaign {
   /** @minimum 1 */
   lembrete_horas: number;
   teste_enviado: boolean;
+  /** @nullable */
+  teste_enviado_em: string | null;
   corpo: EmailBlock[];
   criado_em: string;
 }
@@ -306,23 +318,18 @@ export interface CreateCampaignInput {
   url_deeplink?: string | null;
   /** @nullable */
   url_landing?: string | null;
-  /**
-     * @minimum 0
-     * @nullable
-     */
-  teto_hora?: number | null;
-  /**
-     * @minimum 0
-     * @nullable
-     */
-  teto_dia?: number | null;
-  status?: CampaignStatus;
+  /** @minimum 0 */
+  teto_hora?: number;
+  /** @minimum 0 */
+  teto_dia?: number;
   /** @nullable */
   agendada_para?: string | null;
   lembrete_ativo?: boolean;
-  /** @minimum 1 */
+  /**
+     * @minimum 24
+     * @maximum 168
+     */
   lembrete_horas?: number;
-  teste_enviado?: boolean;
   corpo?: EmailBlock[];
 }
 
@@ -354,23 +361,18 @@ export interface UpdateCampaignInput {
   url_deeplink?: string | null;
   /** @nullable */
   url_landing?: string | null;
-  /**
-     * @minimum 0
-     * @nullable
-     */
-  teto_hora?: number | null;
-  /**
-     * @minimum 0
-     * @nullable
-     */
-  teto_dia?: number | null;
-  status?: CampaignStatus;
+  /** @minimum 0 */
+  teto_hora?: number;
+  /** @minimum 0 */
+  teto_dia?: number;
   /** @nullable */
   agendada_para?: string | null;
   lembrete_ativo?: boolean;
-  /** @minimum 1 */
+  /**
+     * @minimum 24
+     * @maximum 168
+     */
   lembrete_horas?: number;
-  teste_enviado?: boolean;
   corpo?: EmailBlock[];
 }
 

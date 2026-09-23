@@ -1,4 +1,4 @@
-import { Router, type IRouter, type Request } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import {
   CreateCampaignBody,
   CreateCampaignResponse,
@@ -9,6 +9,7 @@ import {
   ListCampaignsResponse,
   RequestCampaignAssetUploadUrlBody,
   RequestCampaignAssetUploadUrlResponse,
+  ScheduleCampaignBody,
   UpdateCampaignBody,
   UpdateCampaignResponse,
 } from "@workspace/api-zod";
@@ -36,7 +37,7 @@ import {
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
-  "id,nome,assunto,assunto_lembrete,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,url_deeplink,url_landing,teto_hora,teto_dia,status,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em";
+  "id,nome,assunto,assunto_lembrete,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,url_deeplink,url_landing,teto_hora,teto_dia,status,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em";
 // Public by design: this bucket contains only e-mail image assets.
 // Never reuse the private CSV bucket from routes/imports.ts here.
 const EMAIL_ASSET_BUCKET = "amoconecta-assets";
@@ -120,9 +121,8 @@ function campaignPayload(input: Record<string, unknown>, partial = false) {
   if (!partial || "url_landing" in input) {
     payload.url_landing = input.url_landing || null;
   }
-  if (!partial || "teto_hora" in input) payload.teto_hora = input.teto_hora ?? null;
-  if (!partial || "teto_dia" in input) payload.teto_dia = input.teto_dia ?? null;
-  if (!partial || "status" in input) payload.status = input.status ?? "rascunho";
+  if (!partial || "teto_hora" in input) payload.teto_hora = input.teto_hora ?? 100;
+  if (!partial || "teto_dia" in input) payload.teto_dia = input.teto_dia ?? 1000;
   if (!partial || "agendada_para" in input) {
     payload.agendada_para = dateValue(input.agendada_para);
   }
@@ -132,13 +132,23 @@ function campaignPayload(input: Record<string, unknown>, partial = false) {
   if (!partial || "lembrete_horas" in input) {
     payload.lembrete_horas = input.lembrete_horas ?? 48;
   }
-  if (!partial || "teste_enviado" in input) {
-    payload.teste_enviado = input.teste_enviado ?? false;
-  }
+  if (!partial) payload.teste_enviado = false;
   if (!partial || "corpo" in input) {
     payload.corpo = normalizeEmailBlocks(input.corpo);
   }
   return payload;
+}
+
+function rejectServerOwnedCampaignFields(req: Request, res: Response): boolean {
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const forbidden = ["status", "teste_enviado"].filter((field) =>
+    Object.prototype.hasOwnProperty.call(body, field),
+  );
+  if (forbidden.length === 0) return false;
+  res.status(422).json({
+    error: `Não é permitido enviar ${forbidden.join(" e ")} neste endpoint. Use as ações específicas da campanha.`,
+  });
+  return true;
 }
 
 function withDefaultSender(input: Record<string, unknown>): Record<string, unknown> {
@@ -153,8 +163,8 @@ function withDefaultSender(input: Record<string, unknown>): Record<string, unkno
   if (!String(result.reply_to ?? "").trim()) {
     result.reply_to = configuredReplyToEmail();
   }
-  if (result.teto_hora == null) result.teto_hora = 100;
-  if (result.teto_dia == null) result.teto_dia = 1000;
+  if (!Object.prototype.hasOwnProperty.call(result, "teto_hora")) result.teto_hora = 100;
+  if (!Object.prototype.hasOwnProperty.call(result, "teto_dia")) result.teto_dia = 1000;
   return result;
 }
 
@@ -357,7 +367,7 @@ async function findCampaign(campaignId: string) {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,status,assunto,preheader,assunto_lembrete,remetente_nome,remetente_email,reply_to,url_deeplink,url_landing,corpo",
+      "id,status,assunto,preheader,assunto_lembrete,remetente_nome,remetente_email,reply_to,url_deeplink,url_landing,valor_credito,validade_credito,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -402,6 +412,7 @@ router.get("/campaigns", async (req, res) => {
 });
 
 router.post("/campaigns", async (req, res) => {
+  if (rejectServerOwnedCampaignFields(req, res)) return;
   const parsed = CreateCampaignBody.safeParse(withDefaultSender(req.body ?? {}));
   if (!parsed.success) {
     res.status(422).json({ error: formatValidationError(parsed.error) });
@@ -416,22 +427,6 @@ router.post("/campaigns", async (req, res) => {
     const session = await getSupabaseUser(req, res);
     if (!session) {
       res.status(401).json({ error: "Sessão expirada. Entre novamente." });
-      return;
-    }
-    if (
-      (parsed.data.status === "agendada" || parsed.data.status === "enviando") &&
-      !getSafetyMode().envio_liberado
-    ) {
-      res.status(422).json({ error: getSafetyModeMessage() });
-      return;
-    }
-    if (
-      (parsed.data.status === "agendada" || parsed.data.status === "enviando") &&
-      !parsed.data.teste_enviado
-    ) {
-      res.status(422).json({
-        error: "Envie e confirme o teste antes de agendar ou iniciar a campanha.",
-      });
       return;
     }
     const { data, error } = await supabaseAdminClient()
@@ -507,6 +502,175 @@ router.get("/campaigns/:campaignId/recipients/summary", async (req, res) => {
     res.status(502).json({ error: "Não foi possível consultar os destinatários." });
   }
 });
+
+function validHttpUrl(value: unknown): value is string {
+  return typeof value === "string" && /^(?:https?):\/\/[^\s]+$/iu.test(value.trim());
+}
+
+async function validateSchedule(
+  campaign: Awaited<ReturnType<typeof findCampaign>>,
+  confirmation: string | null | undefined,
+): Promise<string | null> {
+  if (!campaign) return "Campanha não encontrada.";
+  if (campaign.status !== "rascunho") {
+    return "Somente campanhas em rascunho podem ser agendadas.";
+  }
+  if (!getSafetyMode().envio_liberado) return getSafetyModeMessage();
+  if (campaign.teste_enviado !== true) {
+    return "Envie e confirme o teste antes de agendar a campanha.";
+  }
+  if (!campaign.agendada_para || Number.isNaN(Date.parse(campaign.agendada_para))) {
+    return "Informe uma data e hora válidas para o agendamento.";
+  }
+  if (Date.parse(campaign.agendada_para) <= Date.now()) {
+    return "O agendamento precisa estar no futuro.";
+  }
+  if (campaign.lembrete_ativo) {
+    const reminderHours = Number(campaign.lembrete_horas);
+    if (!Number.isInteger(reminderHours) || reminderHours < 24 || reminderHours > 168) {
+      return "As horas até o lembrete devem estar entre 24 e 168.";
+    }
+    const reminderSubject = campaign.assunto_lembrete?.trim() ?? "";
+    if (!reminderSubject) {
+      return "Informe o assunto do lembrete quando o lembrete estiver ativo.";
+    }
+    if (reminderSubject.toLocaleLowerCase("pt-BR") === campaign.assunto.trim().toLocaleLowerCase("pt-BR")) {
+      return "O assunto do lembrete precisa ser diferente do assunto principal.";
+    }
+  }
+  const blocks = normalizeEmailBlocks(campaign.corpo);
+  if (blocks.some((block) => block.type === "button" && !validHttpUrl(block.href))) {
+    return "Informe um destino http(s) válido para todos os botões.";
+  }
+  const delivery = await recipientDeliveryProjection(
+    supabaseAdminClient(),
+    campaign.id,
+  );
+  if (
+    delivery.receberao_de_fato > 5000 &&
+    (confirmation ?? "").trim() !== String(delivery.receberao_de_fato)
+  ) {
+    return `Digite ${delivery.receberao_de_fato} para confirmar o total que receberá o envio.`;
+  }
+  return null;
+}
+
+async function runSimpleCampaignTransition(
+  req: Request,
+  res: Response,
+  config: {
+    targetStatus: "pausada" | "enviando" | "cancelada";
+    allowedStatuses: string[];
+    requireSafety?: boolean;
+  },
+): Promise<void> {
+  const params = GetCampaignParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(422).json({ error: "Identificador de campanha inválido." });
+    return;
+  }
+  try {
+    const session = await getSupabaseUser(req, res);
+    if (!session) {
+      res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+    const existing = await findCampaign(params.data.campaignId);
+    if (!existing) {
+      res.status(404).json({ error: "Campanha não encontrada." });
+      return;
+    }
+    if (!config.allowedStatuses.includes(existing.status)) {
+      res.status(409).json({ error: "Essa transição não é permitida para o estado atual da campanha." });
+      return;
+    }
+    if (config.requireSafety && !getSafetyMode().envio_liberado) {
+      res.status(422).json({ error: getSafetyModeMessage() });
+      return;
+    }
+    if (config.requireSafety && existing.teste_enviado !== true) {
+      res.status(422).json({ error: "Envie e confirme o teste antes de retomar a campanha." });
+      return;
+    }
+    const { data, error } = await supabaseAdminClient()
+      .from("campanha")
+      .update({ status: config.targetStatus })
+      .eq("id", params.data.campaignId)
+      .select(CAMPAIGN_COLUMNS)
+      .single();
+    if (error) throw error;
+    res.json(GetCampaignResponse.parse(await withSendMetrics(data)));
+  } catch (error) {
+    logSupabaseError(req, "Campaign transition failed", error);
+    res.status(502).json({ error: "Não foi possível alterar o estado da campanha." });
+  }
+}
+
+router.post("/campaigns/:campaignId/agendar", async (req, res) => {
+  const params = GetCampaignParams.safeParse(req.params);
+  const body = ScheduleCampaignBody.safeParse(req.body ?? {});
+  if (!params.success) {
+    res.status(422).json({ error: "Identificador de campanha inválido." });
+    return;
+  }
+  if (!body.success) {
+    res.status(422).json({ error: formatValidationError(body.error) });
+    return;
+  }
+  try {
+    const session = await getSupabaseUser(req, res);
+    if (!session) {
+      res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+    const campaign = await findCampaign(params.data.campaignId);
+    if (!campaign) {
+      res.status(404).json({ error: "Campanha não encontrada." });
+      return;
+    }
+    const validationError = await validateSchedule(
+      campaign,
+      body.data.confirmacao_destinatarios,
+    );
+    if (validationError) {
+      res.status(validationError.includes("estado atual") ? 409 : 422).json({ error: validationError });
+      return;
+    }
+    const { data, error } = await supabaseAdminClient()
+      .from("campanha")
+      .update({ status: "agendada" })
+      .eq("id", params.data.campaignId)
+      .select(CAMPAIGN_COLUMNS)
+      .single();
+    if (error) throw error;
+    res.json(GetCampaignResponse.parse(await withSendMetrics(data)));
+  } catch (error) {
+    logSupabaseError(req, "Campaign scheduling failed", error);
+    res.status(502).json({ error: "Não foi possível agendar a campanha." });
+  }
+});
+
+router.post("/campaigns/:campaignId/pausar", (req, res) =>
+  runSimpleCampaignTransition(req, res, {
+    targetStatus: "pausada",
+    allowedStatuses: ["enviando"],
+  }),
+);
+
+router.post("/campaigns/:campaignId/retomar", (req, res) =>
+  runSimpleCampaignTransition(req, res, {
+    targetStatus: "enviando",
+    allowedStatuses: ["pausada"],
+    requireSafety: true,
+  }),
+);
+
+router.post("/campaigns/:campaignId/cancelar", (req, res) =>
+  runSimpleCampaignTransition(req, res, {
+    targetStatus: "cancelada",
+    allowedStatuses: ["agendada", "enviando", "pausada"],
+  }),
+);
 
 router.delete("/campaigns/:campaignId/recipients", async (req, res) => {
   const params = GetCampaignParams.safeParse(req.params);
@@ -633,6 +797,7 @@ router.post("/campaigns/:campaignId/assets/upload-url", async (req, res) => {
 
 router.patch("/campaigns/:campaignId", async (req, res) => {
   const params = GetCampaignParams.safeParse(req.params);
+  if (rejectServerOwnedCampaignFields(req, res)) return;
   const parsed = UpdateCampaignBody.partial().safeParse(req.body);
   if (!params.success) {
     res.status(422).json({ error: "Identificador de campanha inválido." });
@@ -665,22 +830,6 @@ router.patch("/campaigns/:campaignId", async (req, res) => {
     const session = await getSupabaseUser(req, res);
     if (!session) {
       res.status(401).json({ error: "Sessão expirada. Entre novamente." });
-      return;
-    }
-    if (
-      (parsed.data.status === "agendada" || parsed.data.status === "enviando") &&
-      !getSafetyMode().envio_liberado
-    ) {
-      res.status(422).json({ error: getSafetyModeMessage() });
-      return;
-    }
-    if (
-      (parsed.data.status === "agendada" || parsed.data.status === "enviando") &&
-      parsed.data.teste_enviado !== true
-    ) {
-      res.status(422).json({
-        error: "Envie e confirme o teste antes de agendar ou iniciar a campanha.",
-      });
       return;
     }
     const existing = await findCampaign(params.data.campaignId);

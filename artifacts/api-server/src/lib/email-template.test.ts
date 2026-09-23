@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   renderEmailHtml,
+  renderEmailText,
   sanitizeRichTextHtml,
 } from "@workspace/email-template";
 
@@ -40,7 +41,7 @@ test("renders an optional hidden inbox preheader before the email content", () =
     html.indexOf("Resumo da oferta", bodyStart) < html.indexOf("<table", bodyStart),
   );
   const hidden = html.match(/display:none!important[^>]*>([^<]*)<\/div>/iu)?.[1];
-  assert.ok((hidden?.match(/&zwnj;&nbsp;/gu)?.length ?? 0) >= 30);
+  assert.doesNotMatch(hidden ?? "", /&zwnj;|&nbsp;/iu);
 });
 
 test("limits rendered preheaders to 100 characters", () => {
@@ -59,6 +60,26 @@ test("removes the name token and greeting separator when name is absent", () => 
   assert.match(html, />Olá<\/td>/iu);
   assert.doesNotMatch(html, /\{\{\s*nome\s*\}\}/iu);
   assert.doesNotMatch(html, /@/u);
+});
+
+test("renders campaign variables in HTML and plain text", () => {
+  const blocks = [
+    { id: "copy", type: "text" as const, html: "<p>{{nome}}, use {{valor_credito}} até {{validade_credito}}.</p>" },
+  ];
+  const options = {
+    name: "Marina",
+    valorCredito: 25.5,
+    validadeCredito: "2026-12-31",
+    preheader: "Oferta para {{nome}}",
+  };
+  const html = renderEmailHtml(blocks, options);
+  const text = renderEmailText(blocks, options);
+
+  assert.match(html, /Marina/iu);
+  assert.match(html, /R\$\s*25,50/iu);
+  assert.match(html, /31\/12\/2026/iu);
+  assert.match(text, /Marina, use R\$\s*25,50 até 31\/12\/2026/iu);
+  assert.doesNotMatch(text, /<p>|<\/p>/iu);
 });
 
 test("sanitizes rich text to the supported formatting and safe links", () => {

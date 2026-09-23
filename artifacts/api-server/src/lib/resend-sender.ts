@@ -14,6 +14,7 @@ export type PreparedResendMessage = {
   to: string[];
   subject: string;
   html: string;
+  text: string;
   reply_to?: string;
   headers: Record<string, string>;
   _idempotencyKey: string;

@@ -5,7 +5,6 @@
  * API do AmoConecta
  * OpenAPI spec version: 0.1.0
  */
-import type { CampaignStatus } from './campaignStatus';
 import type { EmailBlock } from './emailBlock';
 
 export interface CreateCampaignInput {
@@ -33,22 +32,17 @@ export interface CreateCampaignInput {
   url_deeplink?: string | null;
   /** @nullable */
   url_landing?: string | null;
-  /**
-     * @minimum 0
-     * @nullable
-     */
-  teto_hora?: number | null;
-  /**
-     * @minimum 0
-     * @nullable
-     */
-  teto_dia?: number | null;
-  status?: CampaignStatus;
+  /** @minimum 0 */
+  teto_hora?: number;
+  /** @minimum 0 */
+  teto_dia?: number;
   /** @nullable */
   agendada_para?: Date | null;
   lembrete_ativo?: boolean;
-  /** @minimum 1 */
+  /**
+     * @minimum 24
+     * @maximum 168
+     */
   lembrete_horas?: number;
-  teste_enviado?: boolean;
   corpo?: EmailBlock[];
 }
