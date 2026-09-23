@@ -983,7 +983,7 @@ function RecipientSummaryPanel({
     : [];
 
   return (
-    <section className="panel sticky top-4 z-10 p-5 shadow-[0_12px_34px_rgba(38,48,68,.08)] sm:p-7" data-testid="panel-recipient-summary">
+    <section className="panel relative z-0 p-5 shadow-[0_12px_34px_rgba(38,48,68,.08)] sm:p-7" data-testid="panel-recipient-summary">
       <div className="flex flex-col justify-between gap-4 border-b border-[#eee7dc] pb-5 sm:flex-row sm:items-start">
         <div>
           <p className="section-kicker">Gestão da base</p>
