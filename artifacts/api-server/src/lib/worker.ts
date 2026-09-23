@@ -19,7 +19,6 @@ import {
   configuredSenderEmail,
   configuredReplyToEmail,
   configuredSenderName,
-  DEFAULT_REPLY_TO,
   DEFAULT_SENDER_NAME,
   isValidReplyToEmail,
   isVerifiedSenderEmail,
@@ -33,6 +32,7 @@ const RECOVERY_RPC = "recuperar_destinatarios_travados";
 const RECOVERY_BATCH_SIZE = 1000;
 const WORKER_LOCK_ACQUIRE_RPC = "tentar_adquirir_lock_worker";
 const WORKER_LOCK_RELEASE_RPC = "liberar_lock_worker";
+const missingReplyToWarnings = new Set<string>();
 // Fixed database-wide lock key. It must remain stable across worker processes.
 const WORKER_LOCK_KEY = 4_782_913_421;
 const WORKER_LOCK_TOKEN = randomUUID();
@@ -266,10 +266,24 @@ function sender(campaign: Campaign): string {
 }
 
 function replyTo(campaign: Campaign): string | undefined {
-  const value = normalize(
-    campaign.reply_to ?? configuredReplyToEmail() ?? DEFAULT_REPLY_TO,
+  const configured = campaign.reply_to?.trim() || configuredReplyToEmail();
+  if (!configured) {
+    if (!missingReplyToWarnings.has(campaign.id)) {
+      missingReplyToWarnings.add(campaign.id);
+      logger.warn(
+        { campaignId: campaign.id },
+        "Reply-To ausente; as respostas usarão o endereço From da campanha",
+      );
+    }
+    return undefined;
+  }
+  const value = normalize(configured);
+  if (isValidReplyToEmail(value)) return value;
+  logger.warn(
+    { campaignId: campaign.id },
+    "Reply-To inválido; o cabeçalho Reply-To será omitido",
   );
-  return isValidReplyToEmail(value) ? value : undefined;
+  return undefined;
 }
 
 function emailPayload(
@@ -295,6 +309,7 @@ function emailPayload(
     unsubscribeUrl: unsubscribe,
     preheader: campaign.preheader,
   };
+  const campaignReplyTo = replyTo(campaign);
   return {
     from: sender(campaign),
     to: [recipient.email],
@@ -304,7 +319,7 @@ function emailPayload(
       normalizeEmailBlocks(campaign.corpo) as EmailBlock[],
       templateOptions,
     ),
-    ...(replyTo(campaign) ? { reply_to: replyTo(campaign) } : {}),
+    ...(campaignReplyTo ? { reply_to: campaignReplyTo } : {}),
     headers: {
       "List-Unsubscribe": `<${unsubscribe}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",

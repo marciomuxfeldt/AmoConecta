@@ -3,12 +3,18 @@ import {
   WorkerConfigurationError,
   processDueCampaigns,
 } from "./lib/worker";
-import { getRequiredSecretStatus } from "./lib/config-diagnostics";
+import {
+  getRequiredSecretStatus,
+  WORKER_REQUIRED_SECRET_NAMES,
+} from "./lib/config-diagnostics";
 
 async function main(): Promise<void> {
   logger.info(
-    { requiredSecrets: getRequiredSecretStatus() },
-    "AmoConecta required Secrets check",
+    {
+      process: "worker",
+      requiredSecrets: getRequiredSecretStatus(WORKER_REQUIRED_SECRET_NAMES),
+    },
+    "AmoConecta worker required Secrets check",
   );
   const processed = await processDueCampaigns();
   logger.info({ processed }, "AmoConecta worker finished");

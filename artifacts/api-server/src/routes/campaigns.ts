@@ -160,8 +160,9 @@ function withDefaultSender(input: Record<string, unknown>): Record<string, unkno
   if (!String(result.remetente_nome ?? "").trim()) {
     result.remetente_nome = configuredSenderName();
   }
-  if (!String(result.reply_to ?? "").trim()) {
-    result.reply_to = configuredReplyToEmail();
+  const replyToEmail = configuredReplyToEmail();
+  if (!String(result.reply_to ?? "").trim() && replyToEmail) {
+    result.reply_to = replyToEmail;
   }
   if (!Object.prototype.hasOwnProperty.call(result, "teto_hora")) result.teto_hora = 100;
   if (!Object.prototype.hasOwnProperty.call(result, "teto_dia")) result.teto_dia = 1000;

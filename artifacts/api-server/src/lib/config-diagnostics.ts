@@ -1,8 +1,7 @@
-export const REQUIRED_SECRET_NAMES = [
+export const API_REQUIRED_SECRET_NAMES = [
   "RESEND_API_KEY",
   "SENDER_EMAIL",
   "SENDER_NAME",
-  "REPLY_TO_EMAIL",
   "UNSUBSCRIBE_SECRET",
   "APP_BASE_URL",
   "ENVIO_LIBERADO",
@@ -11,6 +10,20 @@ export const REQUIRED_SECRET_NAMES = [
   "SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
   "SESSION_SECRET",
+  "DATABASE_URL",
+  "PORT",
+] as const;
+
+export const WORKER_REQUIRED_SECRET_NAMES = [
+  "RESEND_API_KEY",
+  "SENDER_EMAIL",
+  "SENDER_NAME",
+  "UNSUBSCRIBE_SECRET",
+  "APP_BASE_URL",
+  "ENVIO_LIBERADO",
+  "ENVIO_ALLOWLIST",
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
 ] as const;
 
 export type RequiredSecretStatus = {
@@ -18,11 +31,13 @@ export type RequiredSecretStatus = {
   missing: string[];
 };
 
-export function getRequiredSecretStatus(): RequiredSecretStatus {
+export function getRequiredSecretStatus(
+  names: readonly string[],
+): RequiredSecretStatus {
   const present: string[] = [];
   const missing: string[] = [];
 
-  for (const name of REQUIRED_SECRET_NAMES) {
+  for (const name of names) {
     if (process.env[name]?.trim()) present.push(name);
     else missing.push(name);
   }

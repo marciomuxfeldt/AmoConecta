@@ -44,7 +44,7 @@ export const getCampaignDefaultsResponseTetoDiaMin = 0;
 export const GetCampaignDefaultsResponse = zod.object({
   "remetente_email": zod.string().email(),
   "remetente_nome": zod.string(),
-  "reply_to": zod.string().email(),
+  "reply_to": zod.string().email().nullable(),
   "teto_hora": zod.number().int().min(getCampaignDefaultsResponseTetoHoraMin),
   "teto_dia": zod.number().int().min(getCampaignDefaultsResponseTetoDiaMin)
 })

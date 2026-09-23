@@ -1,11 +1,17 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { getTechnicalError } from "./lib/technical-error";
-import { getRequiredSecretStatus } from "./lib/config-diagnostics";
+import {
+  API_REQUIRED_SECRET_NAMES,
+  getRequiredSecretStatus,
+} from "./lib/config-diagnostics";
 
 logger.info(
-  { requiredSecrets: getRequiredSecretStatus() },
-  "AmoConecta required Secrets check",
+  {
+    process: "api",
+    requiredSecrets: getRequiredSecretStatus(API_REQUIRED_SECRET_NAMES),
+  },
+  "AmoConecta API required Secrets check",
 );
 
 const rawPort = process.env["PORT"];

@@ -523,7 +523,7 @@ function CampaignForm({
       campaign,
       defaultsQuery.data?.remetente_email,
       defaultsQuery.data?.remetente_nome,
-      defaultsQuery.data?.reply_to,
+      defaultsQuery.data?.reply_to ?? '',
       defaultsQuery.data?.teto_hora == null ? '100' : String(defaultsQuery.data.teto_hora),
       defaultsQuery.data?.teto_dia == null ? '1000' : String(defaultsQuery.data.teto_dia),
     ),
@@ -553,7 +553,7 @@ function CampaignForm({
       campaign,
       defaultsQuery.data?.remetente_email,
       defaultsQuery.data?.remetente_nome,
-      defaultsQuery.data?.reply_to,
+      defaultsQuery.data?.reply_to ?? '',
       defaultsQuery.data?.teto_hora == null ? '100' : String(defaultsQuery.data.teto_hora),
       defaultsQuery.data?.teto_dia == null ? '1000' : String(defaultsQuery.data.teto_dia),
     ));
@@ -644,7 +644,7 @@ function CampaignForm({
         <div className="grid gap-5 md:grid-cols-2">
           <Field label="Nome do remetente"><div className="relative"><UserRound size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_nome')} disabled={contentLocked} className="field-control pl-10 disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Amo Ofertas" data-testid="input-sender-name" /></div></Field>
            <Field label="E-mail do remetente" hint="Somente endereços do domínio verificado marketing.amo.delivery."><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('remetente_email')} type="email" readOnly aria-readonly="true" className="field-control bg-[#f3eee7] pl-10 text-[#6d7180]" placeholder="Carregando remetente seguro…" data-testid="input-sender-email" /></div>{form.formState.errors.remetente_email && <p className="mt-2 text-xs font-bold text-[#bd4f26]" data-testid="error-sender-email">{form.formState.errors.remetente_email.message}</p>}</Field>
-           <Field label="Reply-To" hint="Respostas dos destinatários serão encaminhadas para este endereço."><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('reply_to')} disabled={contentLocked} type="email" className="field-control pl-10 disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="contato@marketing.amo.delivery" data-testid="input-reply-to" /></div>{form.formState.errors.reply_to && <p className="mt-2 text-xs font-bold text-[#bd4f26]" data-testid="error-reply-to">{form.formState.errors.reply_to.message}</p>}</Field>
+           <Field label="Reply-To" hint="Opcional. Sem este campo, as respostas vão para o endereço From da campanha."><div className="relative"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('reply_to')} disabled={contentLocked} type="email" className="field-control pl-10 disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="opcional — usa o remetente" data-testid="input-reply-to" /></div>{form.formState.errors.reply_to && <p className="mt-2 text-xs font-bold text-[#bd4f26]" data-testid="error-reply-to">{form.formState.errors.reply_to.message}</p>}</Field>
         </div>
       </section>
 

@@ -33,13 +33,13 @@ router.get("/campaign-defaults", async (req, res) => {
     });
     return;
   }
-   res.json({
-     remetente_email: senderEmail,
-     remetente_nome: configuredSenderName(),
-     reply_to: configuredReplyToEmail(),
-     teto_hora: 100,
-     teto_dia: 1000,
-   });
+    res.json({
+      remetente_email: senderEmail,
+      remetente_nome: configuredSenderName(),
+      reply_to: configuredReplyToEmail(),
+      teto_hora: 100,
+      teto_dia: 1000,
+    });
 });
 
 export default router;

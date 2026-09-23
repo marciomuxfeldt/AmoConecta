@@ -833,7 +833,7 @@ components:
         remetente_nome:
           type: string
         reply_to:
-          type: string
+          type: ["string", "null"]
           format: email
         teto_hora:
           type: integer
