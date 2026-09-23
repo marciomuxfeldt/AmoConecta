@@ -431,7 +431,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Campanha bloqueada pelo modo de segurança
+          description: Campanha sem teste confirmado
           content:
             application/json:
               schema:
@@ -1001,6 +1001,14 @@ components:
           type: integer
           minimum: 0
           description: Destinatários atualmente presentes na tabela de supressão.
+        permitidos_modo_teste:
+          type: integer
+          minimum: 0
+          description: Destinatários não suprimidos que podem receber no modo de segurança.
+        bloqueados_modo_teste:
+          type: integer
+          minimum: 0
+          description: Destinatários não suprimidos que serão bloqueados pelo modo de segurança.
         receberao_de_fato:
           type: integer
           minimum: 0
@@ -1013,7 +1021,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RecipientRecencyBucket"
-      required: [campanha_id, total, total_na_lista, suprimidos_no_envio, receberao_de_fato, status, reputacao, recencia]
+      required: [campanha_id, total, total_na_lista, suprimidos_no_envio, permitidos_modo_teste, bloqueados_modo_teste, receberao_de_fato, status, reputacao, recencia]
     CampaignRecipientsCleared:
       type: object
       properties:

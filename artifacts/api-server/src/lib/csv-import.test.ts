@@ -12,7 +12,7 @@ function streamFromText(value: string): ReadableStream<Uint8Array> {
   });
 }
 
-function emptyImportClient() {
+function emptyImportClient(onUpsert?: (rows: unknown[]) => void) {
   return {
     from(table: string) {
       if (table === "supressao") {
@@ -30,7 +30,10 @@ function emptyImportClient() {
             }),
           }),
         }),
-        upsert: async () => ({ error: null }),
+        upsert: async (rows: unknown[]) => {
+          onUpsert?.(rows);
+          return { error: null };
+        },
       };
     },
   };
@@ -95,4 +98,31 @@ test("matches the reference file totals after phone normalization", async () => 
   assert.equal(summary.duplicados_no_arquivo, 1_420);
   assert.equal(summary.invalidos, 0);
   assert.equal(summary.amostras_erros.length, 0);
+});
+
+test("keeps the newest valid purchase date when phones collide", async () => {
+  const savedRows: unknown[] = [];
+  const summary = await validateAndImportCsv({
+    client: emptyImportClient((rows) => savedRows.push(...rows)) as never,
+    stream: streamFromText(
+      [
+        "nome,email,telefone,data_ultima_compra",
+        "Pessoa antiga,antiga@example.com,49999990010,2025-01-15",
+        "Pessoa nova,nova@example.com,(49) 99999-0010,2026-02-20",
+      ].join("\n"),
+    ),
+    campaignId: "00000000-0000-0000-0000-000000000001",
+    storagePath: "campaign/newest.csv",
+    deduplicatePhone: true,
+  });
+
+  assert.equal(summary.validos, 1);
+  assert.equal(summary.duplicados_telefone, 1);
+  assert.equal(summary.duplicados_no_arquivo, 1);
+  assert.equal(savedRows.length, 1);
+  assert.equal((savedRows[0] as { email: string }).email, "nova@example.com");
+  assert.equal(
+    (savedRows[0] as { data_ultima_compra: string }).data_ultima_compra,
+    "2026-02-20",
+  );
 });

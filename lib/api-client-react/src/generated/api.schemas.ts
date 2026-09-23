@@ -129,6 +129,16 @@ export interface CampaignRecipientSummary {
      */
   suprimidos_no_envio: number;
   /**
+     * Destinatários não suprimidos que podem receber no modo de segurança.
+     * @minimum 0
+     */
+  permitidos_modo_teste: number;
+  /**
+     * Destinatários não suprimidos que serão bloqueados pelo modo de segurança.
+     * @minimum 0
+     */
+  bloqueados_modo_teste: number;
+  /**
      * Total atual da lista menos as supressões atuais.
      * @minimum 0
      */

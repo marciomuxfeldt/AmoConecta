@@ -87,6 +87,7 @@ type ImageUploadState = {
   phase: "idle" | "processing" | "uploading" | "error";
   progress: number | null;
   previewUrl: string | null;
+  processedBytes: number | null;
   warning: string | null;
   error: string | null;
 };
@@ -95,9 +96,16 @@ const idleImageUploadState: ImageUploadState = {
   phase: "idle",
   progress: null,
   previewUrl: null,
+  processedBytes: null,
   warning: null,
   error: null,
 };
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+}
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
   return new Promise<Blob>((resolve, reject) => {
@@ -347,11 +355,11 @@ function BlockCard({
     const warning = file.size > MAX_ORIGINAL_IMAGE_BYTES
       ? "O arquivo original passa de 10 MB; vamos reduzi-lo antes do envio."
       : null;
-    setImageUpload({ phase: "processing", progress: null, previewUrl, warning, error: null });
+    setImageUpload({ phase: "processing", progress: null, previewUrl, processedBytes: null, warning, error: null });
     onUploadingChange?.(block.id, true);
     try {
       const compressedFile = await compressImageForUpload(file);
-      setImageUpload((current) => ({ ...current, phase: "uploading", progress: 0 }));
+      setImageUpload((current) => ({ ...current, phase: "uploading", progress: 0, processedBytes: compressedFile.size }));
       const signed = await upload.mutateAsync({
         campaignId,
         data: {
@@ -373,11 +381,11 @@ function BlockCard({
       if (currentBlock?.type === "image") {
         onChangeRef.current(updateBlock(blocksRef.current, block.id, (candidate) => (
           candidate.type === "image"
-            ? { ...candidate, src: signed.public_url, alt: candidate.alt || file.name.replace(/\.[^/.]+$/u, "") }
+              ? { ...candidate, src: signed.public_url }
             : candidate
         )));
       }
-      setImageUpload(idleImageUploadState);
+        setImageUpload({ ...idleImageUploadState, processedBytes: compressedFile.size });
     } catch (error) {
       setImageUpload((current) => ({
         ...current,
@@ -423,12 +431,12 @@ function BlockCard({
                 {imageUpload.phase === "uploading" && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/20" role="progressbar" aria-label="Progresso do upload da imagem" aria-valuemin={0} aria-valuemax={100} aria-valuenow={imageUpload.progress ?? 0}><div className="h-full rounded-full bg-[#d7ef56] transition-[width] duration-150" style={{ width: `${imageUpload.progress ?? 0}%` }} /></div>}
               </div>
             </div>
-          ) : block.src ? <div className="relative overflow-hidden rounded-xl border border-[#e5ddd0] bg-white"><img src={block.src} alt={block.alt} className="max-h-56 w-full object-contain" /><span className="absolute bottom-2 left-2 rounded-full bg-[#263044]/85 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[.08em] text-[#fbf9f5]">Imagem pronta</span></div> : <div className="rounded-xl border border-dashed border-[#d8cdbd] bg-[#f8f3ec] px-4 py-9 text-center"><ImagePlus size={20} className="mx-auto mb-2 text-[#c3b6a7]" /><p className="text-xs font-bold text-[#6d7180]">Nenhuma imagem adicionada</p><p className="mt-1 text-[10px] text-[#99959a]">JPG, PNG, GIF ou WEBP</p></div>}
+          ) : block.src ? <div className="relative overflow-hidden rounded-xl border border-[#e5ddd0] bg-white"><img src={block.src} alt={block.alt} className="max-h-56 w-full object-contain" /><div className="absolute bottom-2 left-2 flex items-center gap-2 rounded-full bg-[#263044]/85 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[.08em] text-[#fbf9f5]"><span>Imagem pronta</span>{imageUpload.processedBytes != null && <span>· {formatBytes(imageUpload.processedBytes)}</span>}</div></div> : <div className="rounded-xl border border-dashed border-[#d8cdbd] bg-[#f8f3ec] px-4 py-9 text-center"><ImagePlus size={20} className="mx-auto mb-2 text-[#c3b6a7]" /><p className="text-xs font-bold text-[#6d7180]">Nenhuma imagem adicionada</p><p className="mt-1 text-[10px] text-[#99959a]">JPG, PNG, GIF ou WEBP</p></div>}
           {imageUpload.warning && <p className="rounded-lg border border-[#f1dfb8] bg-[#fff9e9] px-3 py-2 text-xs text-[#8b671c]" role="status">{imageUpload.warning}</p>}
           <div className="grid gap-3 sm:grid-cols-2">
              <label className="action-button action-button-secondary focus-within:ring-2 focus-within:ring-[#d7ef56] focus-within:ring-offset-2 cursor-pointer text-center"><ImagePlus size={14} /> {imageUpload.phase === "error" ? "Escolher outra imagem" : "Escolher imagem"}<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="sr-only" disabled={disabled || imageUpload.phase === "processing" || imageUpload.phase === "uploading" || upload.isPending} onChange={(event) => { void uploadImage(event.target.files?.[0]); event.currentTarget.value = ""; }} data-testid={`input-image-upload-${block.id}`} /></label>
              {imageUpload.phase === "error" ? <button type="button" disabled={disabled} onClick={() => { void uploadImage(); }} className="action-button action-button-secondary !border-[#efc9ba] !text-[#a64220] disabled:cursor-not-allowed disabled:opacity-40" data-testid={`button-retry-image-upload-${block.id}`}><RefreshCw size={14} /> Tentar novamente</button> : <div />}
-            <div><label htmlFor={`image-alt-${block.id}`} className="field-label">Texto alternativo</label><input id={`image-alt-${block.id}`} disabled={disabled} value={block.alt} onChange={(event) => update({ ...block, alt: event.target.value.slice(0, 160) })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Descreva a imagem" aria-label="Texto alternativo da imagem" data-testid={`input-image-alt-${block.id}`} /></div>
+             <div><label htmlFor={`image-alt-${block.id}`} className="field-label">Texto alternativo</label><input id={`image-alt-${block.id}`} disabled={disabled} value={block.alt} onChange={(event) => update({ ...block, alt: event.target.value.slice(0, 160) })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Descreva a imagem" aria-label="Texto alternativo da imagem" data-testid={`input-image-alt-${block.id}`} /><p className="mt-1.5 text-[10px] leading-4 text-[#8d8780]">Sem texto alternativo, a imagem aparece como espaço vazio para quem bloqueia imagens.</p></div>
           </div>
         <div><label htmlFor={`image-href-${block.id}`} className="field-label">Link da imagem <span className="font-normal text-[#99959a]">· opcional</span></label><input id={`image-href-${block.id}`} disabled={disabled} value={block.href ?? ""} onChange={(event) => update({ ...block, href: event.target.value })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="https://..." aria-label="Link opcional da imagem" data-testid={`input-image-link-${block.id}`} /></div>
            {imageUpload.phase === "error" && imageUpload.error && <p className="rounded-lg border border-[#efc9ba] bg-[#fff0e9] px-3 py-2 text-xs text-[#a64220]" role="alert">{imageUpload.error}</p>}

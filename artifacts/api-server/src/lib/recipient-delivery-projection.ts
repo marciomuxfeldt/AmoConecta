@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isRecipientAllowed } from "./safety-mode";
 
 const RECIPIENT_PAGE_SIZE = 1_000;
 
@@ -9,6 +10,8 @@ function normalizeEmail(value: string): string {
 export type RecipientDeliveryProjection = {
   total_na_lista: number;
   suprimidos_no_envio: number;
+  permitidos_modo_teste: number;
+  bloqueados_modo_teste: number;
   receberao_de_fato: number;
 };
 
@@ -25,11 +28,19 @@ export function buildRecipientDeliveryProjection(
   const suprimidosNoEnvio = normalizedRecipients.filter((email) =>
     normalizedSuppressedEmails.has(email),
   ).length;
+  const recipientsAfterSuppression = normalizedRecipients.filter(
+    (email) => !normalizedSuppressedEmails.has(email),
+  );
+  const permitidosModoTeste = recipientsAfterSuppression.filter(isRecipientAllowed).length;
+  const bloqueadosModoTeste =
+    recipientsAfterSuppression.length - permitidosModoTeste;
 
   return {
     total_na_lista: normalizedRecipients.length,
     suprimidos_no_envio: suprimidosNoEnvio,
-    receberao_de_fato: normalizedRecipients.length - suprimidosNoEnvio,
+    permitidos_modo_teste: permitidosModoTeste,
+    bloqueados_modo_teste: bloqueadosModoTeste,
+    receberao_de_fato: permitidosModoTeste,
   };
 }
 

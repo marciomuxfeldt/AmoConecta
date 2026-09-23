@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import {
   getGetAuthSessionQueryKey,
+  setUnauthorizedHandler,
   useGetAuthSession,
   useLogin,
 } from '@workspace/api-client-react';
@@ -84,6 +85,8 @@ function SessionError({ retry }: { retry: () => void }) {
 
 function LoginPage() {
   const [, setLocation] = useLocation();
+  const sessionExpired = typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('session') === 'expired';
   const queryClientForLogin = useQueryClient();
   const login = useLogin();
   const [showPassword, setShowPassword] = useState(false);
@@ -113,6 +116,7 @@ function LoginPage() {
           <div className="mb-12 flex items-center justify-between lg:hidden"><AmoMark /><span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#7b6870]">Acesso privado</span></div>
           <div className="mb-9"><div className="mb-5 flex h-11 w-11 items-center justify-center rounded-2xl bg-[#d7ef56] text-[#263044] shadow-[3px_3px_0_#e96527]"><KeyRound size={19} strokeWidth={2.3} /></div><p className="section-kicker">Entrar no AmoConecta</p><h2 className="mt-3 text-3xl font-extrabold tracking-[-0.06em] text-[#263044] sm:text-[2.65rem]">Bom ter você de volta.</h2><p className="mt-3 text-sm leading-6 text-[#6d7180]">Use suas credenciais de operação para acessar o controle de campanhas.</p></div>
           <form onSubmit={form.handleSubmit(submit)} className="space-y-5" noValidate>
+             {sessionExpired && <div className="flex items-start gap-3 rounded-xl border border-[#e8c56f] bg-[#fff7dc] px-4 py-3 text-sm leading-5 text-[#74561c]" role="alert" data-testid="status-session-expired"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>Sua sessão expirou. Entre novamente para continuar.</span></div>}
             <div><label htmlFor="email" className="field-label">E-mail de trabalho</label><div className="relative"><Mail size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#89909e]" /><input id="email" type="email" autoComplete="email" placeholder="voce@amoofertas.com.br" {...form.register('email')} className="field-control pl-11" data-testid="input-email" /></div>{form.formState.errors.email && <p className="mt-1.5 text-xs font-medium text-[#bd4f26]" data-testid="error-email">{form.formState.errors.email.message}</p>}</div>
             <div><div className="mb-2 flex items-center justify-between"><label htmlFor="password" className="field-label mb-0">Senha</label><span className="font-mono text-[9px] uppercase tracking-[0.08em] text-[#92939a]">Uso interno</span></div><div className="relative"><KeyRound size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#89909e]" /><input id="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="Digite sua senha" {...form.register('password')} className="field-control px-11" data-testid="input-password" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} className="focus-ring absolute right-3 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 font-mono text-[9px] uppercase tracking-[0.08em] text-[#737986] hover:text-[#263044]" data-testid="button-toggle-password">{showPassword ? 'ocultar' : 'mostrar'}</button></div>{form.formState.errors.password && <p className="mt-1.5 text-xs font-medium text-[#bd4f26]" data-testid="error-password">{form.formState.errors.password.message}</p>}</div>
             {login.isError && <div className="flex items-start gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-login-error"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{getErrorMessage(login.error, 'Não foi possível entrar. Confira seus dados e tente novamente.')}</span><button type="button" onClick={() => login.reset()} className="focus-ring ml-auto rounded p-0.5" aria-label="Fechar aviso" data-testid="button-dismiss-login-error"><X size={14} /></button></div>}
@@ -153,6 +157,16 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
 }
 
 function App() {
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      queryClient.clear();
+      if (!window.location.pathname.endsWith('/login')) {
+        window.location.assign(`${import.meta.env.BASE_URL}login?session=expired`);
+      }
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>

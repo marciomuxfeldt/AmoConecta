@@ -38,6 +38,12 @@ type ImportRow = {
   data_ultima_compra: string | null;
 };
 
+type ImportCandidate = {
+  row: ImportRow;
+  line: number;
+  purchaseDate: string | null;
+};
+
 export class ImportValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -375,8 +381,7 @@ export async function validateAndImportCsv({
 }): Promise<ImportSummary> {
   const summary = buildSummary(storagePath);
   const suppression = await loadSuppression(client);
-  const seenEmails = new Set<string>();
-  const seenPhones = new Set<string>();
+  const candidates: ImportCandidate[] = [];
   const iterator = recordsFromStream(stream);
   let lastReportedLines = 0;
   const reportProgress = async () => {
@@ -490,35 +495,74 @@ export async function validateAndImportCsv({
       await reportProgress();
       continue;
     }
-    if (seenEmails.has(email)) {
+    candidates.push({
+      line: record.line,
+      purchaseDate: parsedDate.date,
+      row: {
+        campanha_id: campaignId,
+        id_usuario: idUsuario,
+        nome,
+        email,
+        telefone,
+        regiao,
+        data_ultima_compra: parsedDate.date,
+      },
+    });
+    await reportProgress();
+  }
+
+  const isMoreRecent = (
+    candidate: ImportCandidate,
+    current: ImportCandidate,
+  ): boolean => {
+    if (candidate.purchaseDate && current.purchaseDate) {
+      return candidate.purchaseDate > current.purchaseDate;
+    }
+    return Boolean(candidate.purchaseDate && !current.purchaseDate);
+  };
+
+  const phoneWinners = new Map<string, ImportCandidate>();
+  const candidatesWithoutPhone: ImportCandidate[] = [];
+  for (const candidate of candidates) {
+    const phone = candidate.row.telefone;
+    if (!deduplicatePhone || !phone) {
+      candidatesWithoutPhone.push(candidate);
+      continue;
+    }
+    const current = phoneWinners.get(phone);
+    if (!current) {
+      phoneWinners.set(phone, candidate);
+      continue;
+    }
+    summary.duplicados_no_arquivo += 1;
+    summary.duplicados_telefone += 1;
+    if (isMoreRecent(candidate, current)) {
+      phoneWinners.set(phone, candidate);
+    }
+  }
+
+  const phoneSelected = deduplicatePhone
+    ? [...phoneWinners.values(), ...candidatesWithoutPhone]
+    : candidates;
+  const selected: ImportCandidate[] = [];
+  const selectedEmails = new Set<string>();
+  for (const candidate of phoneSelected) {
+    if (selectedEmails.has(candidate.row.email)) {
       summary.duplicados_no_arquivo += 1;
       summary.duplicados_email += 1;
-      await reportProgress();
       continue;
     }
-    if (deduplicatePhone && telefone && seenPhones.has(telefone)) {
-      summary.duplicados_no_arquivo += 1;
-      summary.duplicados_telefone += 1;
-      await reportProgress();
-      continue;
-    }
+    selectedEmails.add(candidate.row.email);
+    selected.push(candidate);
+  }
 
-    seenEmails.add(email);
-    if (telefone) seenPhones.add(telefone);
+  for (const candidate of selected) {
     summary.validos += 1;
-    const faixa = recencyBucket(parsedDate.date);
+    const faixa = recencyBucket(candidate.purchaseDate);
     const bucket = summary.recencia.find((item) => item.faixa === faixa);
     if (bucket) bucket.quantidade += 1;
-    block.push({
-      campanha_id: campaignId,
-      id_usuario: idUsuario,
-      nome,
-      email,
-      telefone,
-      regiao,
-      data_ultima_compra: parsedDate.date,
-    });
-    if (existingEmails.has(email)) {
+    block.push(candidate.row);
+    if (existingEmails.has(candidate.row.email)) {
       blockUpdatedCount += 1;
     } else {
       blockNewCount += 1;
@@ -526,7 +570,6 @@ export async function validateAndImportCsv({
     if (block.length >= BLOCK_SIZE) {
       await flush();
     }
-    await reportProgress();
   }
   await flush();
   if (onProgress && summary.total_linhas > lastReportedLines) {

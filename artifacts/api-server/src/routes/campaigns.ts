@@ -17,7 +17,6 @@ import { getSupabaseUser } from "./auth";
 import { supabaseAdminClient } from "../lib/supabase";
 import { getTechnicalError } from "../lib/technical-error";
 import { normalizeEmailBlocks } from "@workspace/email-template";
-import { getSafetyMode, getSafetyModeMessage } from "../lib/safety-mode";
 import { sendTestEmail } from "../lib/worker";
 import { getTestSendErrorResponse } from "../lib/test-send-error";
 import { formatValidationError } from "../lib/validation";
@@ -295,6 +294,8 @@ async function recipientSummary(campaignId: string) {
     total: deliveryProjection.total_na_lista,
     total_na_lista: deliveryProjection.total_na_lista,
     suprimidos_no_envio: deliveryProjection.suprimidos_no_envio,
+    permitidos_modo_teste: deliveryProjection.permitidos_modo_teste,
+    bloqueados_modo_teste: deliveryProjection.bloqueados_modo_teste,
     receberao_de_fato: deliveryProjection.receberao_de_fato,
     status: {
       pendente: statusCounts[0],
@@ -516,7 +517,6 @@ async function validateSchedule(
   if (campaign.status !== "rascunho") {
     return "Somente campanhas em rascunho podem ser agendadas.";
   }
-  if (!getSafetyMode().envio_liberado) return getSafetyModeMessage();
   if (campaign.teste_enviado !== true) {
     return "Envie e confirme o teste antes de agendar a campanha.";
   }
@@ -571,7 +571,7 @@ async function runSimpleCampaignTransition(
   config: {
     targetStatus: "pausada" | "enviando" | "cancelada";
     allowedStatuses: string[];
-    requireSafety?: boolean;
+    requireTest?: boolean;
   },
 ): Promise<void> {
   const params = GetCampaignParams.safeParse(req.params);
@@ -594,11 +594,7 @@ async function runSimpleCampaignTransition(
       res.status(409).json({ error: "Essa transição não é permitida para o estado atual da campanha." });
       return;
     }
-    if (config.requireSafety && !getSafetyMode().envio_liberado) {
-      res.status(422).json({ error: getSafetyModeMessage() });
-      return;
-    }
-    if (config.requireSafety && existing.teste_enviado !== true) {
+    if (config.requireTest && existing.teste_enviado !== true) {
       res.status(422).json({ error: "Envie e confirme o teste antes de retomar a campanha." });
       return;
     }
@@ -671,7 +667,7 @@ router.post("/campaigns/:campaignId/retomar", (req, res) =>
   runSimpleCampaignTransition(req, res, {
     targetStatus: "enviando",
     allowedStatuses: ["pausada"],
-    requireSafety: true,
+    requireTest: true,
   }),
 );
 

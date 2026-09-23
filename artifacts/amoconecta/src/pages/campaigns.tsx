@@ -161,6 +161,11 @@ function toServerDate(value: string) {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
 }
 
+function toDateInput(value: string | null | undefined) {
+  if (!value) return '';
+  return value.slice(0, 10);
+}
+
 function isHttpUrl(value: string) {
   return /^https?:\/\/[^\s]+$/iu.test(value.trim());
 }
@@ -294,7 +299,7 @@ function Shell({
               <div>
                 <strong className="font-bold">{safetyModeQuery.data.message}</strong>
                 <p className="text-xs text-[#8a6b2c]">
-                  A operação permanece bloqueada até a liberação explícita do ambiente.
+                    Campanhas podem ser agendadas; no envio, somente os {formatNumber(safetyModeQuery.data.allowlist_count)} endereços da allowlist recebem a mensagem.
                 </p>
               </div>
             </div>
@@ -480,7 +485,7 @@ function campaignToForm(
     remetente_email: campaign.remetente_email,
     reply_to: campaign.reply_to ?? replyTo,
     valor_credito: campaign.valor_credito == null ? '' : String(campaign.valor_credito),
-    validade_credito: campaign.validade_credito ?? '',
+    validade_credito: toDateInput(campaign.validade_credito),
     url_deeplink: campaign.url_deeplink ?? '',
     url_landing: campaign.url_landing ?? '',
     teto_hora: campaign.teto_hora == null ? '' : String(campaign.teto_hora),
@@ -507,6 +512,8 @@ function CampaignForm({
   testPending,
   testError,
   testSent,
+  onSchedule,
+  schedulePending,
 }: {
   campaign?: Campaign;
   onSaved: (campaign: Campaign) => void;
@@ -514,6 +521,8 @@ function CampaignForm({
   testPending?: boolean;
   testError?: string | null;
   testSent?: boolean;
+  onSchedule?: () => void;
+  schedulePending?: boolean;
 }) {
   const create = useCreateCampaign();
   const update = useUpdateCampaign();
@@ -678,11 +687,11 @@ function CampaignForm({
       {form.formState.errors.corpo?.message && <p className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" data-testid="error-email-content">{form.formState.errors.corpo.message}</p>}
       {isUploadPending && <p className="flex items-center gap-2 rounded-xl border border-[#d4e5df] bg-[#f1f7f5] px-4 py-3 text-xs text-[#247b79]" role="status" data-testid="status-image-upload-blocking"><LoaderCircle size={14} className="animate-spin" /> Aguarde o upload das imagens terminar para salvar a campanha.</p>}
 
-      <section className="panel p-5 sm:p-7">
+       <section id="campaign-operation-block" className="panel scroll-mt-6 p-5 sm:p-7">
         <div className="mb-6"><p className="section-kicker">05 · Operação</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Quando e em que estado ela está?</h2></div>
         <div className="grid gap-5 md:grid-cols-3">
            <Field label="Status"><div className="field-control flex items-center bg-[#f3eee7] font-bold text-[#565c6a]" data-testid="select-campaign-status">{statusLabels[campaign?.status ?? CampaignStatus.rascunho]}</div></Field>
-          <Field label="Agendamento"><input {...form.register('agendada_para')} type="datetime-local" className="field-control" data-testid="input-scheduled-at" /></Field>
+           <Field label="Agendamento"><div className="flex flex-col gap-2 sm:flex-row"><input {...form.register('agendada_para')} type="datetime-local" className="field-control min-w-0 flex-1" data-testid="input-scheduled-at" />{onSchedule && campaign?.status === 'rascunho' && <button type="button" onClick={onSchedule} disabled={schedulePending} className="action-button action-button-primary shrink-0 whitespace-nowrap"><Clock3 size={14} /> {schedulePending ? 'Abrindo...' : 'Agendar envio'}</button>}</div><p className="mt-1.5 text-[10px] text-[#8d8780]">O botão usa a data escolhida neste campo.</p></Field>
            <Field label="Horas até o lembrete"><input {...form.register('lembrete_horas')} type="number" min="24" max="168" className="field-control" data-testid="input-reminder-hours" /></Field>
         </div>
         <div className="mt-6 grid gap-3 border-t border-[#eee7dc] pt-5 sm:grid-cols-2">
@@ -1128,6 +1137,9 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const safetyModeQuery = useGetSafetyMode({
+    query: { queryKey: getGetSafetyModeQueryKey() },
+  });
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmClearRecipients, setConfirmClearRecipients] = useState(false);
   const campaignQuery = useGetCampaign(campaignId, {
@@ -1257,6 +1269,13 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
     setScheduleDialogOpen(true);
   };
 
+  const focusScheduleBlock = () => {
+    document.getElementById('campaign-operation-block')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  };
+
   const confirmSchedule = () => {
     const total = recipientSummaryQuery.data?.receberao_de_fato ?? 0;
     if (total > 5000 && scheduleConfirmation.trim() !== String(total)) return;
@@ -1285,9 +1304,9 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div className="flex items-center gap-3"><Link href="/" className="action-button action-button-secondary !px-3" data-testid="link-back-campaign-list"><ArrowLeft size={15} /></Link><div><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#92939a]">ID {campaign.id}</p><div className="mt-1 flex items-center gap-2"><StatusPill status={campaign.status} /><span className="text-xs text-[#777984]">{statusDescriptions[campaign.status]}</span></div></div></div>
            <div className="flex flex-wrap items-center justify-end gap-2">
-              {campaign.status === 'rascunho' && (
-                <button onClick={openScheduleDialog} disabled={scheduleCampaign.isPending} className="action-button action-button-primary" data-testid="button-schedule-campaign">
-                  {scheduleCampaign.isPending ? <LoaderCircle size={15} className="animate-spin" /> : <Clock3 size={15} />} Agendar envio
+               {campaign.status === 'rascunho' && (
+                 <button onClick={focusScheduleBlock} disabled={scheduleCampaign.isPending} className="action-button action-button-primary" data-testid="button-schedule-campaign">
+                   <Clock3 size={15} /> Ir para agendamento
                 </button>
               )}
              {(campaign.status === 'enviando' || campaign.status === 'pausada') && (
@@ -1315,7 +1334,13 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             <div className="rounded-2xl border-2 border-[#d35f2a] bg-[#fff8ef] p-5 sm:p-6" role="dialog" aria-labelledby="schedule-confirmation-title" data-testid="dialog-schedule-confirmation">
               <p className="section-kicker text-[#a64220]">Confirmação de agendamento</p>
               <h3 id="schedule-confirmation-title" className="mt-2 text-lg font-extrabold text-[#263044]">Revise o tamanho do disparo antes de continuar.</h3>
-              <p className="mt-2 text-sm leading-6 text-[#6d7180]">A lista atual tem <strong className="text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.receberao_de_fato)}</strong> destinatários que receberão de fato.</p>
+               <p className="mt-2 text-sm leading-6 text-[#6d7180]">A lista atual tem <strong className="text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.receberao_de_fato)}</strong> destinatários que receberão de fato.</p>
+               {safetyModeQuery.data && !safetyModeQuery.data.envio_liberado && (
+                 <div className="mt-5 grid gap-3 sm:grid-cols-2" data-testid="schedule-safety-counts">
+                   <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#417846]">{formatNumber(recipientSummaryQuery.data?.permitidos_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Na allowlist e liberados</span></div>
+                   <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.bloqueados_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Bloqueados pelo modo de segurança</span></div>
+                 </div>
+               )}
               {(recipientSummaryQuery.data?.receberao_de_fato ?? 0) > 5000 ? (
                 <label className="mt-5 block text-xs font-bold text-[#565c6a]">Digite {formatNumber(recipientSummaryQuery.data?.receberao_de_fato)} para confirmar<input value={scheduleConfirmation} onChange={(event) => setScheduleConfirmation(event.target.value.replace(/\D/g, ''))} inputMode="numeric" className="field-control mt-2" placeholder={String(recipientSummaryQuery.data?.receberao_de_fato)} data-testid="input-schedule-confirmation" /></label>
               ) : (
@@ -1348,6 +1373,8 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             testPending={sendTest.isPending}
             testError={sendTest.error ? getErrorMessage(sendTest.error, "Não foi possível enviar o teste.") : null}
             testSent={testSent}
+            onSchedule={openScheduleDialog}
+            schedulePending={scheduleCampaign.isPending}
           />
          <SendQuotaPanel campaign={campaign} />
         <ImportPanel campaignId={campaignId} />

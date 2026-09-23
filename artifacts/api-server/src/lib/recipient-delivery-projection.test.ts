@@ -11,7 +11,9 @@ test("projects suppressed recipients before the worker processes them", () => {
   assert.deepEqual(projection, {
     total_na_lista: 12,
     suprimidos_no_envio: 1,
-    receberao_de_fato: 11,
+    permitidos_modo_teste: 0,
+    bloqueados_modo_teste: 11,
+    receberao_de_fato: 0,
   });
 });
 
@@ -24,6 +26,8 @@ test("normalizes recipient and suppression e-mails before crossing the lists", (
     {
       total_na_lista: 1,
       suprimidos_no_envio: 1,
+      permitidos_modo_teste: 0,
+      bloqueados_modo_teste: 0,
       receberao_de_fato: 0,
     },
   );

@@ -818,6 +818,10 @@ export const getCampaignRecipientSummaryResponseTotalNaListaMin = 0;
 
 export const getCampaignRecipientSummaryResponseSuprimidosNoEnvioMin = 0;
 
+export const getCampaignRecipientSummaryResponsePermitidosModoTesteMin = 0;
+
+export const getCampaignRecipientSummaryResponseBloqueadosModoTesteMin = 0;
+
 export const getCampaignRecipientSummaryResponseReceberaoDeFatoMin = 0;
 
 export const getCampaignRecipientSummaryResponseStatusPendenteMin = 0;
@@ -855,6 +859,8 @@ export const GetCampaignRecipientSummaryResponse = zod.object({
   "total": zod.number().int().min(getCampaignRecipientSummaryResponseTotalMin),
   "total_na_lista": zod.number().int().min(getCampaignRecipientSummaryResponseTotalNaListaMin).describe('Total atual de destinatários na lista principal.'),
   "suprimidos_no_envio": zod.number().int().min(getCampaignRecipientSummaryResponseSuprimidosNoEnvioMin).describe('Destinatários atualmente presentes na tabela de supressão.'),
+  "permitidos_modo_teste": zod.number().int().min(getCampaignRecipientSummaryResponsePermitidosModoTesteMin).describe('Destinatários não suprimidos que podem receber no modo de segurança.'),
+  "bloqueados_modo_teste": zod.number().int().min(getCampaignRecipientSummaryResponseBloqueadosModoTesteMin).describe('Destinatários não suprimidos que serão bloqueados pelo modo de segurança.'),
   "receberao_de_fato": zod.number().int().min(getCampaignRecipientSummaryResponseReceberaoDeFatoMin).describe('Total atual da lista menos as supressões atuais.'),
   "status": zod.object({
   "pendente": zod.number().int().min(getCampaignRecipientSummaryResponseStatusPendenteMin),
