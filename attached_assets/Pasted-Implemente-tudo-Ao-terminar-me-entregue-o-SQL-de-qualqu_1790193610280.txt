@@ -1,0 +1,95 @@
+Implemente tudo. Ao terminar, me entregue: o SQL de qualquer migração nova em bloco de código, a lista do que preciso configurar à mão, e quais arquivos mudaram.
+
+1. O modo de segurança está bloqueando o agendamento (crítico)
+
+POST /api/campaigns/:id/agendar devolve 422 com {"error":"Modo de segurança ativo — envios restritos à lista de teste"}.
+
+Isso está errado e inverte o propósito do modo de segurança.
+
+A regra correta, que já está escrita na Fase 4: com ENVIO_LIBERADO=false, a campanha agenda normalmente. O filtro acontece no worker, destinatário por destinatário: quem está na ENVIO_ALLOWLIST recebe, todo o resto vira bloqueado_modo_teste e nunca recebe e-mail.
+
+Do jeito que está, é impossível testar a fila sem desligar o modo de segurança — ou seja, a trava obriga a remover a própria trava para exercitá-la.
+
+Faça:
+
+Remova a recusa de agendamento por modo de segurança. Agendar com ENVIO_LIBERADO=false é permitido e esperado.
+Na tela de confirmação do agendamento, quando o modo de segurança estiver ativo, mostre o quadro real: quantos destinatários estão na allowlist e vão receber, e quantos serão marcados como bloqueado_modo_teste e nunca receberão. Números, não aviso genérico.
+Auditoria: me liste todos os pontos do código que consultam ENVIO_LIBERADO, dizendo o que cada um faz. Quero saber se existe outro lugar recusando operação em vez de filtrar destinatário.
+Não altere o valor de ENVIO_LIBERADO.
+2. Deduplicação por telefone não está rodando na importação
+
+No arquivo teste-amoconecta.csv, as linhas t010 e t011 têm o mesmo telefone (49999990010), com e-mails diferentes. O resumo da importação mostrou 0 DUPLICADOS, Duplicados por telefone: 0, e Total na lista: 12.
+
+Na base real são 1.420 casos assim em 19.565 linhas — 7%. Sem deduplicar, 7% das pessoas recebem dois e-mails em endereços diferentes, o que é gerador direto de marcação de spam.
+
+Faça:
+
+Primeiro me diga se a deduplicação por telefone está implementada na importação, e onde. Se estiver, por que não pegou este caso.
+A normalização tem que ser completa antes de comparar: remover tudo que não é dígito, remover o prefixo 55 quando o número ficar com mais de 11 dígitos, remover zeros à esquerda. 49 9 8905-5639, 049988154909 e 49988154909 são o mesmo telefone.
+Quando houver colisão, mantenha a linha de data_ultima_compra mais recente e descarte as demais, contando-as em Duplicados por telefone.
+Telefone vazio ou inválido nunca agrupa: cada linha sem telefone é uma pessoa distinta.
+3. Texto alternativo da imagem vira o nome do arquivo
+
+No e-mail enviado, o HTML saiu com alt="IMG_8701" e a versão em texto puro ganhou uma linha solta IMG_8701.
+
+O campo "Texto alternativo" ficou em branco e o sistema preencheu com o nome do arquivo. Em Outlook e Hotmail, que bloqueiam imagem por padrão e são 18% da base, o destinatário vê uma caixa vazia escrita "IMG_8701".
+
+Faça:
+
+Nunca use o nome do arquivo como texto alternativo.
+Se o operador preencher o texto alternativo, use-o no alt e na versão em texto.
+Se deixar em branco, a imagem é decorativa: alt="" no HTML e nenhuma linha correspondente na versão em texto.
+No editor, avise que imagem sem texto alternativo aparece como espaço vazio para quem bloqueia imagens.
+4. Peso e dimensão da imagem no upload
+
+A imagem foi servida direto do Storage do Supabase, no tamanho em que foi enviada. Um IMG_8701.jpg de celular costuma ter de 3 a 5 MB.
+
+Multiplicado por cem mil aberturas, são centenas de gigabytes de egress cobrados pelo Supabase — um custo que só aparece depois do primeiro envio grande.
+
+Faça:
+
+Me diga o tamanho em bytes do arquivo já enviado neste teste, e se existe redimensionamento no upload hoje.
+Se não existir: no upload, redimensione para no máximo 1.200 px de largura e recomprima como JPEG qualidade 80. PNG apenas quando houver transparência. Nunca WebP — Outlook para desktop e Outlook mobile não renderizam, e são 18% da base; converta entrada .webp também.
+Mostre ao operador o tamanho final do arquivo depois do processamento.
+5. Botão de agendar separado da data
+
+O botão "Agendar envio" está no topo da página e o campo de data e hora está no bloco 05, no fim. O operador define o horário num lugar e confirma em outro, sem ver os dois ao mesmo tempo.
+
+Coloque a ação de agendar junto do campo de agendamento, no bloco 05, mostrando a data escolhida no próprio botão ou imediatamente ao lado. Pode manter um atalho no topo, desde que ele role a página até o bloco 05 em vez de abrir a confirmação direto.
+
+6. Confirmação por digitação aparecendo com 12 destinatários
+
+A regra combinada é exigir confirmação digitada acima de 5.000 destinatários. Ela apareceu numa campanha de 12.
+
+Se o atrito existe sempre, o operador aprende a preencher no automático e a trava perde o efeito justamente no dia do disparo grande.
+
+Abaixo de 5.000, mostre só a contagem e o botão de confirmar. Acima, exija a digitação do número — validado no servidor contra a contagem real, como já está.
+
+7. Campo de data recebendo timestamp ISO
+
+O console registra, repetidamente:
+
+The specified value "2026-09-24T00:00:00.000Z" does not conform to the required format, "yyyy-MM-dd"
+
+Algum <input type="date"> está recebendo um timestamp ISO completo onde espera yyyy-MM-dd — provavelmente a validade do crédito. O campo fica vazio para o operador, sem explicação.
+
+Localize e corrija a conversão. Me diga qual campo era.
+
+8. Sessão caindo durante o uso
+
+Durante o teste, todas as chamadas passaram a devolver 401 de uma vez, sem o usuário ter deslogado. A tela continuou mostrando dados de cache, o que faz o operador achar que está tudo certo.
+
+Se a sessão vive em memória no processo da API, qualquer reinício desloga todo mundo. Para a pessoa de marketing montando uma campanha de vinte minutos, é perder o trabalho no meio.
+
+Faça:
+
+Me diga onde a sessão é armazenada hoje.
+Se for em memória, passe para armazenamento persistido, de modo que reinício do servidor não derrube sessão.
+Quando uma chamada voltar 401, o painel deve dizer claramente que a sessão expirou e levar ao login, em vez de falhar em silêncio mostrando cache.
+Fora do escopo
+
+Não implemente webhooks, lembrete nem exportação — são as Fases 5 e 6. Não altere ENVIO_LIBERADO.
+
+Ao final
+
+Me diga quais destas mudanças tocam código que o worker também executa (renderização do e-mail, lógica de envio, modo de segurança), porque esse código precisa ser propagado para o Repl do worker.
