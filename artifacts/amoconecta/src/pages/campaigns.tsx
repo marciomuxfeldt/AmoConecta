@@ -1130,9 +1130,21 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmClearRecipients, setConfirmClearRecipients] = useState(false);
-  const campaignQuery = useGetCampaign(campaignId, { query: { enabled: Boolean(campaignId), queryKey: getGetCampaignQueryKey(campaignId), refetchInterval: 15000 } });
+  const campaignQuery = useGetCampaign(campaignId, {
+    query: {
+      enabled: Boolean(campaignId),
+      queryKey: getGetCampaignQueryKey(campaignId),
+      refetchInterval: (query) =>
+        query.state.data?.status === CampaignStatus.enviando ? 15000 : false,
+    },
+  });
   const recipientSummaryQuery = useGetCampaignRecipientSummary(campaignId, {
-    query: { enabled: Boolean(campaignId), queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId), refetchInterval: 15000 },
+    query: {
+      enabled: Boolean(campaignId),
+      queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId),
+      refetchInterval: () =>
+        campaignQuery.data?.status === CampaignStatus.enviando ? 15000 : false,
+    },
   });
   const deleteCampaign = useDeleteCampaign();
   const clearRecipients = useClearCampaignRecipients();

@@ -539,6 +539,15 @@ async function validateSchedule(
     }
   }
   const blocks = normalizeEmailBlocks(campaign.corpo);
+  if (blocks.some((block) => block.type === "button")) {
+    const missingDestinations = [
+      !campaign.url_deeplink?.trim() ? "deep link" : null,
+      !campaign.url_landing?.trim() ? "landing page" : null,
+    ].filter((value): value is string => Boolean(value));
+    if (missingDestinations.length > 0) {
+      return `Preencha ${missingDestinations.join(" e ")} antes de agendar uma campanha com botão.`;
+    }
+  }
   if (blocks.some((block) => block.type === "button" && !validHttpUrl(block.href))) {
     return "Informe um destino http(s) válido para todos os botões.";
   }
