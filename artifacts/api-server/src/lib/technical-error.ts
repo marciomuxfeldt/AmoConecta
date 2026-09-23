@@ -5,9 +5,20 @@ export type TechnicalError = {
   details: string | null;
   hint: string | null;
   stack: string | null;
+  cause: TechnicalError | string | null;
 };
 
 export function getTechnicalError(error: unknown): TechnicalError {
+  const seen = new WeakSet<object>();
+  if (typeof error === "object" && error !== null) seen.add(error);
+  return getTechnicalErrorAt(error, seen, 0);
+}
+
+function getTechnicalErrorAt(
+  error: unknown,
+  seen: WeakSet<object>,
+  depth: number,
+): TechnicalError {
   const record =
     typeof error === "object" && error !== null
       ? (error as Record<string, unknown>)
@@ -37,7 +48,25 @@ export function getTechnicalError(error: unknown): TechnicalError {
       error instanceof Error && error.stack
         ? error.stack
         : syntheticError.stack ?? null,
+    cause: causeValue(error, record, seen, depth),
   };
+}
+
+function causeValue(
+  error: unknown,
+  record: Record<string, unknown> | null,
+  seen: WeakSet<object>,
+  depth: number,
+): TechnicalError | string | null {
+  const cause =
+    error instanceof Error
+      ? error.cause
+      : record?.cause;
+  if (cause == null) return null;
+  if (typeof cause === "string") return cause;
+  if (typeof cause !== "object" || depth >= 4 || seen.has(cause)) return String(cause);
+  seen.add(cause);
+  return getTechnicalErrorAt(cause, seen, depth + 1);
 }
 
 export function getTechnicalErrorText(error: unknown): string {

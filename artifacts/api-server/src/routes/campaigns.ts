@@ -18,6 +18,7 @@ import { getTechnicalError } from "../lib/technical-error";
 import { normalizeEmailBlocks } from "@workspace/email-template";
 import { getSafetyMode, getSafetyModeMessage } from "../lib/safety-mode";
 import { sendTestEmail } from "../lib/worker";
+import { getTestSendErrorResponse } from "../lib/test-send-error";
 import { formatValidationError } from "../lib/validation";
 import {
   configuredSenderEmail,
@@ -51,6 +52,21 @@ function logSupabaseError(
   error: unknown,
 ): void {
   req.log.error({ technicalError: getTechnicalError(error) }, operation);
+}
+
+function logCampaignTestError(
+  req: Request,
+  campaignId: string,
+  error: unknown,
+): void {
+  req.log.error(
+    {
+      requestId: req.id,
+      campaignId,
+      technicalError: getTechnicalError(error),
+    },
+    "Campaign test send failed",
+  );
 }
 
 function dateValue(value: unknown): string | null {
@@ -542,15 +558,12 @@ router.post("/campaigns/:campaignId/test", async (req, res) => {
     );
     res.json({ sent: true, resend_email_id: resendEmailId });
   } catch (error) {
-    logSupabaseError(req, "Campaign test send failed", error);
-    const message =
-      error instanceof Error &&
-      /modo de segurança|suprimido|não encontrada|remetente da campanha|APP_BASE_URL|UNSUBSCRIBE_SECRET|RESEND_API_KEY|Resend não retornou/iu.test(
-        error.message,
-      )
-        ? error.message
-        : "Não foi possível enviar o teste.";
-    res.status(422).json({ error: message });
+    logCampaignTestError(req, params.data.campaignId, error);
+    const failure = getTestSendErrorResponse(error);
+    res.status(failure.status).json({
+      error: failure.message,
+      request_id: req.id,
+    });
   }
 });
 
