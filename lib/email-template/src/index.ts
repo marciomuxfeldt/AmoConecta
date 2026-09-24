@@ -28,6 +28,13 @@ export type DividerBlock = {
 
 export type EmailBlock = TextBlock | ImageBlock | ButtonBlock | DividerBlock;
 
+export type EmailButtonDestinationIssue = {
+  blockId: string;
+  index: number;
+  kind: "missing" | "invalid" | "test-domain";
+  message: string;
+};
+
 export type EmailPreviewOptions = {
   name?: string | null;
   valorCredito?: number | null;
@@ -210,7 +217,7 @@ export function renderEmailText(
       if (text) lines.push(text);
     } else if (block.type === "button") {
       const label = interpolateEmailText(block.label, options).trim();
-      if (label) lines.push(`${label}: ${block.href}`);
+      if (label) lines.push(`${label}: ${safeUrl(block.href)}`);
     } else if (block.type === "image" && block.alt.trim()) {
       lines.push(interpolateEmailText(block.alt.trim(), options));
     }
@@ -257,11 +264,86 @@ export function normalizeEmailBlocks(value: unknown): EmailBlock[] {
           id,
           type: "button",
           label: block.label.slice(0, 120),
-          href: safeUrl(block.href),
+          href: block.href.trim(),
         },
       ];
     }
     if (block.type === "divider") return [{ id, type: "divider" }];
+    return [];
+  });
+}
+
+const TEST_BUTTON_HOSTS = ["example.com", "example.org", "localhost"] as const;
+
+export function validateEmailButtonDestinations(
+  value: unknown,
+): EmailButtonDestinationIssue[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((candidate, arrayIndex): EmailButtonDestinationIssue[] => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return [];
+    }
+    const block = candidate as Record<string, unknown>;
+    if (block.type !== "button") return [];
+
+    const index = arrayIndex + 1;
+    const blockId =
+      typeof block.id === "string" && block.id
+        ? block.id
+        : `block-${index}`;
+    const label = typeof block.label === "string" ? block.label.trim().slice(0, 80) : "";
+    const identity = label ? `botão ${index} (“${label}”)` : `botão ${index}`;
+    const href = typeof block.href === "string" ? block.href.trim() : "";
+
+    if (!href) {
+      return [{
+        blockId,
+        index,
+        kind: "missing",
+        message: `O ${identity} está sem destino.`,
+      }];
+    }
+
+    const URLConstructor = (
+      globalThis as unknown as {
+        URL: new (value: string) => { protocol: string; hostname: string };
+      }
+    ).URL;
+    let url: { protocol: string; hostname: string };
+    try {
+      url = new URLConstructor(href);
+    } catch {
+      return [{
+        blockId,
+        index,
+        kind: "invalid",
+        message: `O ${identity} precisa de uma URL válida começando com http:// ou https://.`,
+      }];
+    }
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return [{
+        blockId,
+        index,
+        kind: "invalid",
+        message: `O ${identity} precisa de uma URL válida começando com http:// ou https://.`,
+      }];
+    }
+
+    const hostname = url.hostname.toLowerCase().replace(/\.$/u, "");
+    const testHost = TEST_BUTTON_HOSTS.find(
+      (host) => hostname === host || hostname.endsWith(`.${host}`),
+    );
+    if (testHost) {
+      return [{
+        blockId,
+        index,
+        kind: "test-domain",
+        message: `O ${identity} usa o domínio de teste ${testHost}; informe um destino real.`,
+      }];
+    }
+
     return [];
   });
 }

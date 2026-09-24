@@ -16,7 +16,10 @@ import {
 import { getSupabaseUser } from "./auth";
 import { supabaseAdminClient } from "../lib/supabase";
 import { getTechnicalError } from "../lib/technical-error";
-import { normalizeEmailBlocks } from "@workspace/email-template";
+import {
+  normalizeEmailBlocks,
+  validateEmailButtonDestinations,
+} from "@workspace/email-template";
 import { sendTestEmail } from "../lib/worker";
 import { getTestSendErrorResponse } from "../lib/test-send-error";
 import { formatValidationError } from "../lib/validation";
@@ -499,10 +502,6 @@ router.get("/campaigns/:campaignId/recipients/summary", async (req, res) => {
   }
 });
 
-function validHttpUrl(value: unknown): value is string {
-  return typeof value === "string" && /^(?:https?):\/\/[^\s]+$/iu.test(value.trim());
-}
-
 async function validateSchedule(
   campaign: Awaited<ReturnType<typeof findCampaign>>,
   confirmation: string | null | undefined,
@@ -533,10 +532,11 @@ async function validateSchedule(
       return "O assunto do lembrete precisa ser diferente do assunto principal.";
     }
   }
-  const blocks = normalizeEmailBlocks(campaign.corpo);
-  if (blocks.some((block) => block.type === "button" && !validHttpUrl(block.href))) {
-    return "Informe um destino http(s) válido para todos os botões.";
+  const buttonDestinationErrors = validateEmailButtonDestinations(campaign.corpo);
+  if (buttonDestinationErrors.length > 0) {
+    return buttonDestinationErrors.map((issue) => issue.message).join(" ");
   }
+  const blocks = normalizeEmailBlocks(campaign.corpo);
   const delivery = await recipientDeliveryProjection(
     supabaseAdminClient(),
     campaign.id,

@@ -37,6 +37,7 @@ type EmailEditorProps = {
   valorCredito?: number | null;
   validadeCredito?: string | null;
   disabled?: boolean;
+  buttonHrefErrors?: ReadonlyMap<string, string>;
   onUploadingChange?: (blockId: string, uploading: boolean) => void;
   onSendTest?: () => void;
   testPending?: boolean;
@@ -67,7 +68,7 @@ function newBlock(type: EmailBlock["type"]): EmailBlock {
   if (type === "text") return { id: newId(type), type, html: "<p>Olá, {{nome}}</p>" };
   if (type === "image") return { id: newId(type), type, src: "", alt: "", href: "" };
   if (type === "button") {
-    return { id: newId(type), type, label: "Ver oferta", href: "https://example.com" };
+    return { id: newId(type), type, label: "Ver oferta", href: "" };
   }
   return { id: newId(type), type };
 }
@@ -289,6 +290,7 @@ function BlockCard({
   resetKey,
   onUploadingChange,
   disabled = false,
+  buttonHrefError,
 }: {
   block: EmailBlock;
   index: number;
@@ -303,6 +305,7 @@ function BlockCard({
   resetKey: string;
   onUploadingChange?: (blockId: string, uploading: boolean) => void;
   disabled?: boolean;
+  buttonHrefError?: string;
 }) {
   const upload = useRequestCampaignAssetUploadUrl();
   const [imageUpload, setImageUpload] = useState<ImageUploadState>(idleImageUploadState);
@@ -407,7 +410,7 @@ function BlockCard({
       onDrop={(event) => { event.preventDefault(); if (!disabled) onDrop(); }}
       onDragEnd={disabled ? undefined : onDragEnd}
       aria-label={`Bloco ${index + 1}: ${blockLabels[block.type]}`}
-      className={`group rounded-[1.1rem] border bg-[#fbf9f5] p-3.5 transition-[border-color,box-shadow,transform] duration-200 ${dragging ? "border-[#e96527] shadow-[0_0_0_3px_rgba(233,101,39,.14),0_12px_24px_rgba(38,48,68,.08)]" : "border-[#e5ddd0] hover:-translate-y-px hover:border-[#d4c7b7] hover:shadow-[0_8px_20px_rgba(38,48,68,.045)]"}`}
+      className={`group rounded-[1.1rem] border bg-[#fbf9f5] p-3.5 transition-[border-color,box-shadow,transform] duration-200 ${buttonHrefError ? "border-[#bd4f26] bg-[#fff7f2] shadow-[0_0_0_3px_rgba(189,79,38,.10)]" : dragging ? "border-[#e96527] shadow-[0_0_0_3px_rgba(233,101,39,.14),0_12px_24px_rgba(38,48,68,.08)]" : "border-[#e5ddd0] hover:-translate-y-px hover:border-[#d4c7b7] hover:shadow-[0_8px_20px_rgba(38,48,68,.045)]"}`}
       data-testid={`email-block-${block.type}-${index}`}
     >
       <div className="mb-3.5 flex items-center gap-2">
@@ -415,7 +418,7 @@ function BlockCard({
         <div className="flex h-8 w-8 items-center justify-center rounded-[.65rem] bg-[#d7ef56] text-[#263044] shadow-[2px_2px_0_rgba(233,101,39,.35)]">
           {block.type === "text" ? <Type size={14} /> : block.type === "image" ? <ImagePlus size={14} /> : block.type === "button" ? <MousePointer2 size={14} /> : <Minus size={14} />}
         </div>
-        <div className="min-w-0"><div className="flex items-center gap-2"><p className="text-xs font-extrabold text-[#263044]">{blockLabels[block.type]}</p><span className="font-mono text-[9px] text-[#b0a9a1]">{String(index + 1).padStart(2, "0")}</span></div><p className="mt-0.5 text-[10px] text-[#92939a]">{blockDescriptions[block.type]}</p></div>
+         <div className="min-w-0"><div className="flex items-center gap-2"><p className="text-xs font-extrabold text-[#263044]">{blockLabels[block.type]}</p><span className="font-mono text-[9px] text-[#b0a9a1]">{String(index + 1).padStart(2, "0")}</span>{buttonHrefError && <span className="rounded-full border border-[#eac0ad] bg-[#fff0e8] px-2 py-0.5 font-mono text-[8px] font-bold uppercase tracking-[.08em] text-[#a64220]">Destino inválido</span>}</div><p className="mt-0.5 text-[10px] text-[#92939a]">{blockDescriptions[block.type]}</p></div>
         <button type="button" disabled={disabled} onClick={onRemove} className="focus-ring ml-auto rounded-lg p-2 text-[#a64220] opacity-75 transition-colors hover:bg-[#fff0e9] hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Remover bloco ${index + 1}, ${blockLabels[block.type]}`} title="Remover bloco" data-testid={`button-remove-${block.id}`}><Trash2 size={14} /></button>
       </div>
 
@@ -447,7 +450,7 @@ function BlockCard({
       {block.type === "button" && (
         <div className="grid gap-3 sm:grid-cols-2">
           <div><label htmlFor={`button-label-${block.id}`} className="field-label">Texto do botão</label><input id={`button-label-${block.id}`} disabled={disabled} value={block.label} onChange={(event) => update({ ...block, label: event.target.value.slice(0, 120) })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Ex.: Ver oferta" aria-label="Rótulo do botão" data-testid={`input-button-label-${block.id}`} /></div>
-          <div><label htmlFor={`button-href-${block.id}`} className="field-label">Destino do clique</label><input id={`button-href-${block.id}`} disabled={disabled} value={block.href} onChange={(event) => update({ ...block, href: event.target.value })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="https://..." aria-label="Destino do botão" data-testid={`input-button-link-${block.id}`} /></div>
+          <div><label htmlFor={`button-href-${block.id}`} className="field-label">Destino do clique</label><input id={`button-href-${block.id}`} disabled={disabled} value={block.href} onChange={(event) => update({ ...block, href: event.target.value })} className={`field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7] ${buttonHrefError ? "!border-[#bd4f26] !bg-[#fff7f2]" : ""}`} placeholder="https://..." aria-label="Destino do botão" aria-invalid={Boolean(buttonHrefError)} aria-describedby={buttonHrefError ? `button-href-error-${block.id}` : undefined} data-testid={`input-button-link-${block.id}`} />{buttonHrefError && <p id={`button-href-error-${block.id}`} className="mt-1.5 text-[11px] font-semibold leading-4 text-[#a64220]" role="alert" data-testid={`error-button-link-${block.id}`}>{buttonHrefError}</p>}</div>
         </div>
       )}
 
@@ -459,6 +462,7 @@ function BlockCard({
 export function EmailEditor({
   blocks,
   onChange,
+  buttonHrefErrors,
   campaignId,
   subject,
   valorCredito,
@@ -524,7 +528,7 @@ export function EmailEditor({
         <div>
           <div className="mb-4 flex items-end justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-[.13em] text-[#d35f2a]">Composição</p><p className="mt-1 text-sm font-extrabold text-[#263044]">Blocos editáveis</p><p className="mt-1 text-[11px] text-[#92939a]">{blocks.length} {blocks.length === 1 ? "bloco" : "blocos"} · arraste para reordenar</p></div><span className="rounded-full bg-[#f1f7f5] px-3 py-1.5 font-mono text-[9px] uppercase tracking-[.1em] text-[#247b79]">Sem limite</span></div>
           <div className="space-y-3">
-             {blocks.map((block, index) => <BlockCard key={block.id} block={block} index={index} blocks={blocks} onChange={onChange} onRemove={() => removeBlock(block.id)} onDragStart={() => setDraggingId(block.id)} onDrop={() => { reorder(block.id); setDraggingId(null); }} onDragEnd={() => setDraggingId(null)} dragging={draggingId === block.id} campaignId={campaignId} resetKey={editorSessionKey} onUploadingChange={onUploadingChange} disabled={disabled} />)}
+              {blocks.map((block, index) => <BlockCard key={block.id} block={block} index={index} blocks={blocks} onChange={onChange} onRemove={() => removeBlock(block.id)} onDragStart={() => setDraggingId(block.id)} onDrop={() => { reorder(block.id); setDraggingId(null); }} onDragEnd={() => setDraggingId(null)} dragging={draggingId === block.id} campaignId={campaignId} resetKey={editorSessionKey} onUploadingChange={onUploadingChange} disabled={disabled} buttonHrefError={block.type === "button" ? buttonHrefErrors?.get(block.id) : undefined} />)}
             {blocks.length === 0 && <div className="rounded-2xl border border-dashed border-[#d8cdbd] bg-[#f8f3ec] px-5 py-12 text-center"><div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-[#d7ef56] text-[#263044]"><Plus size={18} /></div><p className="mt-4 text-sm font-bold text-[#42495b]">Comece pelo primeiro bloco</p><p className="mt-1 text-xs leading-5 text-[#85858b]">A prévia já mostra o rodapé fixo enquanto você cria.</p></div>}
           </div>
           <div className="mt-5 rounded-2xl border border-[#eee7dc] bg-[#f8f3ec] p-3"><p className="mb-2 px-1 font-mono text-[9px] uppercase tracking-[.12em] text-[#99959a]">Adicionar ao e-mail</p><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

@@ -58,7 +58,11 @@ import {
   useValidateCampaignImport,
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { type EmailBlock, normalizeEmailBlocks } from '@workspace/email-template';
+import {
+  type EmailBlock,
+  normalizeEmailBlocks,
+  validateEmailButtonDestinations,
+} from '@workspace/email-template';
 import { EmailEditor } from '../components/EmailEditor';
 
 type SessionUser = { email: string } | null;
@@ -177,8 +181,11 @@ function validateEmailBlocks(blocks: EmailBlock[]) {
     }
     if (block.type === 'button') {
       if (!block.label.trim()) return 'Informe o rótulo de todos os botões.';
-      if (!isHttpUrl(block.href)) return 'Informe um destino válido para todos os botões.';
     }
+  }
+  const buttonDestinationErrors = validateEmailButtonDestinations(blocks);
+  if (buttonDestinationErrors.length > 0) {
+    return buttonDestinationErrors.map((issue) => issue.message).join(' ');
   }
   return null;
 }
@@ -608,6 +615,12 @@ function CampaignForm({
   const isEditing = Boolean(campaign);
   const contentLocked = campaignContentIsLocked(campaign?.status);
   const emailBlocks = form.watch('corpo');
+  const buttonHrefErrors = useMemo(
+    () => new Map(
+      validateEmailButtonDestinations(emailBlocks).map((issue) => [issue.blockId, issue.message] as const),
+    ),
+    [emailBlocks],
+  );
   const emailSubject = form.watch('assunto');
   const preheader = form.watch('preheader');
   const isDirty = form.formState.isDirty;
@@ -790,6 +803,7 @@ function CampaignForm({
 
       <EmailEditor
         blocks={emailBlocks}
+        buttonHrefErrors={buttonHrefErrors}
         onChange={(blocks) => form.setValue('corpo', blocks, { shouldDirty: true })}
         campaignId={campaign?.id}
         subject={emailSubject}
@@ -1482,9 +1496,9 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       setOperationError('Revise o assunto e o intervalo do lembrete (24 a 168 horas).');
       return;
     }
-    const invalidButton = normalizeEmailBlocks(latestCampaign.corpo).some((block) => block.type === 'button' && !isHttpUrl(block.href));
-    if (invalidButton) {
-      setOperationError('Informe um destino válido para todos os botões.');
+    const buttonDestinationErrors = validateEmailButtonDestinations(latestCampaign.corpo);
+    if (buttonDestinationErrors.length > 0) {
+      setOperationError(buttonDestinationErrors.map((issue) => issue.message).join(' '));
       return;
     }
     const total = recipientSummaryQuery.data?.receberao_de_fato;
