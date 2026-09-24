@@ -1,19 +1,5 @@
 -- Keep 010 as an immutable migration and replace its event processor with
 -- classification-aware bounce handling.
-CREATE TABLE IF NOT EXISTS public.resend_bounce_retry_policy (
-  id smallint PRIMARY KEY CHECK (id = 1),
-  enabled_at timestamptz NOT NULL
-);
-
-ALTER TABLE public.resend_bounce_retry_policy ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE public.resend_bounce_retry_policy FROM PUBLIC, anon, authenticated;
-GRANT SELECT ON TABLE public.resend_bounce_retry_policy TO service_role;
-
--- Preserve this activation boundary if the migration is rerun.
-INSERT INTO public.resend_bounce_retry_policy (id, enabled_at)
-VALUES (1, clock_timestamp())
-ON CONFLICT (id) DO NOTHING;
-
 CREATE OR REPLACE FUNCTION public.process_resend_email_event(p_event_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -25,9 +11,6 @@ DECLARE
   v_recipient public.destinatario%ROWTYPE;
   v_permanent boolean;
   v_temporary boolean;
-  v_retry_rule_applies boolean := false;
-  v_campaign_status text;
-  v_retry_enabled_at timestamptz;
   v_bounce_type_raw text;
   v_bounce_type text;
 BEGIN
@@ -97,19 +80,6 @@ BEGIN
           tentativas = tentativas + 1
       WHERE id = p_event_id;
     RETURN jsonb_build_object('processed', false, 'matched', false, 'retryable', true);
-  END IF;
-
-  IF v_event.tipo = 'email.bounced' THEN
-    SELECT enabled_at
-      INTO STRICT v_retry_enabled_at
-      FROM public.resend_bounce_retry_policy
-      WHERE id = 1;
-    v_retry_rule_applies := v_event.recebido_em >= v_retry_enabled_at;
-
-    SELECT status
-      INTO v_campaign_status
-      FROM public.campanha
-      WHERE id = v_recipient.campanha_id;
   END IF;
 
   v_bounce_type_raw := coalesce(
