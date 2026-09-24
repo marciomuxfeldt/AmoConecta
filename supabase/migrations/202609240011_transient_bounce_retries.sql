@@ -138,9 +138,11 @@ BEGIN
         ELSE d.clicado_em
       END,
       status = CASE
+        WHEN d.status IN ('bounce', 'erro') THEN d.status
+        WHEN v_event.tipo = 'email.bounced'
+          AND d.status IN ('entregue', 'aberto', 'clicado') THEN d.status
         WHEN v_event.tipo = 'email.bounced' AND v_permanent THEN 'bounce'
         WHEN v_event.tipo = 'email.bounced' THEN 'erro'
-        WHEN d.status IN ('bounce', 'erro') THEN d.status
         WHEN v_event.tipo = 'email.clicked' AND d.status <> 'clicado' THEN 'clicado'
         WHEN v_event.tipo = 'email.opened'
           AND d.status NOT IN ('aberto', 'clicado') THEN 'aberto'
@@ -153,6 +155,8 @@ BEGIN
         ELSE d.status
       END,
       erro = CASE
+        WHEN v_event.tipo = 'email.bounced'
+          AND d.status IN ('entregue', 'aberto', 'clicado') THEN d.erro
         WHEN v_event.tipo = 'email.bounced' AND NOT v_permanent THEN
           CASE
             WHEN v_temporary THEN
