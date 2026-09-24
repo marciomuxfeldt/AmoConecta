@@ -8,6 +8,6 @@
 - [PostgREST worker lease](postgrest-advisory-lock.md) — separate RPC requests need an atomic tokenized lease with a short expiry.
 - [Orval response naming](orval-response-naming.md) — response components must avoid names Orval derives from operation IDs to prevent generated barrel collisions.
 - [Resend idempotency header](resend-idempotency-header.md) — keep internal deduplication keys on the HTTP request, never in delivered email headers.
-- [Resend event arrival race](resend-event-arrival-race.md) — a webhook can arrive before the sender persists the Resend ID; unmatched events need bounded retries.
+- [Resend event handling](resend-event-arrival-race.md) — unmatched IDs need bounded retries; only explicit permanent bounces suppress, and the first suppression reason is retained.
 - [Campaign content lock](campaign-content-lock.md) — scheduled, sending, and paused campaigns keep message content immutable until completion.
 - [Campaign click destinations](campaign-click-destinations.md) — button-block URLs are active; legacy campaign URL columns stay stored but are not exposed or used.

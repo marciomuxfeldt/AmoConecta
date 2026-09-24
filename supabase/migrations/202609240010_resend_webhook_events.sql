@@ -20,11 +20,14 @@ CREATE TABLE IF NOT EXISTS public.evento_email (
   erro_processamento text,
   tentativas integer NOT NULL DEFAULT 0,
   bounce_permanente boolean,
+  bounce_tipo_bruto text,
   CONSTRAINT evento_email_tentativas_nao_negativas CHECK (tentativas >= 0)
 );
 
 ALTER TABLE public.evento_email
   ADD COLUMN IF NOT EXISTS proxima_tentativa_em timestamptz;
+ALTER TABLE public.evento_email
+  ADD COLUMN IF NOT EXISTS bounce_tipo_bruto text;
 
 CREATE INDEX IF NOT EXISTS evento_email_resend_email_id_idx
   ON public.evento_email (resend_email_id);
@@ -53,6 +56,7 @@ DECLARE
   v_event public.evento_email%ROWTYPE;
   v_recipient public.destinatario%ROWTYPE;
   v_permanent boolean;
+  v_bounce_type_raw text;
   v_bounce_type text;
 BEGIN
   SELECT * INTO v_event
@@ -123,18 +127,24 @@ BEGIN
     RETURN jsonb_build_object('processed', false, 'matched', false, 'retryable', true);
   END IF;
 
-  v_bounce_type := lower(coalesce(
-    v_event.payload #>> '{data,bounce,type}',
-    v_event.payload #>> '{data,bounce_type}',
-    ''
-  ));
+  v_bounce_type_raw := coalesce(
+    NULLIF(btrim(v_event.payload #>> '{data,bounce,type}'), ''),
+    NULLIF(btrim(v_event.payload #>> '{data,bounce_type}'), ''),
+    NULLIF(btrim(v_event.payload #>> '{data,bounceType}'), ''),
+    NULLIF(btrim(v_event.payload #>> '{data,bounce}'), '')
+  );
+  v_bounce_type := lower(coalesce(v_bounce_type_raw, ''));
   v_permanent := v_event.tipo = 'email.bounced'
-    AND v_bounce_type NOT IN ('soft', 'temporary', 'transient', 'delayed');
+    AND v_bounce_type IN ('permanent', 'hard');
 
   UPDATE public.evento_email
     SET destinatario_id = v_recipient.id,
         campanha_id = v_recipient.campanha_id,
         email = lower(btrim(v_recipient.email)),
+        bounce_tipo_bruto = CASE
+          WHEN v_event.tipo = 'email.bounced' THEN coalesce(v_bounce_type_raw, '<missing>')
+          ELSE NULL
+        END,
         bounce_permanente = CASE
           WHEN v_event.tipo = 'email.bounced' THEN v_permanent
           ELSE NULL
@@ -195,7 +205,7 @@ BEGIN
       'campanha:' || v_recipient.campanha_id::text
     )
     ON CONFLICT (email) WHERE email IS NOT NULL
-    DO UPDATE SET motivo = EXCLUDED.motivo, origem = EXCLUDED.origem;
+    DO NOTHING;
   ELSIF v_event.tipo = 'email.complained' THEN
     INSERT INTO public.supressao (email, motivo, origem)
     VALUES (
@@ -204,7 +214,7 @@ BEGIN
       'campanha:' || v_recipient.campanha_id::text
     )
     ON CONFLICT (email) WHERE email IS NOT NULL
-    DO UPDATE SET motivo = EXCLUDED.motivo, origem = EXCLUDED.origem;
+    DO NOTHING;
   END IF;
 
   UPDATE public.evento_email
