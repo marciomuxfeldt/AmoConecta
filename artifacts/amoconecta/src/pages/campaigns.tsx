@@ -1116,8 +1116,8 @@ function RecipientSummaryPanel({
     ? [
         {
           key: 'bounce',
-          label: 'Bounce',
-          description: 'Endereços rejeitados pelo provedor.',
+          label: 'Bounce permanente',
+          description: 'Endereços rejeitados permanentemente pelo provedor.',
           metric: summary.reputacao.bounce,
         },
         {
@@ -1126,6 +1126,17 @@ function RecipientSummaryPanel({
           description: 'Destinatários que marcaram a mensagem como spam.',
           metric: summary.reputacao.reclamacao,
         },
+      ]
+    : [];
+  const emailMetrics = summary?.metricas_email
+    ? [
+        { key: 'enviados', label: 'Enviados', metric: summary.metricas_email.enviados },
+        { key: 'entregues', label: 'Entregues', metric: summary.metricas_email.entregues },
+        { key: 'aberturas', label: 'Aberturas únicas', metric: summary.metricas_email.aberturas },
+        { key: 'cliques', label: 'Cliques únicos', metric: summary.metricas_email.cliques },
+        { key: 'bounces', label: 'Bounces', metric: summary.metricas_email.bounces },
+        { key: 'reclamacoes', label: 'Reclamações', metric: summary.metricas_email.reclamacoes },
+        { key: 'descadastros', label: 'Descadastros', metric: summary.metricas_email.descadastros },
       ]
     : [];
 
@@ -1167,17 +1178,54 @@ function RecipientSummaryPanel({
               </div>
             ))}
           </div>
+          <div className="mt-5 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4" data-testid="panel-email-engagement">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-extrabold text-[#263044]">Resultados do envio</h3>
+                <p className="mt-1 text-xs text-[#7d7e87]">As taxas abaixo usam entregues como base.</p>
+              </div>
+            </div>
+            {emailMetrics.length > 0 && (
+              <>
+                <div className="mt-4 rounded-xl border border-[#263044] bg-[#263044] p-5 text-[#fffaf6]" data-testid="recipient-email-metric-cliques">
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-[.12em] text-[#d7ef56]">Indicador principal · Cliques únicos</span>
+                  <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
+                    <strong className="text-4xl font-extrabold tabular-nums tracking-[-.07em]">{formatNumber(summary?.metricas_email.cliques.quantidade)}</strong>
+                    <span className="rounded-full bg-[#d7ef56] px-3 py-1.5 text-xs font-extrabold text-[#263044]">{formatPercentage(summary?.metricas_email.cliques.percentual ?? 0)} sobre entregues</span>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {emailMetrics.filter((item) => item.key !== 'cliques').map((item) => (
+                    <div key={item.key} className="rounded-xl border border-[#e5ddd0] bg-[#fffdf9] p-3" data-testid={`recipient-email-metric-${item.key}`}>
+                      <span className="text-[11px] font-bold text-[#6d7180]">{item.label}</span>
+                      <div className="mt-2 flex items-baseline justify-between gap-2">
+                        <strong className="text-xl font-extrabold tabular-nums tracking-[-.05em] text-[#263044]">{formatNumber(item.metric.quantidade)}</strong>
+                        <span className="font-mono text-[10px] text-[#7d7e87]">{formatPercentage(item.metric.percentual)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-3 rounded-lg border border-[#e5ddd0] bg-[#fffdf9] px-3 py-2.5 text-[11px] leading-5 text-[#6d7180]" data-testid="note-open-rate-limit">
+                  Aberturas podem ser infladas pelo Apple Mail Privacy Protection e pelo pré-carregamento do Gmail. Use-as para comparar campanhas, não como medida de interesse real.
+                </p>
+              </>
+            )}
+          </div>
            <div className="mt-5 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4" data-testid="panel-reputation-metrics">
              <div className="flex items-start justify-between gap-3">
                <div>
                  <h3 className="text-sm font-extrabold text-[#263044]">Sinais de reputação</h3>
-                 <p className="mt-1 text-xs text-[#7d7e87]">Percentuais sobre {formatNumber(summary?.reputacao.total_enviado)} enviados. Estes indicadores orientam a pausa automática.</p>
+                  <p className="mt-1 text-xs text-[#7d7e87]">Bounce permanente é calculado sobre enviados; reclamações, sobre entregues. Estes indicadores orientam a pausa automática.</p>
                </div>
                <ShieldCheck size={16} className="text-[#247b79]" />
              </div>
              <div className="mt-4 grid gap-3 sm:grid-cols-2">
                {reputationMetrics.map((item) => {
                  const tone = reputationTone(item.metric.percentual, item.metric.limite_percentual);
+                  const denominator = item.key === 'bounce'
+                    ? summary?.reputacao.total_enviado
+                    : summary?.reputacao.total_entregue;
+                  const denominatorLabel = item.key === 'bounce' ? 'enviados' : 'entregues';
                  return (
                    <div key={item.key} className={`rounded-xl border p-4 ${tone.card}`} data-testid={`recipient-reputation-${item.key}`}>
                      <div className="flex items-start justify-between gap-3">
@@ -1190,7 +1238,7 @@ function RecipientSummaryPanel({
                      <div className="mt-4 flex items-end justify-between gap-3">
                        <div>
                          <strong className={`block text-3xl font-extrabold tabular-nums tracking-[-.07em] ${tone.value}`}>{formatPercentage(item.metric.percentual)}</strong>
-                         <span className="mt-1 block text-[11px] text-[#6d7180]">{formatNumber(item.metric.quantidade)} ocorrência(s) em {formatNumber(summary?.reputacao.total_enviado)} enviados</span>
+                          <span className="mt-1 block text-[11px] text-[#6d7180]">{formatNumber(item.metric.quantidade)} ocorrência(s) em {formatNumber(denominator)} {denominatorLabel}</span>
                        </div>
                        <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${tone.badge}`}>{tone.label}</span>
                      </div>
@@ -1361,6 +1409,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
   });
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmClearRecipients, setConfirmClearRecipients] = useState(false);
+  const [confirmReputationResume, setConfirmReputationResume] = useState(false);
   const campaignQuery = useGetCampaign(campaignId, {
     query: {
       enabled: Boolean(campaignId),
@@ -1390,6 +1439,10 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
   const [scheduleConfirmation, setScheduleConfirmation] = useState('');
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const campaign = campaignQuery.data;
+  const isReputationPause = Boolean(
+    campaign?.status === CampaignStatus.pausada &&
+    campaign.pausa_motivo?.startsWith('Pausa automática:'),
+  );
 
   const clearCurrentRecipients = () => {
     if (!confirmClearRecipients) {
@@ -1436,25 +1489,40 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
     );
   };
 
-  const changeCampaignStatus = (status: 'pausada' | 'enviando') => {
+  const changeCampaignStatus = (
+    status: 'pausada' | 'enviando',
+    confirmReputation = false,
+  ) => {
     setOperationError(null);
     setOperationSuccess(null);
-    const mutation = status === 'pausada' ? pauseCampaign : resumeCampaign;
-    mutation.mutate(
-      { campaignId },
-      {
-        onSuccess: (updated) => {
-          queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
-          queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
-          setOperationError(null);
-          setOperationSuccess(status === 'pausada' ? 'Envio pausado. A data, o motivo e o usuário responsável foram registrados.' : 'Envio retomado com sucesso.');
-        },
-        onError: (error) => {
-          setOperationSuccess(null);
-          setOperationError(getErrorMessage(error, 'Não foi possível alterar o estado da campanha.'));
-        },
-      },
-    );
+    const onSuccess = (updated: Campaign) => {
+      queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
+      queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+      setOperationError(null);
+      setOperationSuccess(status === 'pausada' ? 'Envio pausado. A data, o motivo e o usuário responsável foram registrados.' : 'Envio retomado com sucesso.');
+      if (status === 'enviando') setConfirmReputationResume(false);
+    };
+    const onError = (error: unknown) => {
+      setOperationSuccess(null);
+      setOperationError(getErrorMessage(error, 'Não foi possível alterar o estado da campanha.'));
+    };
+    if (status === 'pausada') {
+      pauseCampaign.mutate({ campaignId }, { onSuccess, onError });
+    } else {
+      resumeCampaign.mutate(
+        { campaignId, data: { confirmar_reputacao: confirmReputation } },
+        { onSuccess, onError },
+      );
+    }
+  };
+
+  const requestCampaignResume = () => {
+    if (isReputationPause) {
+      setOperationError(null);
+      setConfirmReputationResume(true);
+      return;
+    }
+    changeCampaignStatus('enviando');
   };
 
   const cancelCurrentCampaign = () => {
@@ -1565,6 +1633,56 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       </div>
     </div>
   );
+  const reputationResumePanel = confirmReputationResume && isReputationPause && campaign && (
+    <section
+      className="rounded-2xl border-2 border-[#bd4f26] bg-[#fff3ee] p-5 sm:p-6"
+      role="alertdialog"
+      aria-labelledby="reputation-resume-title"
+      data-testid="dialog-reputation-resume-confirmation"
+    >
+      <p className="section-kicker text-[#a64220]">Confirmação obrigatória</p>
+      <h3 id="reputation-resume-title" className="mt-2 text-lg font-extrabold text-[#263044]">
+        Esta campanha foi pausada por reputação.
+      </h3>
+      <p className="mt-2 text-sm leading-6 text-[#6d7180]">{campaign.pausa_motivo}</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-[#efc9ba] bg-[#fffaf6] p-3">
+          <span className="text-[11px] font-bold text-[#6d7180]">Bounce permanente / limite 2%</span>
+          <strong className="mt-1 block text-xl font-extrabold tabular-nums text-[#a64220]">
+            {formatPercentage((campaign.pausa_taxa_bounce ?? 0) * 100)}
+          </strong>
+        </div>
+        <div className="rounded-xl border border-[#efc9ba] bg-[#fffaf6] p-3">
+          <span className="text-[11px] font-bold text-[#6d7180]">Reclamações / limite 0,2%</span>
+          <strong className="mt-1 block text-xl font-extrabold tabular-nums text-[#a64220]">
+            {formatPercentage((campaign.pausa_taxa_reclamacao ?? 0) * 100)}
+          </strong>
+        </div>
+      </div>
+      <p className="mt-4 text-xs leading-5 text-[#7d6c6c]">
+        Só retome depois de investigar a causa. Ao confirmar, o worker voltará a enviar para os destinatários pendentes.
+      </p>
+      <div className="mt-5 flex flex-col-reverse justify-end gap-3 sm:flex-row">
+        <button
+          type="button"
+          onClick={() => setConfirmReputationResume(false)}
+          className="action-button action-button-secondary"
+          data-testid="button-cancel-reputation-resume"
+        >
+          Voltar
+        </button>
+        <button
+          type="button"
+          onClick={() => changeCampaignStatus('enviando', true)}
+          disabled={resumeCampaign.isPending}
+          className="action-button action-button-danger"
+          data-testid="button-confirm-reputation-resume"
+        >
+          {resumeCampaign.isPending ? <><LoaderCircle size={15} className="animate-spin" /> Retomando...</> : 'Confirmar retomada'}
+        </button>
+      </div>
+    </section>
+  );
 
   if (campaignQuery.isLoading) {
     return <Shell user={user} title="Campanha" eyebrow="Campanhas / Abrir" mobileNavOpen={mobileNavOpen} setMobileNavOpen={setMobileNavOpen}><div className="panel mx-auto max-w-4xl p-7" data-testid="status-campaign-detail-loading"><div className="skeleton h-5 w-48 rounded-full" /><div className="mt-7 grid gap-4 sm:grid-cols-2">{Array.from({ length: 8 }).map((_, index) => <div key={index} className="skeleton h-12 rounded-xl" />)}</div></div></Shell>;
@@ -1592,6 +1710,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             recipientSummary={recipientSummaryQuery.data}
             recipientsLoading={recipientSummaryQuery.isLoading}
           />
+          {reputationResumePanel}
           <RecipientSummaryPanel
             summary={recipientSummaryQuery.data}
             loading={recipientSummaryQuery.isLoading}
@@ -1618,7 +1737,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             onSchedule={openScheduleDialog}
             schedulePending={scheduleCampaign.isPending}
              onPause={() => changeCampaignStatus('pausada')}
-             onResume={() => changeCampaignStatus('enviando')}
+             onResume={requestCampaignResume}
              transitionPending={pauseCampaign.isPending || resumeCampaign.isPending}
              operationError={operationError}
              operationSuccess={operationSuccess}

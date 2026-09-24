@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: webhooks
+    description: Eventos autenticados de provedores externos
   - name: auth
     description: Sessão da equipe de marketing
   - name: campaigns
@@ -17,6 +19,71 @@ tags:
   - name: safety
     description: Estado seguro da operação de envios
 paths:
+  /webhooks/resend:
+    post:
+      operationId: receiveResendWebhook
+      tags: [webhooks]
+      summary: Registra um evento assinado do Resend
+      description: A assinatura Svix é verificada sobre os bytes JSON originais antes da interpretação do payload.
+      parameters:
+        - name: svix-id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: svix-timestamp
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: svix-signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResendWebhookEvent"
+      responses:
+        "200":
+          description: Evento salvo para processamento idempotente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookAcknowledgement"
+        "400":
+          description: Corpo ou evento assinado malformado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Assinatura Svix inválida ou expirada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Payload maior que o limite aceito
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Falha ao persistir o evento
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Segredo de verificação não configurado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /healthz:
     get:
       operationId: healthCheck
@@ -405,6 +472,12 @@ paths:
       summary: Retoma uma campanha pausada
       security:
         - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CampaignResumeInput"
       responses:
         "200":
           description: Campanha retomada
@@ -959,7 +1032,7 @@ components:
         percentual:
           type: number
           minimum: 0
-          description: Percentual real sobre o total enviado, de 0 a 100.
+          description: Percentual da quantidade sobre a base específica da métrica, de 0 a 100.
         limite_percentual:
           type: number
           minimum: 0
@@ -970,11 +1043,43 @@ components:
         total_enviado:
           type: integer
           minimum: 0
+        total_entregue:
+          type: integer
+          minimum: 0
         bounce:
           $ref: "#/components/schemas/RecipientReputationMetric"
         reclamacao:
           $ref: "#/components/schemas/RecipientReputationMetric"
-      required: [total_enviado, bounce, reclamacao]
+      required: [total_enviado, total_entregue, bounce, reclamacao]
+    RecipientEmailMetric:
+      type: object
+      properties:
+        quantidade:
+          type: integer
+          minimum: 0
+        percentual:
+          type: number
+          minimum: 0
+          description: Percentual sobre o total entregue, de 0 a 100.
+      required: [quantidade, percentual]
+    CampaignEmailMetrics:
+      type: object
+      properties:
+        enviados:
+          $ref: "#/components/schemas/RecipientEmailMetric"
+        entregues:
+          $ref: "#/components/schemas/RecipientEmailMetric"
+        aberturas:
+          $ref: "#/components/schemas/RecipientEmailMetric"
+        cliques:
+          $ref: "#/components/schemas/RecipientEmailMetric"
+        bounces:
+          $ref: "#/components/schemas/RecipientEmailMetric"
+        reclamacoes:
+          $ref: "#/components/schemas/RecipientEmailMetric"
+        descadastros:
+          $ref: "#/components/schemas/RecipientEmailMetric"
+      required: [enviados, entregues, aberturas, cliques, bounces, reclamacoes, descadastros]
     RecipientRecencyBucket:
       type: object
       properties:
@@ -1017,11 +1122,13 @@ components:
           $ref: "#/components/schemas/RecipientStatusSummary"
         reputacao:
           $ref: "#/components/schemas/RecipientReputationSummary"
+        metricas_email:
+          $ref: "#/components/schemas/CampaignEmailMetrics"
         recencia:
           type: array
           items:
             $ref: "#/components/schemas/RecipientRecencyBucket"
-      required: [campanha_id, total, total_na_lista, suprimidos_no_envio, permitidos_modo_teste, bloqueados_modo_teste, receberao_de_fato, status, reputacao, recencia]
+      required: [campanha_id, total, total_na_lista, suprimidos_no_envio, permitidos_modo_teste, bloqueados_modo_teste, receberao_de_fato, status, reputacao, metricas_email, recencia]
     CampaignRecipientsCleared:
       type: object
       properties:
@@ -1042,6 +1149,34 @@ components:
           type: ["string", "null"]
           pattern: "^[0-9]*$"
           maxLength: 20
+    CampaignResumeInput:
+      type: object
+      properties:
+        confirmar_reputacao:
+          type: boolean
+          description: Confirma explicitamente a retomada após uma pausa automática por reputação.
+      required: [confirmar_reputacao]
+    ResendWebhookEvent:
+      type: object
+      additionalProperties: true
+      properties:
+        type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        data:
+          type: object
+          additionalProperties: true
+      required: [type, created_at, data]
+    WebhookAcknowledgement:
+      type: object
+      properties:
+        received:
+          type: boolean
+        duplicate:
+          type: boolean
+      required: [received]
     SendTestResponse:
       type: object
       properties:

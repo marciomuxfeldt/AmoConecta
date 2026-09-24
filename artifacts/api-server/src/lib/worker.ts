@@ -24,6 +24,7 @@ import {
   isVerifiedSenderEmail,
 } from "./sender-config";
 import { logger } from "./logger";
+import { getTechnicalError } from "./technical-error";
 
 const RESEND_BATCH_SIZE = 100;
 const MAX_RETRIES = 3;
@@ -431,26 +432,31 @@ async function maybePauseCampaign(campaignId: string): Promise<boolean> {
     .from("destinatario")
     .select("id", { count: "exact", head: true })
     .eq("campanha_id", campaignId)
+    .eq("is_lembrete", false)
     .in("status", ["enviado", "entregue", "aberto", "clicado", "bounce"]);
   if (sentError) throw sentError;
   if (!sent || sent < 1000) return false;
-  const { count: bounces, error: bounceError } = await client
-    .from("destinatario")
-    .select("id", { count: "exact", head: true })
-    .eq("campanha_id", campaignId)
-    .eq("status", "bounce");
-  if (bounceError) throw bounceError;
-  const { count: complaints, error: complaintError } = await client
-    .from("supressao")
-    .select("email", { count: "exact", head: true })
-    .eq("origem", `campanha:${campaignId}`)
-    .eq("motivo", "complaint");
-  if (complaintError) throw complaintError;
-  const bounceRate = (bounces ?? 0) / sent;
-  const complaintRate = (complaints ?? 0) / sent;
+  const [delivered, hardBounces, complaints] = await Promise.all([
+    client
+      .from("destinatario")
+      .select("id", { count: "exact", head: true })
+      .eq("campanha_id", campaignId)
+      .eq("is_lembrete", false)
+      .not("entregue_em", "is", null),
+    countDistinctCampaignEventContacts(campaignId, "email.bounced", true),
+    countDistinctCampaignEventContacts(campaignId, "email.complained"),
+  ]);
+  if (delivered.error) throw delivered.error;
+  const deliveredCount = delivered.count ?? 0;
+  const bounceRate = hardBounces / sent || 0;
+  const complaintRate = deliveredCount > 0 ? complaints / deliveredCount : 0;
   const reasons: string[] = [];
-  if (bounceRate > 0.02) reasons.push("bounce acima de 2%");
-  if (complaintRate > 0.002) reasons.push("reclamações acima de 0,2%");
+  if (bounceRate > 0.02) {
+    reasons.push(`bounce permanente ${((bounceRate * 100).toFixed(2))}% (limite 2%)`);
+  }
+  if (complaintRate > 0.002) {
+    reasons.push(`reclamações ${((complaintRate * 100).toFixed(2))}% (limite 0,2%)`);
+  }
   if (reasons.length === 0) return false;
   await updateCampaignStatus(campaignId, "pausada", {
     pausa_motivo: `Pausa automática: ${reasons.join(" e ")}.`,
@@ -459,6 +465,118 @@ async function maybePauseCampaign(campaignId: string): Promise<boolean> {
     pausada_em: new Date().toISOString(),
   });
   return true;
+}
+
+async function countDistinctCampaignEventContacts(
+  campaignId: string,
+  eventType: string,
+  permanentBounceOnly = false,
+): Promise<number> {
+  const client = supabaseAdminClient();
+  const emails = new Set<string>();
+  const pageSize = 1000;
+  let offset = 0;
+  while (true) {
+    let query = client
+      .from("evento_email")
+      .select("email")
+      .eq("campanha_id", campaignId)
+      .eq("tipo", eventType)
+      .not("email", "is", null)
+      .order("id", { ascending: true });
+    if (permanentBounceOnly) query = query.eq("bounce_permanente", true);
+    const { data, error } = await query.range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (typeof row.email === "string" && row.email.trim()) {
+        emails.add(normalize(row.email));
+      }
+    }
+    if ((data?.length ?? 0) < pageSize) break;
+    offset += pageSize;
+  }
+  return emails.size;
+}
+
+export async function processPendingEmailEvents(): Promise<number> {
+  const client = supabaseAdminClient();
+  const { data: pending, error: pendingError } = await client
+    .from("evento_email")
+    .select("id,svix_id,tipo,resend_email_id,tentativas")
+    .is("processado_em", null)
+    .or(`proxima_tentativa_em.is.null,proxima_tentativa_em.lte.${new Date().toISOString()}`)
+    .order("recebido_em", { ascending: true })
+    .limit(100);
+  if (pendingError) {
+    logger.error(
+      { technicalError: getTechnicalError(pendingError) },
+      "Could not load pending Resend events",
+    );
+    return 0;
+  }
+
+  let processed = 0;
+  for (const event of pending ?? []) {
+    const { data, error } = await client.rpc("process_resend_email_event", {
+      p_event_id: event.id,
+    });
+    if (error) {
+      const technicalError = getTechnicalError(error);
+      const { error: persistError } = await client
+        .from("evento_email")
+        .update({
+          erro_processamento: JSON.stringify(technicalError),
+          tentativas: event.tentativas + 1,
+          proxima_tentativa_em: new Date(Date.now() + 30_000).toISOString(),
+        })
+        .eq("id", event.id)
+        .is("processado_em", null);
+      logger.error(
+        {
+          svixId: event.svix_id,
+          eventType: event.tipo,
+          resendEmailId: event.resend_email_id,
+          technicalError,
+          ...(persistError
+            ? { persistError: getTechnicalError(persistError) }
+            : {}),
+        },
+        "Resend event processing failed; event remains available for retry",
+      );
+      continue;
+    }
+    const result =
+      typeof data === "object" && data !== null
+        ? (data as Record<string, unknown>)
+        : {};
+    if (result.matched === false && result.retryable === true) {
+      logger.info(
+        {
+          svixId: event.svix_id,
+          eventType: event.tipo,
+          resendEmailId: event.resend_email_id,
+        },
+        "Resend event recipient is not ready yet; event remains queued for retry",
+      );
+    } else if (result.matched === false) {
+      logger.warn(
+        {
+          svixId: event.svix_id,
+          eventType: event.tipo,
+          resendEmailId: event.resend_email_id,
+          reason: result.reason,
+        },
+        "Verified Resend event could not be matched and was retained for audit",
+      );
+    } else if (result.supported === false) {
+      logger.info(
+        { svixId: event.svix_id, eventType: event.tipo },
+        "Verified but unsupported Resend event was stored and ignored",
+      );
+    }
+    if (result.processed === true) processed += 1;
+  }
+  return processed;
 }
 
 async function quotaRemaining(campaign: Campaign): Promise<number> {
@@ -543,6 +661,7 @@ export async function processDueCampaigns(): Promise<number> {
   }
 
   try {
+    await processPendingEmailEvents();
     await recoverStuckRecipients();
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
@@ -619,6 +738,17 @@ export async function addSuppression(
 ): Promise<void> {
   const client = supabaseAdminClient();
   const normalizedEmail = normalize(email);
+  const markCampaignUnsubscribe = async () => {
+    if (!campaignId) return;
+    const { error } = await client
+      .from("destinatario")
+      .update({ descadastrado_em: new Date().toISOString() })
+      .eq("campanha_id", campaignId)
+      .eq("email", normalizedEmail)
+      .eq("is_lembrete", false)
+      .is("descadastrado_em", null);
+    if (error) throw error;
+  };
   const payload = {
     email: normalizedEmail,
     motivo: "descadastro",
@@ -636,16 +766,19 @@ export async function addSuppression(
       .update({ motivo: payload.motivo, origem: payload.origem })
       .eq("id", existing.id);
     if (error) throw error;
+    await markCampaignUnsubscribe();
     return;
   }
   const { error: insertError } = await client.from("supressao").insert(payload);
-  if (!insertError) return;
-  // A second request can insert the same e-mail between the lookup and
-  // insert. In that case, update the row it won.
-  if (insertError.code !== "23505") throw insertError;
-  const { error: retryError } = await client
-    .from("supressao")
-    .update({ motivo: payload.motivo, origem: payload.origem })
-    .eq("email", normalizedEmail);
-  if (retryError) throw retryError;
+  if (insertError) {
+    // A second request can insert the same e-mail between the lookup and
+    // insert. In that case, update the row it won.
+    if (insertError.code !== "23505") throw insertError;
+    const { error: retryError } = await client
+      .from("supressao")
+      .update({ motivo: payload.motivo, origem: payload.origem })
+      .eq("email", normalizedEmail);
+    if (retryError) throw retryError;
+  }
+  await markCampaignUnsubscribe();
 }

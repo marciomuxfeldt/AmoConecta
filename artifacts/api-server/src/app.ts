@@ -3,6 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
+import resendWebhookRouter from "./routes/resend-webhook";
 import { logger } from "./lib/logger";
 import { getTechnicalError } from "./lib/technical-error";
 import type { ErrorRequestHandler } from "express";
@@ -34,6 +35,21 @@ app.use(
 );
 app.use(cors({ credentials: true }));
 app.use(cookieParser());
+// The Svix signature covers the exact request bytes. This narrowly scoped
+// parser must run before express.json() consumes the body.
+app.use(
+  "/api/webhooks/resend",
+  express.raw({ type: "application/json", limit: "1mb" }),
+  resendWebhookRouter,
+);
+const webhookBodyParserError: ErrorRequestHandler = (error, _req, res, next) => {
+  if ((error as { status?: number })?.status === 413) {
+    res.status(413).json({ error: "O payload do webhook excede o limite de 1 MB." });
+    return;
+  }
+  next(error);
+};
+app.use("/api/webhooks/resend", webhookBodyParserError);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

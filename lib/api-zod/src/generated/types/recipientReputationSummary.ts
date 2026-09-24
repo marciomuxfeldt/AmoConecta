@@ -10,6 +10,8 @@ import type { RecipientReputationMetric } from './recipientReputationMetric';
 export interface RecipientReputationSummary {
   /** @minimum 0 */
   total_enviado: number;
+  /** @minimum 0 */
+  total_entregue: number;
   bounce: RecipientReputationMetric;
   reclamacao: RecipientReputationMetric;
 }

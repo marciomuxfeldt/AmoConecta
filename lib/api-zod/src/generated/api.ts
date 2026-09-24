@@ -9,6 +9,28 @@ import * as zod from 'zod';
 
 
 /**
+ * A assinatura Svix é verificada sobre os bytes JSON originais antes da interpretação do payload.
+ * @summary Registra um evento assinado do Resend
+ */
+export const ReceiveResendWebhookHeader = zod.object({
+  "svix-id": zod.string(),
+  "svix-timestamp": zod.string(),
+  "svix-signature": zod.string()
+})
+
+export const ReceiveResendWebhookBody = zod.object({
+  "type": zod.string(),
+  "created_at": zod.coerce.date(),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+export const ReceiveResendWebhookResponse = zod.object({
+  "received": zod.boolean(),
+  "duplicate": zod.boolean().optional()
+})
+
+
+/**
  * Returns server health status
  * @summary Health check
  */
@@ -629,6 +651,10 @@ export const ResumeCampaignParams = zod.object({
   "campaignId": zod.coerce.string().uuid()
 })
 
+export const ResumeCampaignBody = zod.object({
+  "confirmar_reputacao": zod.boolean().describe('Confirma explicitamente a retomada após uma pausa automática por reputação.')
+})
+
 export const resumeCampaignResponsePreheaderMax = 100;
 
 export const resumeCampaignResponseTetoHoraMin = 0;
@@ -820,6 +846,8 @@ export const getCampaignRecipientSummaryResponseStatusErroMin = 0;
 
 export const getCampaignRecipientSummaryResponseReputacaoTotalEnviadoMin = 0;
 
+export const getCampaignRecipientSummaryResponseReputacaoTotalEntregueMin = 0;
+
 export const getCampaignRecipientSummaryResponseReputacaoBounceQuantidadeMin = 0;
 
 export const getCampaignRecipientSummaryResponseReputacaoBouncePercentualMin = 0;
@@ -831,6 +859,34 @@ export const getCampaignRecipientSummaryResponseReputacaoReclamacaoQuantidadeMin
 export const getCampaignRecipientSummaryResponseReputacaoReclamacaoPercentualMin = 0;
 
 export const getCampaignRecipientSummaryResponseReputacaoReclamacaoLimitePercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailEnviadosQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailEnviadosPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailEntreguesQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailEntreguesPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailAberturasQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailAberturasPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailCliquesQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailCliquesPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailBouncesQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailBouncesPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailReclamacoesQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailReclamacoesPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailDescadastrosQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailDescadastrosPercentualMin = 0;
 
 export const getCampaignRecipientSummaryResponseRecenciaItemQuantidadeMin = 0;
 
@@ -854,15 +910,46 @@ export const GetCampaignRecipientSummaryResponse = zod.object({
 }),
   "reputacao": zod.object({
   "total_enviado": zod.number().int().min(getCampaignRecipientSummaryResponseReputacaoTotalEnviadoMin),
+  "total_entregue": zod.number().int().min(getCampaignRecipientSummaryResponseReputacaoTotalEntregueMin),
   "bounce": zod.object({
   "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseReputacaoBounceQuantidadeMin),
-  "percentual": zod.number().min(getCampaignRecipientSummaryResponseReputacaoBouncePercentualMin).describe('Percentual real sobre o total enviado, de 0 a 100.'),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseReputacaoBouncePercentualMin).describe('Percentual da quantidade sobre a base específica da métrica, de 0 a 100.'),
   "limite_percentual": zod.number().min(getCampaignRecipientSummaryResponseReputacaoBounceLimitePercentualMin)
 }),
   "reclamacao": zod.object({
   "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseReputacaoReclamacaoQuantidadeMin),
-  "percentual": zod.number().min(getCampaignRecipientSummaryResponseReputacaoReclamacaoPercentualMin).describe('Percentual real sobre o total enviado, de 0 a 100.'),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseReputacaoReclamacaoPercentualMin).describe('Percentual da quantidade sobre a base específica da métrica, de 0 a 100.'),
   "limite_percentual": zod.number().min(getCampaignRecipientSummaryResponseReputacaoReclamacaoLimitePercentualMin)
+})
+}),
+  "metricas_email": zod.object({
+  "enviados": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailEnviadosQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailEnviadosPercentualMin).describe('Percentual sobre o total entregue, de 0 a 100.')
+}),
+  "entregues": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailEntreguesQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailEntreguesPercentualMin).describe('Percentual sobre o total entregue, de 0 a 100.')
+}),
+  "aberturas": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailAberturasQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailAberturasPercentualMin).describe('Percentual sobre o total entregue, de 0 a 100.')
+}),
+  "cliques": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailCliquesQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailCliquesPercentualMin).describe('Percentual sobre o total entregue, de 0 a 100.')
+}),
+  "bounces": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailBouncesQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailBouncesPercentualMin).describe('Percentual sobre o total entregue, de 0 a 100.')
+}),
+  "reclamacoes": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailReclamacoesQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailReclamacoesPercentualMin).describe('Percentual sobre o total entregue, de 0 a 100.')
+}),
+  "descadastros": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailDescadastrosQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailDescadastrosPercentualMin).describe('Percentual sobre o total entregue, de 0 a 100.')
 })
 }),
   "recencia": zod.array(zod.object({

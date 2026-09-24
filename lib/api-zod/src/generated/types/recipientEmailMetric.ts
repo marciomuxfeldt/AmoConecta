@@ -6,14 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface RecipientReputationMetric {
+export interface RecipientEmailMetric {
   /** @minimum 0 */
   quantidade: number;
   /**
-     * Percentual da quantidade sobre a base específica da métrica, de 0 a 100.
+     * Percentual sobre o total entregue, de 0 a 100.
      * @minimum 0
      */
   percentual: number;
-  /** @minimum 0 */
-  limite_percentual: number;
 }

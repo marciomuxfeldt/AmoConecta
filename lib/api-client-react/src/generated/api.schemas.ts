@@ -93,7 +93,7 @@ export interface RecipientReputationMetric {
   /** @minimum 0 */
   quantidade: number;
   /**
-     * Percentual real sobre o total enviado, de 0 a 100.
+     * Percentual da quantidade sobre a base específica da métrica, de 0 a 100.
      * @minimum 0
      */
   percentual: number;
@@ -104,8 +104,30 @@ export interface RecipientReputationMetric {
 export interface RecipientReputationSummary {
   /** @minimum 0 */
   total_enviado: number;
+  /** @minimum 0 */
+  total_entregue: number;
   bounce: RecipientReputationMetric;
   reclamacao: RecipientReputationMetric;
+}
+
+export interface RecipientEmailMetric {
+  /** @minimum 0 */
+  quantidade: number;
+  /**
+     * Percentual sobre o total entregue, de 0 a 100.
+     * @minimum 0
+     */
+  percentual: number;
+}
+
+export interface CampaignEmailMetrics {
+  enviados: RecipientEmailMetric;
+  entregues: RecipientEmailMetric;
+  aberturas: RecipientEmailMetric;
+  cliques: RecipientEmailMetric;
+  bounces: RecipientEmailMetric;
+  reclamacoes: RecipientEmailMetric;
+  descadastros: RecipientEmailMetric;
 }
 
 export interface RecipientRecencyBucket {
@@ -145,6 +167,7 @@ export interface CampaignRecipientSummary {
   receberao_de_fato: number;
   status: RecipientStatusSummary;
   reputacao: RecipientReputationSummary;
+  metricas_email: CampaignEmailMetrics;
   recencia: RecipientRecencyBucket[];
 }
 
@@ -173,6 +196,25 @@ export interface ScheduleCampaignInput {
      * @pattern ^[0-9]*$
      */
   confirmacao_destinatarios?: string | null;
+}
+
+export interface CampaignResumeInput {
+  /** Confirma explicitamente a retomada após uma pausa automática por reputação. */
+  confirmar_reputacao: boolean;
+}
+
+export type ResendWebhookEventData = { [key: string]: unknown };
+
+export interface ResendWebhookEvent {
+  type: string;
+  created_at: string;
+  data: ResendWebhookEventData;
+  [key: string]: unknown;
+ }
+
+export interface WebhookAcknowledgement {
+  received: boolean;
+  duplicate?: boolean;
 }
 
 export interface SendTestResponse {

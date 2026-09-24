@@ -10,6 +10,7 @@ import {
   RequestCampaignAssetUploadUrlBody,
   RequestCampaignAssetUploadUrlResponse,
   ScheduleCampaignBody,
+  ResumeCampaignBody,
   UpdateCampaignBody,
   UpdateCampaignResponse,
 } from "@workspace/api-zod";
@@ -212,6 +213,7 @@ async function countMainRecipients(
     lt?: string;
     lte?: string;
     isNull?: boolean;
+    isNotNull?: string;
     statuses?: readonly string[];
   },
 ): Promise<number> {
@@ -225,6 +227,7 @@ async function countMainRecipients(
   if (query?.lt) request = request.lt("data_ultima_compra", query.lt);
   if (query?.lte) request = request.lte("data_ultima_compra", query.lte);
   if (query?.isNull) request = request.is("data_ultima_compra", null);
+  if (query?.isNotNull) request = request.not(query.isNotNull, "is", null);
   if (query?.statuses) request = request.in("status", query.statuses);
 
   const { count, error } = await request;
@@ -232,14 +235,178 @@ async function countMainRecipients(
   return count ?? 0;
 }
 
-async function countCampaignComplaints(campaignId: string): Promise<number> {
-  const { count, error } = await supabaseAdminClient()
-    .from("supressao")
-    .select("email", { count: "exact", head: true })
-    .eq("origem", `campanha:${campaignId}`)
-    .eq("motivo", "complaint");
-  if (error) throw error;
-  return count ?? 0;
+type CampaignEmailRollup = {
+  destinatarios: number;
+  enviados: number;
+  entregues: number;
+  aberturas: number;
+  cliques: number;
+  bounces: number;
+  bouncesPermanentes: number;
+  reclamacoes: number;
+  descadastros: number;
+};
+
+type CampaignEmailContact = {
+  recipient?: {
+    status: string;
+    enviado_em: string | null;
+    entregue_em: string | null;
+    aberto_em: string | null;
+    clicado_em: string | null;
+    descadastrado_em: string | null;
+  };
+  sent: boolean;
+  delivered: boolean;
+  opened: boolean;
+  clicked: boolean;
+  bounced: boolean;
+  permanentBounce: boolean;
+  complained: boolean;
+};
+
+function emptyEmailRollup(): CampaignEmailRollup {
+  return {
+    destinatarios: 0,
+    enviados: 0,
+    entregues: 0,
+    aberturas: 0,
+    cliques: 0,
+    bounces: 0,
+    bouncesPermanentes: 0,
+    reclamacoes: 0,
+    descadastros: 0,
+  };
+}
+
+async function loadCampaignEmailRollups(
+  campaignIds: string[],
+): Promise<Map<string, CampaignEmailRollup>> {
+  const output = new Map<string, CampaignEmailRollup>();
+  for (const id of campaignIds) output.set(id, emptyEmailRollup());
+  if (campaignIds.length === 0) return output;
+
+  const contacts = new Map<string, Map<string, CampaignEmailContact>>();
+  const getContact = (campaignId: string, email: unknown) => {
+    if (typeof email !== "string" || !email.trim()) return null;
+    const normalizedEmail = email.trim().toLowerCase();
+    let campaignContacts = contacts.get(campaignId);
+    if (!campaignContacts) {
+      campaignContacts = new Map();
+      contacts.set(campaignId, campaignContacts);
+    }
+    let contact = campaignContacts.get(normalizedEmail);
+    if (!contact) {
+      contact = {
+        sent: false,
+        delivered: false,
+        opened: false,
+        clicked: false,
+        bounced: false,
+        permanentBounce: false,
+        complained: false,
+      };
+      campaignContacts.set(normalizedEmail, contact);
+    }
+    return contact;
+  };
+
+  const client = supabaseAdminClient();
+  const pageSize = 1000;
+  let offset = 0;
+  while (true) {
+    const { data, error } = await client
+      .from("destinatario")
+      .select(
+        "campanha_id,email,status,enviado_em,entregue_em,aberto_em,clicado_em,descadastrado_em",
+      )
+      .in("campanha_id", campaignIds)
+      .eq("is_lembrete", false)
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const rollup = output.get(row.campanha_id);
+      const contact = getContact(row.campanha_id, row.email);
+      if (!rollup || !contact) continue;
+      rollup.destinatarios += 1;
+      contact.recipient = {
+        status: row.status,
+        enviado_em: row.enviado_em,
+        entregue_em: row.entregue_em,
+        aberto_em: row.aberto_em,
+        clicado_em: row.clicado_em,
+        descadastrado_em: row.descadastrado_em,
+      };
+      contact.sent ||= Boolean(row.enviado_em) ||
+        ["enviado", "entregue", "aberto", "clicado", "bounce"].includes(row.status);
+      contact.delivered ||= Boolean(row.entregue_em) ||
+        ["entregue", "aberto", "clicado"].includes(row.status);
+      contact.opened ||= Boolean(row.aberto_em);
+      contact.clicked ||= Boolean(row.clicado_em);
+      contact.bounced ||= row.status === "bounce";
+    }
+    if ((data?.length ?? 0) < pageSize) break;
+    offset += pageSize;
+  }
+
+  offset = 0;
+  while (true) {
+    const { data, error } = await client
+      .from("evento_email")
+      .select("campanha_id,email,tipo,bounce_permanente")
+      .in("campanha_id", campaignIds)
+      .not("email", "is", null)
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const contact = getContact(row.campanha_id, row.email);
+      if (!contact) continue;
+      switch (row.tipo) {
+        case "email.sent":
+          contact.sent = true;
+          break;
+        case "email.delivered":
+          contact.delivered = true;
+          break;
+        case "email.opened":
+          contact.delivered = true;
+          contact.opened = true;
+          break;
+        case "email.clicked":
+          contact.delivered = true;
+          contact.clicked = true;
+          break;
+        case "email.bounced":
+          contact.bounced = true;
+          contact.permanentBounce ||= row.bounce_permanente === true;
+          break;
+        case "email.complained":
+          contact.delivered = true;
+          contact.complained = true;
+          break;
+      }
+    }
+    if ((data?.length ?? 0) < pageSize) break;
+    offset += pageSize;
+  }
+
+  for (const [campaignId, campaignContacts] of contacts) {
+    const rollup = output.get(campaignId);
+    if (!rollup) continue;
+    for (const contact of campaignContacts.values()) {
+      if (contact.sent) rollup.enviados += 1;
+      if (contact.delivered) rollup.entregues += 1;
+      if (contact.opened) rollup.aberturas += 1;
+      if (contact.clicked) rollup.cliques += 1;
+      if (contact.bounced) rollup.bounces += 1;
+      if (contact.permanentBounce) rollup.bouncesPermanentes += 1;
+      if (contact.complained) rollup.reclamacoes += 1;
+      if (contact.recipient?.descadastrado_em) rollup.descadastros += 1;
+    }
+  }
+  return output;
 }
 
 function dateOnlyDaysAgo(days: number): string {
@@ -272,19 +439,21 @@ async function recipientSummary(campaignId: string) {
   const recencyCounts = await Promise.all(
     recencyQueries.map((query) => countMainRecipients(campaignId, query)),
   );
-  const deliveryProjection = await recipientDeliveryProjection(
-    supabaseAdminClient(),
-    campaignId,
-  );
-  const [totalSent, bounces, complaints] = await Promise.all([
-    countMainRecipients(campaignId, {
-      statuses: ["enviado", "entregue", "aberto", "clicado", "bounce"],
-    }),
-    countMainRecipients(campaignId, { statuses: ["bounce"] }),
-    countCampaignComplaints(campaignId),
+  const [deliveryProjection, emailRollups] = await Promise.all([
+    recipientDeliveryProjection(supabaseAdminClient(), campaignId),
+    loadCampaignEmailRollups([campaignId]),
   ]);
-  const bounceRate = totalSent > 0 ? (bounces / totalSent) * 100 : 0;
-  const complaintRate = totalSent > 0 ? (complaints / totalSent) * 100 : 0;
+  const email = emailRollups.get(campaignId) ?? emptyEmailRollup();
+  const totalSent = email.enviados;
+  const totalDelivered = email.entregues;
+  const bounceRate =
+    totalSent > 0 ? (email.bouncesPermanentes / totalSent) * 100 : 0;
+  const complaintRate =
+    totalDelivered > 0 ? (email.reclamacoes / totalDelivered) * 100 : 0;
+  const metric = (quantity: number) => ({
+    quantidade: quantity,
+    percentual: totalDelivered > 0 ? (quantity / totalDelivered) * 100 : 0,
+  });
 
   return GetCampaignRecipientSummaryResponse.parse({
     campanha_id: campaignId,
@@ -304,16 +473,26 @@ async function recipientSummary(campaignId: string) {
     },
     reputacao: {
       total_enviado: totalSent,
+      total_entregue: totalDelivered,
       bounce: {
-        quantidade: bounces,
+        quantidade: email.bouncesPermanentes,
         percentual: bounceRate,
         limite_percentual: 2,
       },
       reclamacao: {
-        quantidade: complaints,
+        quantidade: email.reclamacoes,
         percentual: complaintRate,
         limite_percentual: 0.2,
       },
+    },
+    metricas_email: {
+      enviados: metric(email.enviados),
+      entregues: metric(email.entregues),
+      aberturas: metric(email.aberturas),
+      cliques: metric(email.cliques),
+      bounces: metric(email.bounces),
+      reclamacoes: metric(email.reclamacoes),
+      descadastros: metric(email.descadastros),
     },
     recencia: RECENCY_BUCKETS.map((faixa, index) => ({
       faixa,
@@ -366,7 +545,7 @@ async function findCampaign(campaignId: string) {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,status,assunto,preheader,assunto_lembrete,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo",
+      "id,status,assunto,preheader,assunto_lembrete,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -393,16 +572,20 @@ router.get("/campaigns", async (req, res) => {
       return;
     }
 
-    const campaignsWithRecipientCounts = await Promise.all(
-      (campaigns ?? []).map(async (campaign) => ({
-        ...campaign,
-        enviados: 0,
-        entregues: 0,
-        abertos: 0,
-        clicados: 0,
-        destinatarios_total: await countMainRecipients(campaign.id),
-      })),
+    const rollups = await loadCampaignEmailRollups(
+      (campaigns ?? []).map((campaign) => campaign.id),
     );
+    const campaignsWithRecipientCounts = (campaigns ?? []).map((campaign) => {
+      const metrics = rollups.get(campaign.id) ?? emptyEmailRollup();
+      return {
+        ...campaign,
+        enviados: metrics.enviados,
+        entregues: metrics.entregues,
+        abertos: metrics.aberturas,
+        clicados: metrics.cliques,
+        destinatarios_total: metrics.destinatarios,
+      };
+    });
     res.json(ListCampaignsResponse.parse(campaignsWithRecipientCounts));
   } catch (error) {
     logSupabaseError(req, "Campaign listing failed", error);
@@ -560,6 +743,7 @@ async function runSimpleCampaignTransition(
     targetStatus: "pausada" | "enviando" | "cancelada";
     allowedStatuses: string[];
     requireTest?: boolean;
+    confirmReputationPause?: boolean;
   },
 ): Promise<void> {
   const params = GetCampaignParams.safeParse(req.params);
@@ -590,6 +774,16 @@ async function runSimpleCampaignTransition(
     }
     if (config.requireTest && existing.teste_enviado !== true) {
       res.status(422).json({ error: "Envie e confirme o teste antes de retomar a campanha." });
+      return;
+    }
+    if (
+      config.targetStatus === "enviando" &&
+      existing.pausa_motivo?.startsWith("Pausa automática:") &&
+      config.confirmReputationPause !== true
+    ) {
+      res.status(409).json({
+        error: `Confirme explicitamente a retomada da pausa por reputação. ${existing.pausa_motivo}`,
+      });
       return;
     }
     const update =
@@ -675,13 +869,19 @@ router.post("/campaigns/:campaignId/pausar", (req, res) =>
   }),
 );
 
-router.post("/campaigns/:campaignId/retomar", (req, res) =>
-  runSimpleCampaignTransition(req, res, {
+router.post("/campaigns/:campaignId/retomar", (req, res) => {
+  const body = ResumeCampaignBody.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(422).json({ error: formatValidationError(body.error) });
+    return;
+  }
+  return runSimpleCampaignTransition(req, res, {
     targetStatus: "enviando",
     allowedStatuses: ["pausada"],
     requireTest: true,
-  }),
-);
+    confirmReputationPause: body.data.confirmar_reputacao,
+  });
+});
 
 router.post("/campaigns/:campaignId/cancelar", (req, res) =>
   runSimpleCampaignTransition(req, res, {
