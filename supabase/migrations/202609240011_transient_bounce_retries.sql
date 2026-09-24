@@ -1,5 +1,19 @@
 -- Keep 010 as an immutable migration and replace its event processor with
 -- classification-aware bounce handling.
+CREATE TABLE IF NOT EXISTS public.resend_bounce_retry_policy (
+  id smallint PRIMARY KEY CHECK (id = 1),
+  enabled_at timestamptz NOT NULL
+);
+
+ALTER TABLE public.resend_bounce_retry_policy ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.resend_bounce_retry_policy FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE public.resend_bounce_retry_policy TO service_role;
+
+-- Preserve this activation boundary if the migration is rerun.
+INSERT INTO public.resend_bounce_retry_policy (id, enabled_at)
+VALUES (1, clock_timestamp())
+ON CONFLICT (id) DO NOTHING;
+
 CREATE OR REPLACE FUNCTION public.process_resend_email_event(p_event_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -11,6 +25,9 @@ DECLARE
   v_recipient public.destinatario%ROWTYPE;
   v_permanent boolean;
   v_temporary boolean;
+  v_retry_rule_applies boolean := false;
+  v_campaign_status text;
+  v_retry_enabled_at timestamptz;
   v_bounce_type_raw text;
   v_bounce_type text;
 BEGIN
@@ -82,6 +99,19 @@ BEGIN
     RETURN jsonb_build_object('processed', false, 'matched', false, 'retryable', true);
   END IF;
 
+  IF v_event.tipo = 'email.bounced' THEN
+    SELECT enabled_at
+      INTO STRICT v_retry_enabled_at
+      FROM public.resend_bounce_retry_policy
+      WHERE id = 1;
+    v_retry_rule_applies := v_event.recebido_em >= v_retry_enabled_at;
+
+    SELECT status
+      INTO v_campaign_status
+      FROM public.campanha
+      WHERE id = v_recipient.campanha_id;
+  END IF;
+
   v_bounce_type_raw := coalesce(
     NULLIF(btrim(v_event.payload #>> '{data,bounce,type}'), ''),
     NULLIF(btrim(v_event.payload #>> '{data,bounce_type}'), ''),
@@ -142,12 +172,18 @@ BEGIN
         WHEN v_event.tipo = 'email.bounced'
           AND d.status IN ('entregue', 'aberto', 'clicado') THEN d.status
         WHEN v_event.tipo = 'email.bounced' AND v_permanent THEN 'bounce'
-        WHEN v_temporary
+        WHEN v_event.tipo = 'email.bounced' AND NOT v_retry_rule_applies THEN 'bounce'
+        WHEN v_temporary AND v_retry_rule_applies
           AND d.status NOT IN ('entregue', 'aberto', 'clicado')
-          AND d.tentativas < 3 THEN 'pendente'
-        WHEN v_temporary
+          AND v_campaign_status IS DISTINCT FROM 'enviando' THEN 'erro'
+        WHEN v_temporary AND v_retry_rule_applies
           AND d.status NOT IN ('entregue', 'aberto', 'clicado')
+          AND v_campaign_status = 'enviando'
           AND d.tentativas >= 3 THEN 'erro'
+        WHEN v_temporary AND v_retry_rule_applies
+          AND d.status NOT IN ('entregue', 'aberto', 'clicado')
+          AND v_campaign_status = 'enviando'
+          AND d.tentativas < 3 THEN 'pendente'
         WHEN v_event.tipo = 'email.clicked' AND d.status <> 'clicado' THEN 'clicado'
         WHEN v_event.tipo = 'email.opened'
           AND d.status NOT IN ('aberto', 'clicado') THEN 'aberto'
@@ -160,31 +196,28 @@ BEGIN
         ELSE d.status
       END,
       erro = CASE
-        WHEN v_temporary
+        WHEN v_temporary AND v_retry_rule_applies
+          AND d.status NOT IN ('bounce', 'entregue', 'aberto', 'clicado')
+          AND v_campaign_status IS DISTINCT FROM 'enviando'
+          THEN 'Bounce temporário; campanha não está enviando, retentativa não realizada.'
+        WHEN v_temporary AND v_retry_rule_applies
           AND d.status NOT IN ('bounce', 'erro', 'entregue', 'aberto', 'clicado')
+          AND v_campaign_status = 'enviando'
           AND d.tentativas < 3 THEN NULL
-        WHEN v_temporary
-          AND d.status NOT IN ('bounce', 'erro', 'entregue', 'aberto', 'clicado')
+        WHEN v_temporary AND v_retry_rule_applies
+          AND d.status NOT IN ('bounce', 'entregue', 'aberto', 'clicado')
+          AND v_campaign_status = 'enviando'
           AND d.tentativas >= 3
           THEN 'Bounce temporário; limite de 3 tentativas de envio atingido.'
         ELSE d.erro
       END,
       processando_em = CASE
         WHEN v_event.tipo = 'email.bounced'
-          AND (v_permanent OR v_temporary)
+          AND (v_permanent OR (v_temporary AND v_retry_rule_applies))
           AND d.status NOT IN ('entregue', 'aberto', 'clicado') THEN NULL
         ELSE d.processando_em
       END
     WHERE d.id = v_recipient.id;
-  END IF;
-
-  IF v_temporary
-     AND v_recipient.tentativas < 3
-     AND v_recipient.status NOT IN ('bounce', 'erro', 'entregue', 'aberto', 'clicado') THEN
-    UPDATE public.campanha
-      SET status = 'enviando'
-      WHERE id = v_recipient.campanha_id
-        AND status = 'concluida';
   END IF;
 
   IF v_event.tipo = 'email.bounced' AND v_permanent THEN
@@ -219,69 +252,3 @@ $$;
 
 REVOKE ALL ON FUNCTION public.process_resend_email_event(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.process_resend_email_event(uuid) TO service_role;
-
--- Requeue earlier explicitly transient bounces that the previous handler
--- recorded as terminal. Never requeue recipients with permanent-bounce history
--- or evidence that a later delivery/open/click already succeeded.
-WITH transient_bounces AS (
-  SELECT DISTINCT e.destinatario_id
-  FROM public.evento_email AS e
-  WHERE e.tipo = 'email.bounced'
-    AND e.bounce_permanente IS FALSE
-    AND lower(btrim(coalesce(e.bounce_tipo_bruto, '')))
-      IN ('transient', 'temporary', 'soft', 'delayed')
-    AND e.destinatario_id IS NOT NULL
-)
-UPDATE public.destinatario AS d
-SET status = CASE
-      WHEN d.tentativas < 3 THEN 'pendente'
-      ELSE 'erro'
-    END,
-    processando_em = NULL,
-    erro = CASE
-      WHEN d.tentativas < 3 THEN NULL
-      ELSE 'Bounce temporário; limite de 3 tentativas de envio atingido.'
-    END
-FROM transient_bounces AS t
-WHERE d.id = t.destinatario_id
-  AND d.status = 'bounce'
-  AND d.entregue_em IS NULL
-  AND d.aberto_em IS NULL
-  AND d.clicado_em IS NULL
-  AND NOT EXISTS (
-    SELECT 1
-    FROM public.evento_email AS permanent_event
-    WHERE permanent_event.destinatario_id = d.id
-      AND permanent_event.tipo = 'email.bounced'
-      AND permanent_event.bounce_permanente IS TRUE
-  );
-
-UPDATE public.campanha AS c
-SET status = 'enviando'
-WHERE c.status = 'concluida'
-  AND EXISTS (
-    SELECT 1
-    FROM public.destinatario AS d
-    WHERE d.campanha_id = c.id
-      AND d.status = 'pendente'
-      AND d.tentativas < 3
-      AND d.entregue_em IS NULL
-      AND d.aberto_em IS NULL
-      AND d.clicado_em IS NULL
-      AND EXISTS (
-        SELECT 1
-        FROM public.evento_email AS temporary_event
-        WHERE temporary_event.destinatario_id = d.id
-          AND temporary_event.tipo = 'email.bounced'
-          AND temporary_event.bounce_permanente IS FALSE
-          AND lower(btrim(coalesce(temporary_event.bounce_tipo_bruto, '')))
-            IN ('transient', 'temporary', 'soft', 'delayed')
-      )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM public.evento_email AS permanent_event
-        WHERE permanent_event.destinatario_id = d.id
-          AND permanent_event.tipo = 'email.bounced'
-          AND permanent_event.bounce_permanente IS TRUE
-      )
-  );
