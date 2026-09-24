@@ -1,0 +1,129 @@
+Hoje a plataforma envia às cegas. Ela sabe que entregou ao Resend, e nada mais. Esta fase é o retorno: o que foi entregue, o que voltou, quem abriu, quem clicou, quem reclamou — e o freio automático que usa esses números.
+
+Regra número zero: o webhook é entrada não confiável
+
+O endpoint é público. Qualquer um na internet pode chamá-lo.
+
+Nenhum evento é processado sem verificação de assinatura. O Resend assina os webhooks pelo padrão Svix, com os cabeçalhos svix-id, svix-timestamp e svix-signature. A chave de assinatura é gerada no painel do Resend ao criar o webhook.
+
+Crie o Secret RESEND_WEBHOOK_SECRET.
+Verifique a assinatura antes de qualquer leitura do corpo. Assinatura inválida responde 401 e não toca no banco.
+Recuse eventos com svix-timestamp fora de uma janela de 5 minutos, para bloquear reenvio de mensagem capturada.
+O conteúdo do payload é dado, nunca instrução. Trate todo campo como texto de origem externa.
+
+Sem isso, qualquer pessoa marca destinatários como entregues, ou pior: dispara reclamações falsas até a pausa automática travar uma campanha legítima.
+
+Migração
+
+Me entregue o SQL em bloco de código para eu aplicar à mão. Sem política de RLS — RLS habilitado, nenhuma policy, o backend usa a service role.
+
+Tabela nova, para o registro bruto de todo evento recebido:
+
+evento_email
+  id              uuid primary key
+  svix_id         text not null unique
+  tipo            text not null
+  resend_email_id text
+  destinatario_id uuid references destinatario(id)
+  campanha_id     uuid references campanha(id)
+  email           text
+  ocorrido_em     timestamptz not null     -- o created_at do payload
+  recebido_em     timestamptz not null default now()
+  payload         jsonb not null
+
+Índices em (resend_email_id), (campanha_id, tipo) e (destinatario_id, tipo).
+
+O unique em svix_id é o que garante idempotência: o Resend entrega pelo menos uma vez, e reenvia quando não recebe 2xx. Sem isso, um evento repetido conta duas vezes na taxa de reclamação e pausa a campanha à toa.
+
+Em campanha, acrescente o que faltar para os contadores de reputação, se ainda não existir.
+
+Eventos a tratar
+
+email.sent, email.delivered, email.delivery_delayed, email.bounced, email.complained, email.opened, email.clicked.
+
+Cada evento é gravado bruto em evento_email antes de qualquer atualização de estado. O registro bruto é o que responde, meses depois, quando alguém disser que recebeu e-mail depois de ter se descadastrado.
+
+A ligação com o destinatário é pelo resend_email_id, que já é gravado no envio. Evento sem correspondência no banco — envio de teste, por exemplo — é registrado e ignorado, com log, nunca com erro.
+
+Ordem dos eventos
+
+Os webhooks chegam fora de ordem. É normal e acontece com frequência: a abertura pode chegar antes da entrega.
+
+Duas regras, as duas obrigatórias:
+
+A ordenação é sempre pelo created_at do payload, nunca pela hora de chegada.
+A progressão de status é monotônica: enviado → entregue → aberto → clicado. Um evento nunca faz o destinatário retroceder. Se aberto chega antes de delivered, grava-se entregue_em sem rebaixar o status.
+
+bounce e erro são terminais: nada os sobrescreve.
+
+As colunas entregue_em, aberto_em e clicado_em recebem sempre o horário do primeiro evento daquele tipo, não do último.
+
+Supressão automática
+email.bounced com bounce permanente (hard): entra em supressao com motivo = 'bounce' e origem identificando a campanha. Endereço que não existe nunca mais recebe.
+email.complained: entra em supressao com motivo = 'reclamacao', imediatamente, sem exceção. Quem marcou como spam não recebe mais nada, nunca.
+email.delivery_delayed e bounce temporário (soft): não suprime. É caixa cheia ou problema momentâneo. Registre o evento e siga.
+
+Distinguir hard de soft importa: suprimir por soft bounce joga fora endereços bons.
+
+Pausa automática por reputação
+
+O mecanismo já existe da Fase 4 e nunca recebeu dados. Agora recebe.
+
+A cada execução do worker, para cada campanha em enviando:
+
+Taxa de reclamação = reclamações ÷ entregues. Limite 0,2%.
+Taxa de bounce = bounces permanentes ÷ enviados. Limite 2%.
+Só avalia a partir de 1.000 enviados, para não pausar por amostra pequena.
+Ao ultrapassar qualquer limite: status vira pausada, pausada_em recebe o horário, pausa_motivo recebe qual limite estourou e a taxa apurada, e o envio para.
+
+Uma campanha pausada por reputação não pode ser retomada com um clique. Exija confirmação explícita, mostrando a taxa que causou a pausa. Retomar um envio que está gerando reclamação acima do limite é como o domínio entra em lista negra.
+
+O painel
+
+Por campanha, mostre: enviados, entregues, aberturas únicas, cliques únicos, bounces, reclamações, descadastros — cada um com o número absoluto e a taxa sobre entregues.
+
+Enquanto a campanha estiver em enviando, atualize a cada 15 segundos.
+
+Uma exigência de honestidade na apresentação: a taxa de abertura é inflada e não mede interesse. O Apple Mail Privacy Protection carrega o pixel de rastreamento sem o destinatário abrir nada, e o Gmail pré-carrega imagens. Boa parte das "aberturas" nunca foi vista por ninguém.
+
+Portanto:
+
+Cliques únicos são o indicador principal de engajamento, e devem ter o destaque visual.
+A abertura aparece como indicador secundário, com uma nota curta explicando que é inflada por proteções de privacidade e serve para comparar campanhas entre si, não para medir interesse real.
+
+Se o painel apresentar abertura como sucesso, a pessoa de marketing vai otimizar a coisa errada por meses.
+
+Resposta do endpoint
+
+O Resend reenvia quando não recebe 2xx. Então:
+
+Responda 200 rapidamente, assim que o evento estiver gravado em evento_email.
+Se o processamento de estado falhar depois, isso não pode virar erro HTTP — senão o Resend reenvia e o evento duplica.
+Nunca processe de forma síncrona algo demorado dentro do webhook.
+Erro interno vai para o log com a causa técnica completa, conforme a regra do projeto: nunca mascarar erro.
+Configuração manual
+
+Me diga exatamente o que preciso fazer no painel do Resend e no Replit, incluindo:
+
+A URL completa do endpoint que devo cadastrar no Resend.
+Quais eventos marcar.
+Onde encontrar a chave de assinatura.
+Em quais Repls o RESEND_WEBHOOK_SECRET precisa existir.
+
+Registre também, de forma visível na sua resposta: quando o domínio amoconecta.com.br entrar no ar, a URL do webhook muda e precisa ser atualizada no Resend. Se isso passar batido, os eventos param de chegar em silêncio e ninguém percebe até alguém reparar que nenhuma campanha tem aberturas.
+
+Fora do escopo
+
+Não implemente o lembrete, a supressão por desengajamento crônico nem a exportação para BI — são a Fase 6. Não altere ENVIO_LIBERADO. Não mexa na deduplicação por telefone.
+
+Critérios de aceite
+Webhook com assinatura inválida é recusado com 401 e não grava nada.
+O mesmo evento entregue duas vezes é gravado uma vez só.
+Evento de abertura chegando antes do de entrega preenche entregue_em sem rebaixar o status.
+Reclamação entra em supressao e o endereço é bloqueado no envio seguinte.
+Hard bounce suprime; soft bounce não.
+O painel mostra os contadores e atualiza sozinho durante o envio.
+Cliques têm destaque maior que aberturas, com a nota sobre inflação.
+Ao final
+
+Me entregue o SQL da migração em bloco de código, a lista do que preciso configurar à mão, e quais arquivos alterados são executados também pelo worker — em especial se a função de pausa automática mudou, porque ela roda lá.
