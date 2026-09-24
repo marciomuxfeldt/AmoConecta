@@ -243,9 +243,13 @@ type CampaignEmailRollup = {
   cliques: number;
   bounces: number;
   bouncesPermanentes: number;
+  bouncesTemporarios: number;
+  bouncesIndeterminados: number;
   reclamacoes: number;
   descadastros: number;
 };
+
+type BounceClassification = "permanente" | "temporario" | "indeterminado";
 
 type CampaignEmailContact = {
   recipient?: {
@@ -261,7 +265,7 @@ type CampaignEmailContact = {
   opened: boolean;
   clicked: boolean;
   bounced: boolean;
-  permanentBounce: boolean;
+  bounceClassification: BounceClassification | null;
   complained: boolean;
 };
 
@@ -274,9 +278,20 @@ function emptyEmailRollup(): CampaignEmailRollup {
     cliques: 0,
     bounces: 0,
     bouncesPermanentes: 0,
+    bouncesTemporarios: 0,
+    bouncesIndeterminados: 0,
     reclamacoes: 0,
     descadastros: 0,
   };
+}
+
+function classifyBounceType(value: unknown): BounceClassification {
+  const type = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (type === "permanent" || type === "hard") return "permanente";
+  if (["transient", "temporary", "soft", "delayed"].includes(type)) {
+    return "temporario";
+  }
+  return "indeterminado";
 }
 
 async function loadCampaignEmailRollups(
@@ -303,7 +318,7 @@ async function loadCampaignEmailRollups(
         opened: false,
         clicked: false,
         bounced: false,
-        permanentBounce: false,
+        bounceClassification: null,
         complained: false,
       };
       campaignContacts.set(normalizedEmail, contact);
@@ -354,7 +369,7 @@ async function loadCampaignEmailRollups(
   while (true) {
     const { data, error } = await client
       .from("evento_email")
-      .select("campanha_id,email,tipo,bounce_permanente")
+      .select("campanha_id,email,tipo,bounce_permanente,bounce_tipo_bruto")
       .in("campanha_id", campaignIds)
       .not("email", "is", null)
       .order("id", { ascending: true })
@@ -380,7 +395,20 @@ async function loadCampaignEmailRollups(
           break;
         case "email.bounced":
           contact.bounced = true;
-          contact.permanentBounce ||= row.bounce_permanente === true;
+          {
+            const classification =
+              row.bounce_permanente === true
+                ? "permanente"
+                : classifyBounceType(row.bounce_tipo_bruto);
+            if (
+              contact.bounceClassification === null ||
+              classification === "permanente" ||
+              (classification === "temporario" &&
+                contact.bounceClassification === "indeterminado")
+            ) {
+              contact.bounceClassification = classification;
+            }
+          }
           break;
         case "email.complained":
           contact.delivered = true;
@@ -400,8 +428,16 @@ async function loadCampaignEmailRollups(
       if (contact.delivered) rollup.entregues += 1;
       if (contact.opened) rollup.aberturas += 1;
       if (contact.clicked) rollup.cliques += 1;
-      if (contact.bounced) rollup.bounces += 1;
-      if (contact.permanentBounce) rollup.bouncesPermanentes += 1;
+      if (contact.bounced) {
+        rollup.bounces += 1;
+        if (contact.bounceClassification === "permanente") {
+          rollup.bouncesPermanentes += 1;
+        } else if (contact.bounceClassification === "temporario") {
+          rollup.bouncesTemporarios += 1;
+        } else {
+          rollup.bouncesIndeterminados += 1;
+        }
+      }
       if (contact.complained) rollup.reclamacoes += 1;
       if (contact.recipient?.descadastrado_em) rollup.descadastros += 1;
     }
@@ -450,9 +486,9 @@ async function recipientSummary(campaignId: string) {
     totalSent > 0 ? (email.bouncesPermanentes / totalSent) * 100 : 0;
   const complaintRate =
     totalDelivered > 0 ? (email.reclamacoes / totalDelivered) * 100 : 0;
-  const metric = (quantity: number) => ({
+  const metric = (quantity: number, denominator = totalDelivered) => ({
     quantidade: quantity,
-    percentual: totalDelivered > 0 ? (quantity / totalDelivered) * 100 : 0,
+    percentual: denominator > 0 ? (quantity / denominator) * 100 : 0,
   });
 
   return GetCampaignRecipientSummaryResponse.parse({
@@ -490,7 +526,10 @@ async function recipientSummary(campaignId: string) {
       entregues: metric(email.entregues),
       aberturas: metric(email.aberturas),
       cliques: metric(email.cliques),
-      bounces: metric(email.bounces),
+      bounces: metric(email.bounces, totalSent),
+      bounces_permanentes: metric(email.bouncesPermanentes, totalSent),
+      bounces_temporarios: metric(email.bouncesTemporarios, totalSent),
+      bounces_indeterminados: metric(email.bouncesIndeterminados, totalSent),
       reclamacoes: metric(email.reclamacoes),
       descadastros: metric(email.descadastros),
     },

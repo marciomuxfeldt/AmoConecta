@@ -1134,7 +1134,10 @@ function RecipientSummaryPanel({
         { key: 'entregues', label: 'Entregues', metric: summary.metricas_email.entregues },
         { key: 'aberturas', label: 'Aberturas únicas', metric: summary.metricas_email.aberturas },
         { key: 'cliques', label: 'Cliques únicos', metric: summary.metricas_email.cliques },
-        { key: 'bounces', label: 'Bounces', metric: summary.metricas_email.bounces },
+        { key: 'bounces', label: 'Bounces totais', metric: summary.metricas_email.bounces },
+        { key: 'bounces_permanentes', label: 'Bounces permanentes', metric: summary.metricas_email.bounces_permanentes },
+        { key: 'bounces_temporarios', label: 'Bounces temporários', metric: summary.metricas_email.bounces_temporarios },
+        { key: 'bounces_indeterminados', label: 'Bounces não classificados', metric: summary.metricas_email.bounces_indeterminados },
         { key: 'reclamacoes', label: 'Reclamações', metric: summary.metricas_email.reclamacoes },
         { key: 'descadastros', label: 'Descadastros', metric: summary.metricas_email.descadastros },
       ]
@@ -1182,7 +1185,7 @@ function RecipientSummaryPanel({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-sm font-extrabold text-[#263044]">Resultados do envio</h3>
-                <p className="mt-1 text-xs text-[#7d7e87]">As taxas abaixo usam entregues como base.</p>
+                <p className="mt-1 text-xs text-[#7d7e87]">Engajamento usa entregues; as taxas de bounce usam enviados como base.</p>
               </div>
             </div>
             {emailMetrics.length > 0 && (

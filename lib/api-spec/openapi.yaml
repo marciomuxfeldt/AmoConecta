@@ -1060,7 +1060,7 @@ components:
         percentual:
           type: number
           minimum: 0
-          description: Percentual sobre o total entregue, de 0 a 100.
+          description: Percentual sobre a base de referência da métrica, de 0 a 100.
       required: [quantidade, percentual]
     CampaignEmailMetrics:
       type: object
@@ -1075,11 +1075,17 @@ components:
           $ref: "#/components/schemas/RecipientEmailMetric"
         bounces:
           $ref: "#/components/schemas/RecipientEmailMetric"
+        bounces_permanentes:
+          $ref: "#/components/schemas/RecipientEmailMetric"
+        bounces_temporarios:
+          $ref: "#/components/schemas/RecipientEmailMetric"
+        bounces_indeterminados:
+          $ref: "#/components/schemas/RecipientEmailMetric"
         reclamacoes:
           $ref: "#/components/schemas/RecipientEmailMetric"
         descadastros:
           $ref: "#/components/schemas/RecipientEmailMetric"
-      required: [enviados, entregues, aberturas, cliques, bounces, reclamacoes, descadastros]
+      required: [enviados, entregues, aberturas, cliques, bounces, bounces_permanentes, bounces_temporarios, bounces_indeterminados, reclamacoes, descadastros]
     RecipientRecencyBucket:
       type: object
       properties:

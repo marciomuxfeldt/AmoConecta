@@ -13,6 +13,9 @@ export interface CampaignEmailMetrics {
   aberturas: RecipientEmailMetric;
   cliques: RecipientEmailMetric;
   bounces: RecipientEmailMetric;
+  bounces_permanentes: RecipientEmailMetric;
+  bounces_temporarios: RecipientEmailMetric;
+  bounces_indeterminados: RecipientEmailMetric;
   reclamacoes: RecipientEmailMetric;
   descadastros: RecipientEmailMetric;
 }

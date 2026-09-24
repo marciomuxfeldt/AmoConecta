@@ -433,7 +433,7 @@ async function maybePauseCampaign(campaignId: string): Promise<boolean> {
     .select("id", { count: "exact", head: true })
     .eq("campanha_id", campaignId)
     .eq("is_lembrete", false)
-    .in("status", ["enviado", "entregue", "aberto", "clicado", "bounce"]);
+    .not("enviado_em", "is", null);
   if (sentError) throw sentError;
   if (!sent || sent < 1000) return false;
   const [delivered, hardBounces, complaints] = await Promise.all([
