@@ -1,0 +1,89 @@
+Este lote não é sobre posicionar botões. É sobre uma regra que hoje não existe: o operador não consegue saber em que estado a campanha está, nem o que precisa fazer para avançar. Tudo abaixo é consequência disso.
+
+Contexto de quem usa: uma pessoa de marketing, sozinha, montando uma campanha que vai para dezenas de milhares de caixas de entrada. Ela não tem como saber o que o sistema espera dela se a tela não disser.
+
+1. Uma regra única para salvar
+
+Hoje parte da tela salva sozinha e parte exige o botão "Salvar alterações". O operador muda a data, clica em agendar, e recebe um erro que fala de outra coisa. Levou várias tentativas para descobrir que a data precisava ser salva antes.
+
+Estabeleça uma regra para a tela inteira e aplique sem exceção:
+
+Nada persiste até o operador clicar em Salvar alterações.
+Enquanto houver qualquer campo alterado e não salvo, mostre um indicador permanente e visível de "alterações não salvas", e destaque o botão de salvar.
+Sair da página com alterações pendentes pede confirmação.
+
+Não misture salvamento automático com salvamento manual na mesma tela. Se um bloco do editor salva sozinho e o campo de data não, o operador não tem como construir um modelo mental do que está acontecendo — e é exatamente isso que está acontecendo hoje.
+
+2. Agendar salva antes de agendar
+
+Mesmo com a regra acima clara, o caso mais comum continua sendo: o operador ajusta a data e clica em agendar.
+
+Faça o botão Agendar envio salvar as alterações pendentes e então agendar, numa ação só. Se houver alteração não salva, o botão diz isso antes de executar: "Salvar alterações e agendar".
+
+Isso elimina a classe inteira de erro, em vez de melhorar a mensagem sobre ela.
+
+3. Nenhuma mensagem de erro pode mentir
+
+O sistema exibiu "O agendamento precisa estar no futuro" para uma data que estava no futuro. A causa real era outra: a data não tinha sido salva.
+
+Regra geral, válida para toda a plataforma: a mensagem mostrada ao operador descreve a causa real da recusa. Se a recusa é por alteração não salva, diga isso. Se é por data no passado, diga isso. Se são duas causas, diga as duas.
+
+Revise todas as mensagens de recusa das ações de status — agendar, pausar, retomar, cancelar — e me liste quais estavam imprecisas e como ficaram.
+
+4. Confirmação de agendamento no lugar onde se agenda
+
+O painel "Revise o tamanho do disparo antes de continuar" abre no topo da página, longe do bloco 05, que é onde o operador está olhando quando clica em agendar. Ele clica e parece que nada aconteceu.
+
+O painel de confirmação abre imediatamente abaixo do bloco de agendamento, e a tela rola até ele. Os dois botões — Voltar e Confirmar agendamento — ficam ali.
+
+5. Pausar e retomar junto do agendamento
+
+Mesma regra para as ações de campanha em andamento. Enquanto o status for enviando ou pausada, os botões de Pausar e Retomar aparecem no bloco 05, ao lado do agendamento, junto com o que já foi enviado na hora e no dia contra os tetos.
+
+Durante um disparo, é esse bloco que o operador fica olhando. O freio precisa estar lá.
+
+6. A jornada precisa estar visível
+
+Acrescente ao topo da tela uma trilha com os passos e o estado de cada um:
+
+Destinatários importados — número
+Conteúdo montado — blocos
+Teste enviado — data e hora, ou pendente
+Agendamento definido — data e hora, ou pendente
+Agendada
+
+Cada passo mostra se está cumprido ou o que falta. O operador precisa conseguir responder "o que falta para eu disparar" olhando uma vez para a tela.
+
+7. Avisos que não somem sozinhos
+
+Depois de enviar o teste com sucesso, o aviso "Envie um teste bem-sucedido antes de agendar a campanha" continuou na tela até recarregar a página.
+
+Todo aviso de pendência desaparece assim que a pendência é resolvida, sem recarregar. E o inverso: ao concluir uma ação, mostre a confirmação — hoje o operador clica e não recebe retorno nenhum.
+
+8. Campanha sem destinatários não pode ser agendada
+
+O painel de confirmação exibiu "A lista atual tem 0 destinatários que receberão de fato" e ainda assim ofereceu o botão de confirmar.
+
+Recuse o agendamento com zero destinatários, na tela e no servidor, explicando que a lista está vazia.
+
+9. Registro da pausa
+
+Ao pausar, pausada_em e pausa_motivo ficaram nulos. Testei: o status muda, mas nada é registrado.
+
+Ao pausar manualmente, grave pausada_em com o horário e pausa_motivo identificando que foi pausa manual e por qual usuário. A pausa automática por reputação, quando entrar, grava o motivo dela — e é justamente para distinguir as duas que esses campos existem.
+
+Exiba no painel, enquanto a campanha estiver pausada, quem pausou e quando.
+
+Junto disso, dois itens da mesma tela
+
+Destino do clique com duas fontes de verdade. A campanha guarda url_deeplink e url_landing, mas o bloco de botão no corpo tem seu próprio href. Numa campanha real, os campos apontavam para somosamo.com.br e o botão mandava para example.com — foi o que saiu no e-mail. Ou o botão herda o destino dos campos da campanha, ou os campos deixam de existir. Ter os dois garante que um dia vão discordar sem ninguém perceber.
+
+Campo de data recebendo timestamp ISO. O console registra repetidamente The specified value "2026-09-24T00:00:00.000Z" does not conform to the required format, "yyyy-MM-dd". Algum <input type="date"> recebe timestamp completo onde espera só a data, e o campo fica vazio sem explicação. Localize e corrija; me diga qual campo era.
+
+Fora do escopo
+
+Não implemente webhooks, lembrete nem exportação. Não altere ENVIO_LIBERADO. Não mexa na deduplicação por telefone neste lote.
+
+Ao final
+
+Me entregue o SQL de qualquer migração nova em bloco de código, a lista do que preciso configurar à mão, e quais arquivos alterados são executados também pelo worker.
