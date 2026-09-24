@@ -265,10 +265,6 @@ export interface Campaign {
   valor_credito: number | null;
   /** @nullable */
   validade_credito: string | null;
-  /** @nullable */
-  url_deeplink: string | null;
-  /** @nullable */
-  url_landing: string | null;
   /**
      * @minimum 0
      * @nullable
@@ -325,10 +321,6 @@ export interface CreateCampaignInput {
   valor_credito?: number | null;
   /** @nullable */
   validade_credito?: string | null;
-  /** @nullable */
-  url_deeplink?: string | null;
-  /** @nullable */
-  url_landing?: string | null;
   /** @minimum 0 */
   teto_hora?: number;
   /** @minimum 0 */
@@ -368,10 +360,6 @@ export interface UpdateCampaignInput {
   valor_credito?: number | null;
   /** @nullable */
   validade_credito?: string | null;
-  /** @nullable */
-  url_deeplink?: string | null;
-  /** @nullable */
-  url_landing?: string | null;
   /** @minimum 0 */
   teto_hora?: number;
   /** @minimum 0 */

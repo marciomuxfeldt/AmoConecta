@@ -13,8 +13,6 @@ const FIELD_LABELS: Record<string, string> = {
   remetente_email: "e-mail do remetente",
   valor_credito: "valor do crédito",
   validade_credito: "validade do crédito",
-  url_deeplink: "deep link",
-  url_landing: "landing page",
   teto_hora: "teto por hora",
   teto_dia: "teto por dia",
   status: "status",

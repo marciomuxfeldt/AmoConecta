@@ -8,7 +8,6 @@ import {
   Clock3,
   FileCheck2,
   Inbox,
-  Link2,
   LoaderCircle,
   LogOut,
   Mail,
@@ -429,8 +428,6 @@ type CampaignFormValues = {
   reply_to: string;
   valor_credito: string;
   validade_credito: string;
-  url_deeplink: string;
-  url_landing: string;
   teto_hora: string;
   teto_dia: string;
   agendada_para: string;
@@ -456,8 +453,6 @@ function blankCampaign(
     reply_to: replyTo,
     valor_credito: '',
     validade_credito: '',
-    url_deeplink: '',
-    url_landing: '',
     teto_hora: hourCap,
     teto_dia: dayCap,
     agendada_para: '',
@@ -486,8 +481,6 @@ function campaignToForm(
     reply_to: campaign.reply_to ?? replyTo,
     valor_credito: campaign.valor_credito == null ? '' : String(campaign.valor_credito),
     validade_credito: toDateInput(campaign.validade_credito),
-    url_deeplink: campaign.url_deeplink ?? '',
-    url_landing: campaign.url_landing ?? '',
     teto_hora: campaign.teto_hora == null ? '' : String(campaign.teto_hora),
     teto_dia: campaign.teto_dia == null ? '' : String(campaign.teto_dia),
     agendada_para: toDateTimeLocal(campaign.agendada_para),
@@ -505,6 +498,65 @@ function campaignContentIsLocked(status?: string): boolean {
   return status === 'agendada' || status === 'enviando' || status === 'pausada';
 }
 
+function useUnsavedChangesGuard(isDirty: boolean) {
+  const dirtyRef = useRef(isDirty);
+  const currentUrlRef = useRef('');
+
+  useEffect(() => {
+    dirtyRef.current = isDirty;
+  }, [isDirty]);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    currentUrlRef.current = window.location.href;
+    const confirmLeave = () => window.confirm('Há alterações não salvas. Deseja sair sem salvá-las?');
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const onClickCapture = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const logout = target?.closest('[data-testid="button-logout"]');
+      const anchor = target?.closest<HTMLAnchorElement>('a[href]');
+      if (!logout && (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download'))) return;
+      if (anchor) {
+        const destination = new URL(anchor.href, window.location.href);
+        if (
+          destination.origin === window.location.origin &&
+          `${destination.pathname}${destination.search}${destination.hash}` ===
+            `${window.location.pathname}${window.location.search}${window.location.hash}`
+        ) return;
+      }
+      if (confirmLeave()) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const onPopState = (event: PopStateEvent) => {
+      if (!dirtyRef.current) {
+        currentUrlRef.current = window.location.href;
+        return;
+      }
+      if (confirmLeave()) {
+        currentUrlRef.current = window.location.href;
+        return;
+      }
+      event.stopImmediatePropagation();
+      window.history.pushState(window.history.state, '', currentUrlRef.current);
+    };
+
+    document.addEventListener('click', onClickCapture, true);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('popstate', onPopState, true);
+    return () => {
+      document.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('popstate', onPopState, true);
+    };
+  }, [isDirty]);
+}
+
 function CampaignForm({
   campaign,
   onSaved,
@@ -514,6 +566,14 @@ function CampaignForm({
   testSent,
   onSchedule,
   schedulePending,
+  onPause,
+  onResume,
+  transitionPending = false,
+  operationError,
+  operationSuccess,
+  onClearOperationMessage,
+  scheduleConfirmationPanel,
+  sendQuotaPanel,
 }: {
   campaign?: Campaign;
   onSaved: (campaign: Campaign) => void;
@@ -521,8 +581,16 @@ function CampaignForm({
   testPending?: boolean;
   testError?: string | null;
   testSent?: boolean;
-  onSchedule?: () => void;
+  onSchedule?: (campaign: Campaign) => void;
   schedulePending?: boolean;
+  onPause?: () => void;
+  onResume?: () => void;
+  transitionPending?: boolean;
+  operationError?: string | null;
+  operationSuccess?: string | null;
+  onClearOperationMessage?: () => void;
+  scheduleConfirmationPanel?: ReactNode;
+  sendQuotaPanel?: ReactNode;
 }) {
   const create = useCreateCampaign();
   const update = useUpdateCampaign();
@@ -542,6 +610,8 @@ function CampaignForm({
   const emailBlocks = form.watch('corpo');
   const emailSubject = form.watch('assunto');
   const preheader = form.watch('preheader');
+  const isDirty = form.formState.isDirty;
+  useUnsavedChangesGuard(isDirty);
   const [uploadingBlockIds, setUploadingBlockIds] = useState<Set<string>>(() => new Set());
   const isUploadPending = uploadingBlockIds.size > 0;
 
@@ -558,6 +628,7 @@ function CampaignForm({
   };
 
   useEffect(() => {
+    if (form.formState.isDirty) return;
     form.reset(campaignToForm(
       campaign,
       defaultsQuery.data?.remetente_email,
@@ -576,18 +647,17 @@ function CampaignForm({
     form,
   ]);
 
-  const savePayload = (payload: CreateCampaignInput) => {
-    if (campaign) {
-      update.mutate({ campaignId: campaign.id, data: payload as UpdateCampaignInput }, { onSuccess: onSaved });
-    } else {
-      create.mutate({ data: payload }, { onSuccess: onSaved });
-    }
-  };
+  useEffect(() => {
+    const subscription = form.watch((_values, event) => {
+      if (event.type === 'change') onClearOperationMessage?.();
+    });
+    return () => subscription.unsubscribe();
+  }, [form.watch, onClearOperationMessage]);
 
-  const submit = (values: CampaignFormValues) => {
+  const validateValues = (values: CampaignFormValues) => {
     if (isUploadPending) {
       form.setError('corpo', { type: 'upload', message: 'Aguarde o término do upload das imagens antes de salvar.' });
-      return;
+      return false;
     }
     if (!values.nome.trim() || !values.assunto.trim() || !values.remetente_nome.trim() || !values.remetente_email.trim()) {
       const missingField: keyof CampaignFormValues = !values.nome.trim()
@@ -598,13 +668,17 @@ function CampaignForm({
             ? 'remetente_nome'
             : 'remetente_email';
       form.setError(missingField, { message: 'Campo obrigatório.' });
-      return;
+      return false;
     }
     const contentError = validateEmailBlocks(values.corpo);
     if (contentError) {
       form.setError('corpo', { type: 'validate', message: contentError });
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const makePayload = (values: CampaignFormValues) => {
     const corpo = values.corpo.map((block) => (
       block.type === 'image' && !block.href?.trim()
         ? { ...block, href: undefined }
@@ -620,16 +694,54 @@ function CampaignForm({
       reply_to: values.reply_to.trim() || null,
       valor_credito: nullableNumber(values.valor_credito),
       validade_credito: values.validade_credito.trim() || null,
-      url_deeplink: values.url_deeplink.trim() || null,
-      url_landing: values.url_landing.trim() || null,
-       teto_hora: nullableNumber(values.teto_hora) ?? 100,
-       teto_dia: nullableNumber(values.teto_dia) ?? 1000,
+      teto_hora: nullableNumber(values.teto_hora) ?? 100,
+      teto_dia: nullableNumber(values.teto_dia) ?? 1000,
       agendada_para: toServerDate(values.agendada_para),
       lembrete_ativo: values.lembrete_ativo,
-       lembrete_horas: Math.min(168, Math.max(24, Number(values.lembrete_horas) || 48)),
+      lembrete_horas: Math.min(168, Math.max(24, Number(values.lembrete_horas) || 48)),
       corpo,
     };
-    savePayload(payload as CreateCampaignInput);
+    return payload;
+  };
+
+  const persistValues = async (values: CampaignFormValues) => {
+    const payload = makePayload(values);
+    const saved = campaign
+      ? await update.mutateAsync({ campaignId: campaign.id, data: payload as UpdateCampaignInput })
+      : await create.mutateAsync({ data: payload as CreateCampaignInput });
+    form.reset(campaignToForm(
+      saved,
+      defaultsQuery.data?.remetente_email,
+      defaultsQuery.data?.remetente_nome,
+      defaultsQuery.data?.reply_to ?? '',
+      defaultsQuery.data?.teto_hora == null ? '100' : String(defaultsQuery.data.teto_hora),
+      defaultsQuery.data?.teto_dia == null ? '1000' : String(defaultsQuery.data.teto_dia),
+    ));
+    onSaved(saved);
+    return saved;
+  };
+
+  const submit = async (values: CampaignFormValues) => {
+    if (!validateValues(values)) return;
+    onClearOperationMessage?.();
+    try {
+      await persistValues(values);
+    } catch {
+      // The mutation retains its error for the inline save error below.
+    }
+  };
+
+  const requestSchedule = async () => {
+    if (!campaign || !onSchedule) return;
+    onClearOperationMessage?.();
+    const values = form.getValues();
+    if (!validateValues(values)) return;
+    try {
+      const latestCampaign = isDirty ? await persistValues(values) : campaign;
+      onSchedule(latestCampaign);
+    } catch {
+      // The mutation retains its error for the inline save error below.
+    }
   };
 
   const isPending = create.isPending || update.isPending;
@@ -637,6 +749,14 @@ function CampaignForm({
 
   return (
     <form onSubmit={form.handleSubmit(submit)} className="space-y-5" noValidate data-testid="form-campaign">
+      {isDirty && (
+        <div className="sticky top-2 z-30 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-[#d35f2a] bg-[#fff8ef] px-4 py-3 shadow-[0_12px_28px_rgba(38,48,68,.16)]" role="status" data-testid="status-unsaved-changes">
+          <div className="flex items-center gap-2 text-sm font-extrabold text-[#8e3a20]"><CircleAlert size={17} /> Alterações não salvas</div>
+          <button type="submit" disabled={isPending || isUploadPending} className="action-button action-button-primary !min-h-10 !px-4" data-testid="button-save-unsaved">
+            {isPending ? <><LoaderCircle size={15} className="animate-spin" /> Salvando...</> : <><Save size={15} /> Salvar alterações</>}
+          </button>
+        </div>
+      )}
        <section className="panel p-5 sm:p-7">
         <div className="mb-6 flex items-start justify-between gap-4"><div><p className="section-kicker">01 · Identidade</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Como esta campanha será reconhecida?</h2></div><span className="font-mono text-[9px] uppercase tracking-[.12em] text-[#aaa3a1]">Obrigatório</span></div>
         <div className="grid gap-5 md:grid-cols-2">
@@ -664,9 +784,8 @@ function CampaignForm({
           <Field label="Validade do crédito" hint="Data limite do crédito."><input {...form.register('validade_credito')} type="date" className="field-control" data-testid="input-credit-expiry" /></Field>
            <Field label="Teto por hora" hint="Sugestão inicial para a rampa: 100."><input {...form.register('teto_hora')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-hour-cap" /></Field>
            <Field label="Teto por dia" hint="Sugestão inicial para a rampa: 1.000."><input {...form.register('teto_dia')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-day-cap" /></Field>
-           <div className="sm:col-span-2 lg:col-span-2"><Field label="Deep link"><div className="relative"><Link2 size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('url_deeplink')} disabled={contentLocked} type="url" className="field-control pl-10 disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="https://..." data-testid="input-deeplink" /></div></Field></div>
-           <div className="sm:col-span-2 lg:col-span-2"><Field label="Landing page"><div className="relative"><Link2 size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#92939a]" /><input {...form.register('url_landing')} disabled={contentLocked} type="url" className="field-control pl-10 disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="https://..." data-testid="input-landing-page" /></div></Field></div>
         </div>
+         <p className="mt-4 rounded-xl border border-[#d8e5dd] bg-[#f1f7f5] px-4 py-3 text-xs leading-5 text-[#426c65]">O destino de cada chamada é definido diretamente no bloco de botão do e-mail. Esse é o único endereço usado no link enviado.</p>
       </section>
 
       <EmailEditor
@@ -682,6 +801,7 @@ function CampaignForm({
         testPending={testPending}
         testError={testError}
         testSent={testSent}
+         testDisabledReason={isDirty ? 'Salve as alterações antes de enviar o teste.' : null}
       />
        {contentLocked && <p className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] px-4 py-3 text-xs leading-5 text-[#6d7180]" role="status" data-testid="campaign-content-locked">O corpo, assunto, remetente e links ficam bloqueados enquanto a campanha está agendada, enviando ou pausada.</p>}
       {form.formState.errors.corpo?.message && <p className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" data-testid="error-email-content">{form.formState.errors.corpo.message}</p>}
@@ -691,17 +811,41 @@ function CampaignForm({
         <div className="mb-6"><p className="section-kicker">05 · Operação</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Quando e em que estado ela está?</h2></div>
         <div className="grid gap-5 md:grid-cols-3">
            <Field label="Status"><div className="field-control flex items-center bg-[#f3eee7] font-bold text-[#565c6a]" data-testid="select-campaign-status">{statusLabels[campaign?.status ?? CampaignStatus.rascunho]}</div></Field>
-           <Field label="Agendamento"><div className="flex flex-col gap-2 sm:flex-row"><input {...form.register('agendada_para')} type="datetime-local" className="field-control min-w-0 flex-1" data-testid="input-scheduled-at" />{onSchedule && campaign?.status === 'rascunho' && <button type="button" onClick={onSchedule} disabled={schedulePending} className="action-button action-button-primary shrink-0 whitespace-nowrap"><Clock3 size={14} /> {schedulePending ? 'Abrindo...' : 'Agendar envio'}</button>}</div><p className="mt-1.5 text-[10px] text-[#8d8780]">O botão usa a data escolhida neste campo.</p></Field>
+            <Field label="Agendamento"><div className="flex flex-col gap-2 sm:flex-row"><input {...form.register('agendada_para')} type="datetime-local" className="field-control min-w-0 flex-1" data-testid="input-scheduled-at" />{onSchedule && campaign?.status === 'rascunho' && <button type="button" onClick={() => { void requestSchedule(); }} disabled={schedulePending || isPending || isUploadPending} className="action-button action-button-primary shrink-0 whitespace-nowrap" data-testid="button-schedule-campaign"><Clock3 size={14} /> {schedulePending ? 'Agendando...' : isPending ? 'Salvando...' : isDirty ? 'Salvar alterações e agendar' : 'Agendar envio'}</button>}</div><p className="mt-1.5 text-[10px] text-[#8d8780]">Se houver alterações pendentes, elas serão salvas antes da confirmação do agendamento.</p></Field>
            <Field label="Horas até o lembrete"><input {...form.register('lembrete_horas')} type="number" min="24" max="168" className="field-control" data-testid="input-reminder-hours" /></Field>
         </div>
         <div className="mt-6 grid gap-3 border-t border-[#eee7dc] pt-5 sm:grid-cols-2">
           <label className="flex items-start gap-3 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3 text-xs text-[#565c6a]"><input {...form.register('lembrete_ativo')} type="checkbox" className="mt-0.5 accent-[#e96527]" data-testid="checkbox-reminder-active" /><span><strong className="block text-[#263044]">Lembrete ativo</strong><span className="mt-1 block leading-5">Deixa o lembrete habilitado para a operação.</span></span></label>
            <div className="flex items-start gap-3 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3 text-xs text-[#565c6a]" data-testid="status-test-sent"><CheckCircle2 size={15} className={`mt-0.5 ${campaign?.teste_enviado ? 'text-[#417846]' : 'text-[#aaa3a1]'}`} /><span><strong className="block text-[#263044]">Teste de conteúdo</strong><span className="mt-1 block leading-5">{campaign?.teste_enviado_em ? `Teste enviado em ${new Date(campaign.teste_enviado_em).toLocaleDateString('pt-BR')} às ${new Date(campaign.teste_enviado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Nenhum teste enviado ainda.'}</span></span></div>
         </div>
+         {(campaign?.status === 'enviando' || campaign?.status === 'pausada') && (
+           <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[#eee7dc] pt-5" data-testid="campaign-live-controls">
+             <div><p className="text-xs font-extrabold text-[#263044]">Controles do envio</p><p className="mt-1 text-[11px] text-[#777984]">{campaign.status === 'enviando' ? 'Pause o disparo se precisar interromper a operação.' : 'Retome o disparo quando estiver pronto para continuar.'}</p></div>
+             {campaign.status === 'enviando' && onPause && <button type="button" onClick={onPause} disabled={transitionPending} className="action-button action-button-secondary" data-testid="button-pause-campaign">{transitionPending ? <LoaderCircle size={15} className="animate-spin" /> : <Pause size={15} />} Pausar envio</button>}
+             {campaign.status === 'pausada' && onResume && <button type="button" onClick={onResume} disabled={transitionPending} className="action-button action-button-primary" data-testid="button-resume-campaign">{transitionPending ? <LoaderCircle size={15} className="animate-spin" /> : <Play size={15} />} Retomar envio</button>}
+           </div>
+         )}
+         {sendQuotaPanel}
+         {campaign?.status === 'pausada' && (
+           <div className="mt-5 rounded-xl border border-[#efc9ba] bg-[#fff3ee] px-4 py-3 text-xs leading-5 text-[#8e3a20]" data-testid="status-campaign-pause-reason">
+             <strong className="block">{campaign.pausada_em ? `Pausada em ${formatDate(campaign.pausada_em)}` : 'Campanha pausada'}</strong>
+             <span>{campaign.pausa_motivo || 'Motivo da pausa não informado.'}</span>
+             {(campaign.pausa_taxa_bounce != null || campaign.pausa_taxa_reclamacao != null) && (
+               <span className="mt-1 block text-[#a65d46]">
+                 {campaign.pausa_taxa_bounce != null && `Bounce: ${formatPercentage(campaign.pausa_taxa_bounce * 100)}`}
+                 {campaign.pausa_taxa_bounce != null && campaign.pausa_taxa_reclamacao != null && ' · '}
+                 {campaign.pausa_taxa_reclamacao != null && `Reclamações: ${formatPercentage(campaign.pausa_taxa_reclamacao * 100)}`}
+               </span>
+             )}
+           </div>
+         )}
+         {operationError && <div className="mt-5 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" role="alert" data-testid="status-campaign-operation-error"><div className="flex items-start gap-3"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{operationError}</span></div></div>}
+         {operationSuccess && <div className="mt-5 rounded-xl border border-[#b9d9bc] bg-[#eef7ee] px-4 py-3 text-sm leading-5 text-[#3f7b46]" role="status" data-testid="status-campaign-operation-success"><div className="flex items-start gap-3"><CheckCircle2 size={17} className="mt-0.5 shrink-0" /><span>{operationSuccess}</span></div></div>}
+         {scheduleConfirmationPanel}
       </section>
 
       {error && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-save-error"><div className="flex items-start gap-3"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{getErrorMessage(error, 'Não foi possível salvar a campanha.')}</span></div></div>}
-       <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row"><Link href={campaign ? `/campaigns/${campaign.id}` : '/'} className="action-button action-button-secondary" data-testid="link-cancel-campaign">Cancelar</Link><button type="submit" disabled={isPending || isUploadPending} className="action-button action-button-primary" data-testid="button-save-campaign">{isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando...</> : isUploadPending ? <><LoaderCircle size={16} className="animate-spin" /> Aguardando upload...</> : <><Save size={16} /> {isEditing ? 'Salvar alterações' : 'Criar campanha'}</>}</button></div>
+        <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row"><Link href={campaign ? `/campaigns/${campaign.id}` : '/'} className="action-button action-button-secondary" data-testid="link-cancel-campaign">Cancelar</Link><button type="submit" disabled={isPending || isUploadPending} className={`action-button action-button-primary ${isDirty ? 'ring-2 ring-[#d35f2a] ring-offset-2' : ''}`} data-testid="button-save-campaign">{isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando...</> : isUploadPending ? <><LoaderCircle size={16} className="animate-spin" /> Aguardando upload...</> : <><Save size={16} /> {isEditing ? 'Salvar alterações' : 'Criar campanha'}</>}</button></div>
     </form>
   );
 }
@@ -1076,11 +1220,11 @@ function SendQuotaPanel({ campaign }: { campaign: Campaign }) {
     value == null ? null : `${(value * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
 
   return (
-    <section className="panel p-5 sm:p-7" data-testid="panel-send-quota">
-      <div className="mb-5 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+    <div className="mt-5 rounded-2xl border border-[#e5ddd0] bg-[#fbf9f5] p-4 sm:p-5" data-testid="panel-send-quota">
+      <div className="mb-4 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
         <div>
           <p className="section-kicker">Controle de rampa</p>
-          <h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Quanto já foi enviado?</h2>
+          <h3 className="mt-2 text-base font-extrabold tracking-[-.04em] text-[#263044]">Enviado na hora e no dia</h3>
         </div>
         <span className="font-mono text-[9px] uppercase tracking-[.12em] text-[#989498]">Contagem atualizada ao abrir</span>
       </div>
@@ -1102,19 +1246,80 @@ function SendQuotaPanel({ campaign }: { campaign: Campaign }) {
           );
         })}
       </div>
-      {campaign.status === 'pausada' && campaign.pausa_motivo && (
-        <div className="mt-5 rounded-xl border border-[#efc9ba] bg-[#fff3ee] px-4 py-3 text-xs leading-5 text-[#8e3a20]" data-testid="status-campaign-pause-reason">
-          <strong className="block">Motivo da pausa</strong>
-          <span>{campaign.pausa_motivo}</span>
-          {(campaign.pausa_taxa_bounce != null || campaign.pausa_taxa_reclamacao != null) && (
-            <span className="mt-1 block text-[#a65d46]">
-              {campaign.pausa_taxa_bounce != null && `Bounce: ${formatRate(campaign.pausa_taxa_bounce)}`}
-              {campaign.pausa_taxa_bounce != null && campaign.pausa_taxa_reclamacao != null && ' · '}
-              {campaign.pausa_taxa_reclamacao != null && `Reclamações: ${formatRate(campaign.pausa_taxa_reclamacao)}`}
-            </span>
-          )}
+      <p className="mt-3 text-[10px] text-[#777984]">
+        {campaign.pausa_taxa_bounce != null && `Bounce ${formatRate(campaign.pausa_taxa_bounce)}`}
+        {campaign.pausa_taxa_bounce != null && campaign.pausa_taxa_reclamacao != null && ' · '}
+        {campaign.pausa_taxa_reclamacao != null && `Reclamações ${formatRate(campaign.pausa_taxa_reclamacao)}`}
+      </p>
+    </div>
+  );
+}
+
+function CampaignJourney({
+  campaign,
+  recipientSummary,
+  recipientsLoading,
+}: {
+  campaign: Campaign;
+  recipientSummary?: CampaignRecipientSummary;
+  recipientsLoading: boolean;
+}) {
+  const recipientCount = recipientSummary?.total_na_lista ?? recipientSummary?.total ?? 0;
+  const blocks = normalizeEmailBlocks(campaign.corpo);
+  const scheduledAt = campaign.agendada_para && !Number.isNaN(Date.parse(campaign.agendada_para))
+    ? formatDate(campaign.agendada_para)
+    : null;
+  const scheduledStatus = ['agendada', 'enviando', 'pausada', 'concluida', 'cancelada'].includes(campaign.status);
+  const steps = [
+    {
+      title: `Destinatários importados${recipientsLoading ? '' : ` — ${formatNumber(recipientCount)}`}`,
+      done: recipientCount > 0,
+      detail: recipientsLoading ? 'Consultando a lista atual.' : recipientCount > 0 ? 'A lista tem destinatários prontos para a campanha.' : 'Importe ao menos um destinatário.',
+    },
+    {
+      title: `Conteúdo montado — ${formatNumber(blocks.length)} ${blocks.length === 1 ? 'bloco' : 'blocos'}`,
+      done: blocks.length > 0,
+      detail: blocks.length > 0 ? 'O conteúdo da mensagem está montado.' : 'Adicione pelo menos um bloco ao e-mail.',
+    },
+    {
+      title: 'Teste enviado',
+      done: campaign.teste_enviado,
+      detail: campaign.teste_enviado_em ? `Enviado em ${formatDate(campaign.teste_enviado_em)}.` : 'Envie um teste e confirme que chegou.',
+    },
+    {
+      title: 'Agendamento definido',
+      done: Boolean(scheduledAt),
+      detail: scheduledAt ? `Definido para ${scheduledAt}.` : 'Escolha uma data e hora no bloco 05.',
+    },
+    {
+      title: 'Agendada',
+      done: scheduledStatus,
+      detail: scheduledStatus ? `Estado atual: ${statusLabels[campaign.status] ?? campaign.status}.` : 'Confirme o agendamento depois de revisar a lista.',
+    },
+  ];
+
+  return (
+    <section className="panel p-5 sm:p-6" aria-labelledby="campaign-journey-title" data-testid="panel-campaign-journey">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <p className="section-kicker">Jornada da campanha</p>
+          <h2 id="campaign-journey-title" className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">O que falta para disparar?</h2>
         </div>
-      )}
+        <span className="font-mono text-[9px] uppercase tracking-[.1em] text-[#92939a]">Atualizada com o estado atual</span>
+      </div>
+      <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {steps.map((step, index) => (
+          <li key={step.title} className={`rounded-xl border p-3 ${step.done ? 'border-[#cfe4c7] bg-[#f2f8ee]' : 'border-[#e5ddd0] bg-[#f8f3ec]'}`} data-testid={`journey-step-${index + 1}`}>
+            <div className="flex items-start gap-2">
+              {step.done ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-[#417846]" /> : <CircleAlert size={15} className="mt-0.5 shrink-0 text-[#b47b1c]" />}
+              <div className="min-w-0">
+                <p className="text-xs font-extrabold leading-5 text-[#263044]">{step.title}</p>
+                <p className="mt-1 text-[10px] leading-4 text-[#777984]">{step.detail}</p>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }
@@ -1167,6 +1372,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
   const cancelCampaign = useCancelCampaign();
   const [testSent, setTestSent] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [operationSuccess, setOperationSuccess] = useState<string | null>(null);
   const [scheduleConfirmation, setScheduleConfirmation] = useState('');
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const campaign = campaignQuery.data;
@@ -1200,19 +1406,25 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
 
   const sendCampaignTest = () => {
     setTestSent(false);
+    setOperationError(null);
+    setOperationSuccess(null);
     sendTest.mutate(
       { campaignId },
       {
         onSuccess: () => {
           setTestSent(true);
+          setOperationError(null);
+          setOperationSuccess('Teste enviado com sucesso para o e-mail da sua sessão.');
           queryClient.invalidateQueries({ queryKey: getGetCampaignQueryKey(campaignId) });
         },
+        onError: () => setOperationSuccess(null),
       },
     );
   };
 
   const changeCampaignStatus = (status: 'pausada' | 'enviando') => {
     setOperationError(null);
+    setOperationSuccess(null);
     const mutation = status === 'pausada' ? pauseCampaign : resumeCampaign;
     mutation.mutate(
       { campaignId },
@@ -1220,42 +1432,57 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
         onSuccess: (updated) => {
           queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
           queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+          setOperationError(null);
+          setOperationSuccess(status === 'pausada' ? 'Envio pausado. A data, o motivo e o usuário responsável foram registrados.' : 'Envio retomado com sucesso.');
         },
-        onError: (error) => setOperationError(getErrorMessage(error, 'Não foi possível alterar o estado da campanha.')),
+        onError: (error) => {
+          setOperationSuccess(null);
+          setOperationError(getErrorMessage(error, 'Não foi possível alterar o estado da campanha.'));
+        },
       },
     );
   };
 
   const cancelCurrentCampaign = () => {
     setOperationError(null);
+    setOperationSuccess(null);
     cancelCampaign.mutate(
       { campaignId },
       {
         onSuccess: (updated) => {
           queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
           queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+          setOperationError(null);
+          setOperationSuccess('Envio cancelado com sucesso.');
         },
-        onError: (error) => setOperationError(getErrorMessage(error, 'Não foi possível cancelar a campanha.')),
+        onError: (error) => {
+          setOperationSuccess(null);
+          setOperationError(getErrorMessage(error, 'Não foi possível cancelar a campanha.'));
+        },
       },
     );
   };
 
-  const openScheduleDialog = () => {
+  const openScheduleDialog = (latestCampaign: Campaign) => {
     setOperationError(null);
-    if (!campaign) return;
-    if (!campaign.teste_enviado) {
+    setOperationSuccess(null);
+    if (latestCampaign.status !== 'rascunho') {
+      setOperationError('Somente campanhas em rascunho podem ser agendadas.');
+      return;
+    }
+    if (!latestCampaign.teste_enviado) {
       setOperationError('Envie um teste bem-sucedido antes de agendar a campanha.');
       return;
     }
-    if (!campaign.agendada_para || Number.isNaN(Date.parse(campaign.agendada_para)) || Date.parse(campaign.agendada_para) <= Date.now()) {
+    if (!latestCampaign.agendada_para || Number.isNaN(Date.parse(latestCampaign.agendada_para)) || Date.parse(latestCampaign.agendada_para) <= Date.now()) {
       setOperationError('O agendamento precisa estar no futuro.');
       return;
     }
-    if (campaign.lembrete_ativo && (campaign.lembrete_horas < 24 || campaign.lembrete_horas > 168 || !campaign.assunto_lembrete?.trim() || campaign.assunto_lembrete.trim().toLocaleLowerCase('pt-BR') === campaign.assunto.trim().toLocaleLowerCase('pt-BR'))) {
+    if (latestCampaign.lembrete_ativo && (latestCampaign.lembrete_horas < 24 || latestCampaign.lembrete_horas > 168 || !latestCampaign.assunto_lembrete?.trim() || latestCampaign.assunto_lembrete.trim().toLocaleLowerCase('pt-BR') === latestCampaign.assunto.trim().toLocaleLowerCase('pt-BR'))) {
       setOperationError('Revise o assunto e o intervalo do lembrete (24 a 168 horas).');
       return;
     }
-    const invalidButton = normalizeEmailBlocks(campaign.corpo).some((block) => block.type === 'button' && !isHttpUrl(block.href));
+    const invalidButton = normalizeEmailBlocks(latestCampaign.corpo).some((block) => block.type === 'button' && !isHttpUrl(block.href));
     if (invalidButton) {
       setOperationError('Informe um destino válido para todos os botões.');
       return;
@@ -1265,19 +1492,24 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       setOperationError('Aguarde a contagem atual dos destinatários antes de agendar.');
       return;
     }
+    if (total === 0) {
+      setOperationError('A lista está vazia. Importe ao menos um destinatário antes de agendar.');
+      return;
+    }
     setScheduleConfirmation(total > 5000 ? '' : String(total));
     setScheduleDialogOpen(true);
-  };
-
-  const focusScheduleBlock = () => {
-    document.getElementById('campaign-operation-block')?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
+    requestAnimationFrame(() => {
+      document.getElementById('dialog-schedule-confirmation')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
   };
 
   const confirmSchedule = () => {
     const total = recipientSummaryQuery.data?.receberao_de_fato ?? 0;
+    if (total === 0) {
+      setScheduleDialogOpen(false);
+      setOperationError('A lista está vazia. Importe ao menos um destinatário antes de agendar.');
+      return;
+    }
     if (total > 5000 && scheduleConfirmation.trim() !== String(total)) return;
     scheduleCampaign.mutate(
       { campaignId, data: { confirmacao_destinatarios: scheduleConfirmation.trim() } },
@@ -1286,11 +1518,39 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
           setScheduleDialogOpen(false);
           queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
           queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+          setOperationError(null);
+          setOperationSuccess('Campanha agendada com sucesso.');
         },
-        onError: (error) => setOperationError(getErrorMessage(error, 'Não foi possível agendar a campanha.')),
+        onError: (error) => {
+          setOperationSuccess(null);
+          setOperationError(getErrorMessage(error, 'Não foi possível agendar a campanha.'));
+        },
       },
     );
   };
+
+  const scheduleConfirmationPanel = scheduleDialogOpen && (
+    <div id="dialog-schedule-confirmation" className="mt-6 rounded-2xl border-2 border-[#d35f2a] bg-[#fff8ef] p-5 sm:p-6" role="dialog" aria-labelledby="schedule-confirmation-title" data-testid="dialog-schedule-confirmation">
+      <p className="section-kicker text-[#a64220]">Confirmação de agendamento</p>
+      <h3 id="schedule-confirmation-title" className="mt-2 text-lg font-extrabold text-[#263044]">Revise o tamanho do disparo antes de continuar.</h3>
+      <p className="mt-2 text-sm leading-6 text-[#6d7180]">A lista atual tem <strong className="text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.receberao_de_fato)}</strong> destinatários que receberão de fato.</p>
+      {safetyModeQuery.data && !safetyModeQuery.data.envio_liberado && (
+        <div className="mt-5 grid gap-3 sm:grid-cols-2" data-testid="schedule-safety-counts">
+          <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#417846]">{formatNumber(recipientSummaryQuery.data?.permitidos_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Na allowlist e liberados</span></div>
+          <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.bloqueados_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Bloqueados pelo modo de segurança</span></div>
+        </div>
+      )}
+      {(recipientSummaryQuery.data?.receberao_de_fato ?? 0) > 5000 ? (
+        <label className="mt-5 block text-xs font-bold text-[#565c6a]">Digite {formatNumber(recipientSummaryQuery.data?.receberao_de_fato)} para confirmar<input value={scheduleConfirmation} onChange={(event) => setScheduleConfirmation(event.target.value.replace(/\D/g, ''))} inputMode="numeric" className="field-control mt-2" placeholder={String(recipientSummaryQuery.data?.receberao_de_fato)} data-testid="input-schedule-confirmation" /></label>
+      ) : (
+        <p className="mt-5 rounded-xl border border-[#e5ddd0] bg-[#fffdf9] px-4 py-3 text-xs leading-5 text-[#6d7180]">A confirmação é registrada com a contagem atual da lista.</p>
+      )}
+      <div className="mt-5 flex flex-col-reverse justify-end gap-3 sm:flex-row">
+        <button type="button" onClick={() => setScheduleDialogOpen(false)} className="action-button action-button-secondary" data-testid="button-cancel-schedule-confirmation">Voltar</button>
+        <button type="button" onClick={confirmSchedule} disabled={scheduleCampaign.isPending || (recipientSummaryQuery.data?.receberao_de_fato ?? 0) === 0 || ((recipientSummaryQuery.data?.receberao_de_fato ?? 0) > 5000 && scheduleConfirmation.trim() !== String(recipientSummaryQuery.data?.receberao_de_fato))} className="action-button action-button-primary" data-testid="button-confirm-schedule">{scheduleCampaign.isPending ? <><LoaderCircle size={16} className="animate-spin" /> Agendando...</> : <><CheckCircle2 size={16} /> Confirmar agendamento</>}</button>
+      </div>
+    </div>
+  );
 
   if (campaignQuery.isLoading) {
     return <Shell user={user} title="Campanha" eyebrow="Campanhas / Abrir" mobileNavOpen={mobileNavOpen} setMobileNavOpen={setMobileNavOpen}><div className="panel mx-auto max-w-4xl p-7" data-testid="status-campaign-detail-loading"><div className="skeleton h-5 w-48 rounded-full" /><div className="mt-7 grid gap-4 sm:grid-cols-2">{Array.from({ length: 8 }).map((_, index) => <div key={index} className="skeleton h-12 rounded-xl" />)}</div></div></Shell>;
@@ -1304,22 +1564,6 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div className="flex items-center gap-3"><Link href="/" className="action-button action-button-secondary !px-3" data-testid="link-back-campaign-list"><ArrowLeft size={15} /></Link><div><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#92939a]">ID {campaign.id}</p><div className="mt-1 flex items-center gap-2"><StatusPill status={campaign.status} /><span className="text-xs text-[#777984]">{statusDescriptions[campaign.status]}</span></div></div></div>
            <div className="flex flex-wrap items-center justify-end gap-2">
-               {campaign.status === 'rascunho' && (
-                 <button onClick={focusScheduleBlock} disabled={scheduleCampaign.isPending} className="action-button action-button-primary" data-testid="button-schedule-campaign">
-                   <Clock3 size={15} /> Ir para agendamento
-                </button>
-              )}
-             {(campaign.status === 'enviando' || campaign.status === 'pausada') && (
-               <button
-                 onClick={() => changeCampaignStatus(campaign.status === 'enviando' ? 'pausada' : 'enviando')}
-                  disabled={pauseCampaign.isPending || resumeCampaign.isPending}
-                 className={`action-button ${campaign.status === 'enviando' ? 'action-button-secondary' : 'action-button-primary'}`}
-                 data-testid={campaign.status === 'enviando' ? 'button-pause-campaign' : 'button-resume-campaign'}
-               >
-                  {pauseCampaign.isPending || resumeCampaign.isPending ? <LoaderCircle size={15} className="animate-spin" /> : campaign.status === 'enviando' ? <Pause size={15} /> : <Play size={15} />}
-                 {campaign.status === 'enviando' ? 'Pausar envio' : 'Retomar envio'}
-               </button>
-             )}
               {(['agendada', 'enviando', 'pausada'] as string[]).includes(campaign.status) && (
                 <button onClick={cancelCurrentCampaign} disabled={cancelCampaign.isPending} className="action-button action-button-secondary !text-[#a64220]" data-testid="button-cancel-campaign">
                   {cancelCampaign.isPending ? <LoaderCircle size={15} className="animate-spin" /> : <X size={15} />} Cancelar envio
@@ -1329,29 +1573,11 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
            </div>
         </div>
         {deleteCampaign.isError && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm text-[#a64220]" data-testid="status-delete-error">Não foi possível excluir a campanha. Tente novamente.</div>}
-         {operationError && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm text-[#a64220]" data-testid="status-campaign-operation-error">{operationError}</div>}
-          {scheduleDialogOpen && (
-            <div className="rounded-2xl border-2 border-[#d35f2a] bg-[#fff8ef] p-5 sm:p-6" role="dialog" aria-labelledby="schedule-confirmation-title" data-testid="dialog-schedule-confirmation">
-              <p className="section-kicker text-[#a64220]">Confirmação de agendamento</p>
-              <h3 id="schedule-confirmation-title" className="mt-2 text-lg font-extrabold text-[#263044]">Revise o tamanho do disparo antes de continuar.</h3>
-               <p className="mt-2 text-sm leading-6 text-[#6d7180]">A lista atual tem <strong className="text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.receberao_de_fato)}</strong> destinatários que receberão de fato.</p>
-               {safetyModeQuery.data && !safetyModeQuery.data.envio_liberado && (
-                 <div className="mt-5 grid gap-3 sm:grid-cols-2" data-testid="schedule-safety-counts">
-                   <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#417846]">{formatNumber(recipientSummaryQuery.data?.permitidos_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Na allowlist e liberados</span></div>
-                   <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.bloqueados_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Bloqueados pelo modo de segurança</span></div>
-                 </div>
-               )}
-              {(recipientSummaryQuery.data?.receberao_de_fato ?? 0) > 5000 ? (
-                <label className="mt-5 block text-xs font-bold text-[#565c6a]">Digite {formatNumber(recipientSummaryQuery.data?.receberao_de_fato)} para confirmar<input value={scheduleConfirmation} onChange={(event) => setScheduleConfirmation(event.target.value.replace(/\D/g, ''))} inputMode="numeric" className="field-control mt-2" placeholder={String(recipientSummaryQuery.data?.receberao_de_fato)} data-testid="input-schedule-confirmation" /></label>
-              ) : (
-                <p className="mt-5 rounded-xl border border-[#e5ddd0] bg-[#fffdf9] px-4 py-3 text-xs leading-5 text-[#6d7180]">A confirmação é registrada com a contagem atual da lista.</p>
-              )}
-              <div className="mt-5 flex flex-col-reverse justify-end gap-3 sm:flex-row">
-                <button type="button" onClick={() => setScheduleDialogOpen(false)} className="action-button action-button-secondary" data-testid="button-cancel-schedule-confirmation">Voltar</button>
-                <button type="button" onClick={confirmSchedule} disabled={scheduleCampaign.isPending || ((recipientSummaryQuery.data?.receberao_de_fato ?? 0) > 5000 && scheduleConfirmation.trim() !== String(recipientSummaryQuery.data?.receberao_de_fato))} className="action-button action-button-primary" data-testid="button-confirm-schedule">{scheduleCampaign.isPending ? <><LoaderCircle size={16} className="animate-spin" /> Agendando...</> : <><CheckCircle2 size={16} /> Confirmar agendamento</>}</button>
-              </div>
-            </div>
-          )}
+          <CampaignJourney
+            campaign={campaign}
+            recipientSummary={recipientSummaryQuery.data}
+            recipientsLoading={recipientSummaryQuery.isLoading}
+          />
           <RecipientSummaryPanel
             summary={recipientSummaryQuery.data}
             loading={recipientSummaryQuery.isLoading}
@@ -1368,6 +1594,8 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             onSaved={(updated) => {
               queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
               queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+               setOperationError(null);
+               setOperationSuccess('Alterações salvas.');
             }}
             onSendTest={sendCampaignTest}
             testPending={sendTest.isPending}
@@ -1375,8 +1603,15 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             testSent={testSent}
             onSchedule={openScheduleDialog}
             schedulePending={scheduleCampaign.isPending}
+             onPause={() => changeCampaignStatus('pausada')}
+             onResume={() => changeCampaignStatus('enviando')}
+             transitionPending={pauseCampaign.isPending || resumeCampaign.isPending}
+             operationError={operationError}
+             operationSuccess={operationSuccess}
+             onClearOperationMessage={() => { setOperationError(null); setOperationSuccess(null); }}
+             scheduleConfirmationPanel={scheduleConfirmationPanel}
+             sendQuotaPanel={(campaign.status === 'enviando' || campaign.status === 'pausada') ? <SendQuotaPanel campaign={campaign} /> : null}
           />
-         <SendQuotaPanel campaign={campaign} />
         <ImportPanel campaignId={campaignId} />
       </div>
     </Shell>

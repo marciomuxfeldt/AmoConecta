@@ -1078,12 +1078,6 @@ components:
         validade_credito:
           type: ["string", "null"]
           format: date
-        url_deeplink:
-          type: ["string", "null"]
-          format: uri
-        url_landing:
-          type: ["string", "null"]
-          format: uri
         teto_hora:
           type: ["integer", "null"]
           minimum: 0
@@ -1138,8 +1132,6 @@ components:
         - reply_to
         - valor_credito
         - validade_credito
-        - url_deeplink
-        - url_landing
         - teto_hora
         - teto_dia
         - status
@@ -1178,12 +1170,6 @@ components:
         validade_credito:
           type: ["string", "null"]
           format: date
-        url_deeplink:
-          type: ["string", "null"]
-          format: uri
-        url_landing:
-          type: ["string", "null"]
-          format: uri
         teto_hora:
           type: integer
           minimum: 0
@@ -1237,12 +1223,6 @@ components:
         validade_credito:
           type: ["string", "null"]
           format: date
-        url_deeplink:
-          type: ["string", "null"]
-          format: uri
-        url_landing:
-          type: ["string", "null"]
-          format: uri
         teto_hora:
           type: integer
           minimum: 0

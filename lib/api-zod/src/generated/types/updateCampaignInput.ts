@@ -31,10 +31,6 @@ export interface UpdateCampaignInput {
   valor_credito?: number | null;
   /** @nullable */
   validade_credito?: Date | null;
-  /** @nullable */
-  url_deeplink?: string | null;
-  /** @nullable */
-  url_landing?: string | null;
   /** @minimum 0 */
   teto_hora?: number;
   /** @minimum 0 */

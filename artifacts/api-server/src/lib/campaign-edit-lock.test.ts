@@ -13,8 +13,6 @@ const existingCampaign = {
   remetente_nome: "Amo Ofertas",
   remetente_email: "envios@marketing.amo.delivery",
   reply_to: "respostas@marketing.amo.delivery",
-  url_deeplink: "https://example.com/oferta",
-  url_landing: "https://example.com/landing",
   corpo: [{ id: "text-1", type: "text", html: "<p>Olá</p>" }],
 };
 

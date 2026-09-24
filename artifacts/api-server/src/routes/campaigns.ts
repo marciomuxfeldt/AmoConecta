@@ -36,7 +36,7 @@ import {
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
-  "id,nome,assunto,assunto_lembrete,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,url_deeplink,url_landing,teto_hora,teto_dia,status,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em";
+  "id,nome,assunto,assunto_lembrete,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,status,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em";
 // Public by design: this bucket contains only e-mail image assets.
 // Never reuse the private CSV bucket from routes/imports.ts here.
 const EMAIL_ASSET_BUCKET = "amoconecta-assets";
@@ -113,12 +113,6 @@ function campaignPayload(input: Record<string, unknown>, partial = false) {
   }
   if (!partial || "validade_credito" in input) {
     payload.validade_credito = dateOnlyValue(input.validade_credito);
-  }
-  if (!partial || "url_deeplink" in input) {
-    payload.url_deeplink = input.url_deeplink || null;
-  }
-  if (!partial || "url_landing" in input) {
-    payload.url_landing = input.url_landing || null;
   }
   if (!partial || "teto_hora" in input) payload.teto_hora = input.teto_hora ?? 100;
   if (!partial || "teto_dia" in input) payload.teto_dia = input.teto_dia ?? 1000;
@@ -369,7 +363,7 @@ async function findCampaign(campaignId: string) {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,status,assunto,preheader,assunto_lembrete,remetente_nome,remetente_email,reply_to,url_deeplink,url_landing,valor_credito,validade_credito,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo",
+      "id,status,assunto,preheader,assunto_lembrete,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -540,15 +534,6 @@ async function validateSchedule(
     }
   }
   const blocks = normalizeEmailBlocks(campaign.corpo);
-  if (blocks.some((block) => block.type === "button")) {
-    const missingDestinations = [
-      !campaign.url_deeplink?.trim() ? "deep link" : null,
-      !campaign.url_landing?.trim() ? "landing page" : null,
-    ].filter((value): value is string => Boolean(value));
-    if (missingDestinations.length > 0) {
-      return `Preencha ${missingDestinations.join(" e ")} antes de agendar uma campanha com botão.`;
-    }
-  }
   if (blocks.some((block) => block.type === "button" && !validHttpUrl(block.href))) {
     return "Informe um destino http(s) válido para todos os botões.";
   }
@@ -556,6 +541,9 @@ async function validateSchedule(
     supabaseAdminClient(),
     campaign.id,
   );
+  if (delivery.receberao_de_fato === 0) {
+    return "A lista está vazia. Importe ao menos um destinatário antes de agendar.";
+  }
   if (
     delivery.receberao_de_fato > 5000 &&
     (confirmation ?? "").trim() !== String(delivery.receberao_de_fato)
@@ -591,16 +579,40 @@ async function runSimpleCampaignTransition(
       return;
     }
     if (!config.allowedStatuses.includes(existing.status)) {
-      res.status(409).json({ error: "Essa transição não é permitida para o estado atual da campanha." });
+      const message =
+        config.targetStatus === "pausada"
+          ? "Só é possível pausar uma campanha enquanto ela está enviando."
+          : config.targetStatus === "enviando"
+            ? "Só é possível retomar uma campanha pausada."
+            : "Só é possível cancelar uma campanha agendada, enviando ou pausada.";
+      res.status(409).json({ error: message });
       return;
     }
     if (config.requireTest && existing.teste_enviado !== true) {
       res.status(422).json({ error: "Envie e confirme o teste antes de retomar a campanha." });
       return;
     }
+    const update =
+      config.targetStatus === "pausada"
+        ? {
+            status: config.targetStatus,
+            pausa_motivo: `Pausa manual por ${session.user.email ?? session.user.id}.`,
+            pausada_em: new Date().toISOString(),
+            pausa_taxa_bounce: null,
+            pausa_taxa_reclamacao: null,
+          }
+        : config.targetStatus === "enviando"
+          ? {
+              status: config.targetStatus,
+              pausa_motivo: null,
+              pausada_em: null,
+              pausa_taxa_bounce: null,
+              pausa_taxa_reclamacao: null,
+            }
+          : { status: config.targetStatus };
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
-      .update({ status: config.targetStatus })
+      .update(update)
       .eq("id", params.data.campaignId)
       .select(CAMPAIGN_COLUMNS)
       .single();

@@ -13,8 +13,6 @@ export const CAMPAIGN_CONTENT_LOCKED_FIELDS = [
   "remetente_nome",
   "remetente_email",
   "reply_to",
-  "url_deeplink",
-  "url_landing",
   "corpo",
 ] as const;
 
@@ -28,8 +26,6 @@ const fieldLabels: Record<CampaignContentLockedField, string> = {
   remetente_nome: "o nome do remetente",
   remetente_email: "o e-mail do remetente",
   reply_to: "o Reply-To",
-  url_deeplink: "o deep link",
-  url_landing: "a landing page",
   corpo: "o corpo do e-mail",
 };
 
