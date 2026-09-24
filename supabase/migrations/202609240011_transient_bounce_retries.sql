@@ -138,22 +138,9 @@ BEGIN
         ELSE d.clicado_em
       END,
       status = CASE
-        WHEN d.status IN ('bounce', 'erro') THEN d.status
-        WHEN v_event.tipo = 'email.bounced'
-          AND d.status IN ('entregue', 'aberto', 'clicado') THEN d.status
         WHEN v_event.tipo = 'email.bounced' AND v_permanent THEN 'bounce'
-        WHEN v_event.tipo = 'email.bounced' AND NOT v_retry_rule_applies THEN 'bounce'
-        WHEN v_temporary AND v_retry_rule_applies
-          AND d.status NOT IN ('entregue', 'aberto', 'clicado')
-          AND v_campaign_status IS DISTINCT FROM 'enviando' THEN 'erro'
-        WHEN v_temporary AND v_retry_rule_applies
-          AND d.status NOT IN ('entregue', 'aberto', 'clicado')
-          AND v_campaign_status = 'enviando'
-          AND d.tentativas >= 3 THEN 'erro'
-        WHEN v_temporary AND v_retry_rule_applies
-          AND d.status NOT IN ('entregue', 'aberto', 'clicado')
-          AND v_campaign_status = 'enviando'
-          AND d.tentativas < 3 THEN 'pendente'
+        WHEN v_event.tipo = 'email.bounced' THEN 'erro'
+        WHEN d.status IN ('bounce', 'erro') THEN d.status
         WHEN v_event.tipo = 'email.clicked' AND d.status <> 'clicado' THEN 'clicado'
         WHEN v_event.tipo = 'email.opened'
           AND d.status NOT IN ('aberto', 'clicado') THEN 'aberto'
@@ -166,25 +153,19 @@ BEGIN
         ELSE d.status
       END,
       erro = CASE
-        WHEN v_temporary AND v_retry_rule_applies
-          AND d.status NOT IN ('bounce', 'entregue', 'aberto', 'clicado')
-          AND v_campaign_status IS DISTINCT FROM 'enviando'
-          THEN 'Bounce temporário; campanha não está enviando, retentativa não realizada.'
-        WHEN v_temporary AND v_retry_rule_applies
-          AND d.status NOT IN ('bounce', 'erro', 'entregue', 'aberto', 'clicado')
-          AND v_campaign_status = 'enviando'
-          AND d.tentativas < 3 THEN NULL
-        WHEN v_temporary AND v_retry_rule_applies
-          AND d.status NOT IN ('bounce', 'entregue', 'aberto', 'clicado')
-          AND v_campaign_status = 'enviando'
-          AND d.tentativas >= 3
-          THEN 'Bounce temporário; limite de 3 tentativas de envio atingido.'
+        WHEN v_event.tipo = 'email.bounced' AND NOT v_permanent THEN
+          CASE
+            WHEN v_temporary THEN
+              'Bounce temporário informado pelo Resend; tipo bruto: '
+                || coalesce(v_bounce_type_raw, '<missing>')
+            ELSE
+              'Bounce não classificado informado pelo Resend; tipo bruto: '
+                || coalesce(v_bounce_type_raw, '<missing>')
+          END
         ELSE d.erro
       END,
       processando_em = CASE
-        WHEN v_event.tipo = 'email.bounced'
-          AND (v_permanent OR (v_temporary AND v_retry_rule_applies))
-          AND d.status NOT IN ('entregue', 'aberto', 'clicado') THEN NULL
+        WHEN v_event.tipo = 'email.bounced' THEN NULL
         ELSE d.processando_em
       END
     WHERE d.id = v_recipient.id;
