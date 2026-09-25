@@ -172,9 +172,10 @@ async function processExport(job: ExportJob): Promise<boolean> {
       const { data, error } = await query;
       if (error) throw error;
       if (!data?.length) break;
-      const emails = (data ?? [])
+      const emails = [...new Set((data ?? [])
         .map((row) => (typeof row.email === "string" ? row.email : null))
-        .filter((email): email is string => Boolean(email));
+        .filter((email): email is string => Boolean(email))
+        .map((email) => email.trim().toLowerCase()))];
       const campaignIds = [
         ...new Set(
           (data ?? [])

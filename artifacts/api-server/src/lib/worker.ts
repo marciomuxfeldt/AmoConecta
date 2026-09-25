@@ -244,12 +244,12 @@ async function loadSuppressedEmails(emails: string[]): Promise<Set<string>> {
 
 async function loadChronicEmails(emails: string[]): Promise<Set<string>> {
   if (emails.length === 0) return new Set();
+  const normalizedEmails = [...new Set(emails.map(normalize))];
   const { data, error } = await supabaseAdminClient()
-    .from("destinatario")
+    .from("contato_desengajamento")
     .select("email")
-    .eq("is_lembrete", false)
     .eq("desengajado_cronico", true)
-    .in("email", emails);
+    .in("email", normalizedEmails);
   if (error) throw error;
   return new Set(
     (data ?? [])
@@ -711,10 +711,18 @@ async function refreshChronicDisengagementIfDue(): Promise<void> {
   const client = supabaseAdminClient();
   const { data, error } = await client
     .from("estado_desengajamento")
-    .select("calculado_em")
+    .select("calculado_em,ciclo_iniciado_em")
     .eq("id", 1)
     .maybeSingle();
   if (error) throw error;
+  if (typeof data?.ciclo_iniciado_em === "string") {
+    const { error: continueError } = await client.rpc(
+      "refresh_chronic_disengagement",
+      { p_limit: 1000 },
+    );
+    if (continueError) throw continueError;
+    return;
+  }
   const calculatedAt =
     typeof data?.calculado_em === "string"
       ? Date.parse(data.calculado_em)
@@ -724,6 +732,7 @@ async function refreshChronicDisengagementIfDue(): Promise<void> {
   }
   const { error: refreshError } = await client.rpc(
     "refresh_chronic_disengagement",
+    { p_limit: 1000 },
   );
   if (refreshError) throw refreshError;
 }

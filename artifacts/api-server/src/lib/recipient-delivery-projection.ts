@@ -68,11 +68,10 @@ export async function recipientDeliveryProjection(
   includeDisengaged?: boolean,
 ): Promise<RecipientDeliveryProjection> {
   const recipientEmails: string[] = [];
-  const chronicDisengagedEmails = new Set<string>();
   for (let offset = 0; ; offset += RECIPIENT_PAGE_SIZE) {
     const { data, error } = await client
       .from("destinatario")
-      .select("email,desengajado_cronico")
+      .select("email")
       .eq("campanha_id", campaignId)
       .eq("is_lembrete", false)
       .order("id", { ascending: true })
@@ -81,12 +80,24 @@ export async function recipientDeliveryProjection(
     for (const row of data ?? []) {
       if (typeof row.email === "string") {
         recipientEmails.push(row.email);
-        if (row.desengajado_cronico === true) {
-          chronicDisengagedEmails.add(row.email);
-        }
       }
     }
     if (!data || data.length < RECIPIENT_PAGE_SIZE) break;
+  }
+
+  const chronicDisengagedEmails = new Set<string>();
+  const uniqueRecipientEmails = [...new Set(recipientEmails.map(normalizeEmail))];
+  for (let offset = 0; offset < uniqueRecipientEmails.length; offset += RECIPIENT_PAGE_SIZE) {
+    const emailBatch = uniqueRecipientEmails.slice(offset, offset + RECIPIENT_PAGE_SIZE);
+    const { data: chronicRows, error: chronicError } = await client
+      .from("contato_desengajamento")
+      .select("email")
+      .eq("desengajado_cronico", true)
+      .in("email", emailBatch);
+    if (chronicError) throw chronicError;
+    for (const row of chronicRows ?? []) {
+      if (typeof row.email === "string") chronicDisengagedEmails.add(row.email);
+    }
   }
 
   const suppressedEmails = new Set<string>();
