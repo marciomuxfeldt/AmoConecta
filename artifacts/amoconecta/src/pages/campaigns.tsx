@@ -217,6 +217,23 @@ function formatDate(value: string | null | undefined) {
   }).format(date).replace('.', '');
 }
 
+function formatLongDateTime(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const dateLabel = new Intl.DateTimeFormat('pt-BR', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
+  const timeLabel = new Intl.DateTimeFormat('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+  return `${dateLabel}, ${timeLabel}`;
+}
+
 function toDateTimeLocal(value: string | null | undefined) {
   if (!value) return '';
   const date = new Date(value);
@@ -698,6 +715,8 @@ function CampaignForm({
   );
   const emailSubject = form.watch('assunto');
   const preheader = form.watch('preheader');
+  const scheduledAt = form.watch('agendada_para');
+  const scheduledAtLongLabel = formatLongDateTime(scheduledAt);
   const isDirty = form.formState.isDirty;
   useUnsavedChangesGuard(isDirty);
   const [uploadingBlockIds, setUploadingBlockIds] = useState<Set<string>>(() => new Set());
@@ -899,10 +918,49 @@ function CampaignForm({
 
        <section id="campaign-operation-block" className="panel scroll-mt-6 p-5 sm:p-7">
         <div className="mb-6"><p className="section-kicker">05 · Operação</p><h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Quando e em que estado ela está?</h2></div>
-        <div className="grid gap-5 md:grid-cols-3">
-           <Field label="Status"><div className="field-control flex items-center bg-[#f3eee7] font-bold text-[#565c6a]" data-testid="select-campaign-status">{statusLabels[campaign?.status ?? CampaignStatus.rascunho]}</div></Field>
-            <Field label="Agendamento"><div className="flex flex-col gap-2 sm:flex-row"><input {...form.register('agendada_para')} type="datetime-local" className="field-control min-w-0 flex-1" data-testid="input-scheduled-at" />{onSchedule && campaign?.status === 'rascunho' && <button type="button" onClick={() => { void requestSchedule(); }} disabled={schedulePending || isPending || isUploadPending} className="action-button action-button-primary shrink-0 whitespace-nowrap" data-testid="button-schedule-campaign"><Clock3 size={14} /> {schedulePending ? 'Agendando...' : isPending ? 'Salvando...' : isDirty ? 'Salvar alterações e agendar' : 'Agendar envio'}</button>}</div><p className="mt-1.5 text-[10px] text-[#8d8780]">Se houver alterações pendentes, elas serão salvas antes da confirmação do agendamento.</p></Field>
-           <Field label="Horas até o lembrete"><input {...form.register('lembrete_horas')} type="number" min="24" max="168" className="field-control" data-testid="input-reminder-hours" /></Field>
+         <div className="grid gap-5 md:grid-cols-3">
+            <Field label="Status"><div className="field-control flex items-center bg-[#f3eee7] font-bold text-[#565c6a]" data-testid="select-campaign-status">{statusLabels[campaign?.status ?? CampaignStatus.rascunho]}</div></Field>
+            <div className="min-w-0">
+              <Field label="Agendamento">
+                <div className="min-w-0 space-y-2">
+                  <input
+                    {...form.register('agendada_para')}
+                    type="datetime-local"
+                    className="field-control block w-full min-w-0"
+                    data-testid="input-scheduled-at"
+                  />
+                  <p className="text-xs leading-5 text-[#6d7180]" data-testid="text-scheduled-at-long">
+                    {scheduledAtLongLabel
+                      ? <>Data e hora no horário local: <strong className="font-bold text-[#263044]">{scheduledAtLongLabel}</strong></>
+                      : 'Escolha uma data e hora para ver a confirmação por extenso.'}
+                  </p>
+                  {onSchedule && campaign?.status === 'rascunho' && (
+                    <div className="space-y-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => { void requestSchedule(); }}
+                        disabled={schedulePending || isPending || isUploadPending}
+                        className="action-button action-button-primary w-full min-w-0 justify-center whitespace-normal text-center"
+                        data-testid="button-schedule-campaign"
+                      >
+                        <Clock3 size={14} className="shrink-0" />
+                        {schedulePending
+                          ? 'Agendando...'
+                          : isPending
+                            ? 'Salvando...'
+                            : isDirty
+                              ? 'Salvar e revisar agendamento'
+                              : 'Revisar agendamento'}
+                      </button>
+                      <p className="text-[10px] leading-4 text-[#8d8780]">
+                        Este botão salva alterações pendentes e abre uma revisão; o envio só será agendado depois da confirmação. Para apenas salvar, use “Salvar alterações” no fim da página.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </Field>
+            </div>
+            <Field label="Horas até o lembrete"><input {...form.register('lembrete_horas')} type="number" min="24" max="168" className="field-control" data-testid="input-reminder-hours" /></Field>
         </div>
         <div className="mt-6 grid gap-3 border-t border-[#eee7dc] pt-5 sm:grid-cols-2">
           <label className="flex items-start gap-3 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3 text-xs text-[#565c6a]"><input {...form.register('lembrete_ativo')} type="checkbox" className="mt-0.5 accent-[#e96527]" data-testid="checkbox-reminder-active" /><span><strong className="block text-[#263044]">Lembrete ativo</strong><span className="mt-1 block leading-5">Deixa o lembrete habilitado para a operação.</span></span></label>
@@ -934,8 +992,11 @@ function CampaignForm({
          {scheduleConfirmationPanel}
       </section>
 
-      {error && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-save-error"><div className="flex items-start gap-3"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{getErrorMessage(error, 'Não foi possível salvar a campanha.')}</span></div></div>}
-        <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row"><Link href={campaign ? `/campaigns/${campaign.id}` : '/'} className="action-button action-button-secondary" data-testid="link-cancel-campaign">{draftId && !campaign ? 'Voltar à lista' : 'Cancelar'}</Link><button type="submit" disabled={isPending || isUploadPending} className={`action-button action-button-primary ${isDirty ? 'ring-2 ring-[#d35f2a] ring-offset-2' : ''}`} data-testid="button-save-campaign">{isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando...</> : isUploadPending ? <><LoaderCircle size={16} className="animate-spin" /> Aguardando upload...</> : <><Save size={16} /> {saveLabel}</>}</button></div>
+       {error && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-save-error"><div className="flex items-start gap-3"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{getErrorMessage(error, 'Não foi possível salvar a campanha.')}</span></div></div>}
+         <div>
+           {campaign && <p className="mb-2 text-right text-[11px] leading-5 text-[#8d8780]">“Salvar alterações” apenas grava as mudanças da campanha; não inicia nem confirma o agendamento.</p>}
+           <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row"><Link href={campaign ? `/campaigns/${campaign.id}` : '/'} className="action-button action-button-secondary" data-testid="link-cancel-campaign">{draftId && !campaign ? 'Voltar à lista' : 'Cancelar'}</Link><button type="submit" disabled={isPending || isUploadPending} className={`action-button action-button-primary ${isDirty ? 'ring-2 ring-[#d35f2a] ring-offset-2' : ''}`} data-testid="button-save-campaign">{isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando...</> : isUploadPending ? <><LoaderCircle size={16} className="animate-spin" /> Aguardando upload...</> : <><Save size={16} /> {saveLabel}</>}</button></div>
+         </div>
     </form>
   );
 }
