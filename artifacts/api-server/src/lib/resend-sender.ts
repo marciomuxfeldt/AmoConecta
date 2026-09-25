@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
+import { logger } from "./logger";
 
 const RESEND_SEND_CONCURRENCY = 10;
 export const RESEND_MIN_INTERVAL_ENV = "RESEND_MIN_INTERVAL_MS";
 export const DEFAULT_RESEND_MIN_INTERVAL_MS = 125;
+const MIN_RESEND_INTERVAL_MS = 100;
+let warnedLowIntervalValue: string | undefined;
 
 export type ResendResult = {
   id?: string;
@@ -56,6 +59,19 @@ function configuredMinIntervalMs(): number {
     throw new Error(
       `${RESEND_MIN_INTERVAL_ENV} precisa ser um número maior que zero.`,
     );
+  }
+  if (value < MIN_RESEND_INTERVAL_MS) {
+    if (warnedLowIntervalValue !== raw) {
+      warnedLowIntervalValue = raw;
+      logger.warn(
+        {
+          configuredIntervalMs: value,
+          minimumIntervalMs: MIN_RESEND_INTERVAL_MS,
+        },
+        `${RESEND_MIN_INTERVAL_ENV} configurado abaixo de ${MIN_RESEND_INTERVAL_MS} ms foi ignorado; o mínimo evita ultrapassar 10 requisições por segundo.`,
+      );
+    }
+    return MIN_RESEND_INTERVAL_MS;
   }
   return Math.ceil(value);
 }

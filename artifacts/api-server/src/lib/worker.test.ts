@@ -9,12 +9,15 @@ import {
   testIdempotencyKey,
   type PreparedResendMessage,
 } from "./resend-sender";
+import { logger } from "./logger";
 
 const originalFetch = globalThis.fetch;
 const originalInterval = process.env[RESEND_MIN_INTERVAL_ENV];
+const originalWarn = logger.warn;
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
+  logger.warn = originalWarn;
   if (originalInterval === undefined) delete process.env[RESEND_MIN_INTERVAL_ENV];
   else process.env[RESEND_MIN_INTERVAL_ENV] = originalInterval;
 });
@@ -126,7 +129,7 @@ function testMessage(email: string): PreparedResendMessage {
 }
 
 test("spaces request starts using the configured minimum interval", async () => {
-  process.env[RESEND_MIN_INTERVAL_ENV] = "20";
+  process.env[RESEND_MIN_INTERVAL_ENV] = "120";
   const starts: number[] = [];
   globalThis.fetch = async () => {
     starts.push(Date.now());
@@ -141,8 +144,40 @@ test("spaces request starts using the configured minimum interval", async () => 
     testMessage("terceira@example.com"),
   ]);
 
-  assert.ok(starts[1] - starts[0] >= 18);
-  assert.ok(starts[2] - starts[1] >= 18);
+  assert.ok(starts[1] - starts[0] >= 118);
+  assert.ok(starts[2] - starts[1] >= 118);
+});
+
+test("floors intervals below 100ms and warns once per configured value", async () => {
+  process.env[RESEND_MIN_INTERVAL_ENV] = "50";
+  const starts: number[] = [];
+  const warnings: unknown[][] = [];
+  logger.warn = ((...args: unknown[]) => {
+    warnings.push(args);
+  }) as typeof logger.warn;
+  globalThis.fetch = async () => {
+    starts.push(Date.now());
+    return new Response(JSON.stringify({ id: `resend-${starts.length}` }), {
+      status: 200,
+    });
+  };
+
+  await sendResendMessages("resend-test-key", [
+    testMessage("sexta@example.com"),
+    testMessage("sétima@example.com"),
+    testMessage("oitava@example.com"),
+  ]);
+
+  assert.ok(starts[1] - starts[0] >= 98);
+  assert.ok(starts[2] - starts[1] >= 98);
+  assert.equal(warnings.length, 1);
+  const [context, message] = warnings[0] as [
+    { configuredIntervalMs: number; minimumIntervalMs: number },
+    string,
+  ];
+  assert.equal(context.configuredIntervalMs, 50);
+  assert.equal(context.minimumIntervalMs, 100);
+  assert.match(message, /foi ignorado/u);
 });
 
 test("defaults to 125ms and waits for a low remaining window", async () => {
