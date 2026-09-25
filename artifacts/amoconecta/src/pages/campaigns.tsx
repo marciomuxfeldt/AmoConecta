@@ -40,6 +40,7 @@ import {
   getGetSafetyModeQueryKey,
   useGetCampaignDefaults,
   useCreateCampaign,
+  useCreateCampaignDraft,
   useClearCampaignRecipients,
   useDeleteCampaign,
   useGetCampaign,
@@ -96,6 +97,57 @@ function getErrorMessage(error: unknown, fallback: string) {
   }
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+function getDetailedFailureMessage(
+  error: unknown,
+  fallback: string,
+  nextStep: string,
+): string {
+  const record = error && typeof error === 'object'
+    ? error as Record<string, unknown>
+    : {};
+  const data = record.data && typeof record.data === 'object'
+    ? record.data as Record<string, unknown>
+    : {};
+  const technical = data.technical_error && typeof data.technical_error === 'object'
+    ? data.technical_error as Record<string, unknown>
+    : null;
+  const status = typeof record.status === 'number' ? record.status : null;
+  const statusText = typeof record.statusText === 'string' ? record.statusText : '';
+  const requestId = typeof data.request_id === 'string' ? data.request_id : null;
+  const message = typeof data.error === 'string'
+    ? data.error
+    : error instanceof Error && error.message
+      ? error.message
+      : fallback;
+  if (record.name === 'AbortError') {
+    return `O envio foi interrompido antes de receber uma resposta HTTP (status indisponível). ${nextStep}`;
+  }
+  if (record.name === 'TypeError' && status == null) {
+    return `A solicitação falhou sem resposta HTTP (possível falha de rede ou proxy). ${nextStep}`;
+  }
+  const technicalDetails = technical
+    ? [
+        technical.name,
+        technical.message,
+        technical.code,
+        technical.details,
+        technical.hint,
+        technical.cause,
+      ].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ')
+    : null;
+  const responseText = typeof record.responseText === 'string' ? record.responseText.trim() : '';
+  const httpStatus = status == null
+    ? ''
+    : ` (HTTP ${status}${statusText ? ` ${statusText}` : ''})`;
+  const details = technicalDetails
+    ? ` Causa técnica: ${technicalDetails}.`
+    : responseText
+      ? ` Resposta técnica: ${responseText}`
+      : '';
+  const reference = requestId ? ` Referência da requisição: ${requestId}.` : '';
+  return `${message}${httpStatus}.${details}${reference} ${nextStep}`;
 }
 
 function formatNumber(value: number | null | undefined) {
@@ -566,6 +618,7 @@ function useUnsavedChangesGuard(isDirty: boolean) {
 
 function CampaignForm({
   campaign,
+  draftId,
   onSaved,
   onSendTest,
   testPending,
@@ -583,6 +636,7 @@ function CampaignForm({
   sendQuotaPanel,
 }: {
   campaign?: Campaign;
+  draftId?: string;
   onSaved: (campaign: Campaign) => void;
   onSendTest?: () => void;
   testPending?: boolean;
@@ -612,7 +666,7 @@ function CampaignForm({
       defaultsQuery.data?.teto_dia == null ? '1000' : String(defaultsQuery.data.teto_dia),
     ),
   });
-  const isEditing = Boolean(campaign);
+  const saveLabel = campaign ? 'Salvar alterações' : draftId ? 'Salvar rascunho' : 'Criar campanha';
   const contentLocked = campaignContentIsLocked(campaign?.status);
   const emailBlocks = form.watch('corpo');
   const buttonHrefErrors = useMemo(
@@ -719,8 +773,9 @@ function CampaignForm({
 
   const persistValues = async (values: CampaignFormValues) => {
     const payload = makePayload(values);
-    const saved = campaign
-      ? await update.mutateAsync({ campaignId: campaign.id, data: payload as UpdateCampaignInput })
+    const existingCampaignId = campaign?.id ?? draftId;
+    const saved = existingCampaignId
+      ? await update.mutateAsync({ campaignId: existingCampaignId, data: payload as UpdateCampaignInput })
       : await create.mutateAsync({ data: payload as CreateCampaignInput });
     form.reset(campaignToForm(
       saved,
@@ -805,7 +860,7 @@ function CampaignForm({
         blocks={emailBlocks}
         buttonHrefErrors={buttonHrefErrors}
         onChange={(blocks) => form.setValue('corpo', blocks, { shouldDirty: true })}
-        campaignId={campaign?.id}
+        campaignId={campaign?.id ?? draftId}
         subject={emailSubject}
          valorCredito={nullableNumber(form.watch('valor_credito'))}
          validadeCredito={form.watch('validade_credito') || null}
@@ -859,7 +914,7 @@ function CampaignForm({
       </section>
 
       {error && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-save-error"><div className="flex items-start gap-3"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{getErrorMessage(error, 'Não foi possível salvar a campanha.')}</span></div></div>}
-        <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row"><Link href={campaign ? `/campaigns/${campaign.id}` : '/'} className="action-button action-button-secondary" data-testid="link-cancel-campaign">Cancelar</Link><button type="submit" disabled={isPending || isUploadPending} className={`action-button action-button-primary ${isDirty ? 'ring-2 ring-[#d35f2a] ring-offset-2' : ''}`} data-testid="button-save-campaign">{isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando...</> : isUploadPending ? <><LoaderCircle size={16} className="animate-spin" /> Aguardando upload...</> : <><Save size={16} /> {isEditing ? 'Salvar alterações' : 'Criar campanha'}</>}</button></div>
+        <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row"><Link href={campaign ? `/campaigns/${campaign.id}` : '/'} className="action-button action-button-secondary" data-testid="link-cancel-campaign">{draftId && !campaign ? 'Voltar à lista' : 'Cancelar'}</Link><button type="submit" disabled={isPending || isUploadPending} className={`action-button action-button-primary ${isDirty ? 'ring-2 ring-[#d35f2a] ring-offset-2' : ''}`} data-testid="button-save-campaign">{isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando...</> : isUploadPending ? <><LoaderCircle size={16} className="animate-spin" /> Aguardando upload...</> : <><Save size={16} /> {saveLabel}</>}</button></div>
     </form>
   );
 }
@@ -1002,21 +1057,58 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
       return;
     }
     setError(null);
+    let transferStage: 'upload-url' | 'storage-put' | 'import-validation' = 'upload-url';
     try {
       setPhase('requesting');
       const upload = await requestUpload.mutateAsync({ campaignId, data: { nome_arquivo: file.name, tamanho: file.size } });
       setPhase('uploading');
+      transferStage = 'storage-put';
       const uploadBody = new FormData();
       uploadBody.append('cacheControl', '3600');
       uploadBody.append('', file);
       const response = await fetch(upload.signed_url, { method: 'PUT', body: uploadBody });
-      if (!response.ok) throw new Error(`O upload do arquivo foi recusado (${response.status}).`);
+      if (!response.ok) {
+        const responseText = await response.text().catch(() => '');
+        console.error('Campaign CSV storage upload failed', {
+          stage: transferStage,
+          campaignId,
+          fileName: file.name,
+          fileSize: file.size,
+          status: response.status,
+          statusText: response.statusText,
+          responseText,
+        });
+        throw Object.assign(new Error('O Storage recusou o envio do CSV.'), {
+          status: response.status,
+          statusText: response.statusText,
+          responseText,
+        });
+      }
        setPhase('processing');
+       transferStage = 'import-validation';
        const job = await validateImport.mutateAsync({ campaignId, data: { storage_path: upload.path, deduplicar_por_telefone: deduplicatePhone } });
        setImportJobId(job.id);
     } catch (uploadError) {
       setPhase('idle');
-      setError(getErrorMessage(uploadError, 'Não foi possível concluir a validação do CSV.'));
+      console.error('Campaign CSV operation failed', {
+        stage: transferStage,
+        campaignId,
+        fileName: file.name,
+        fileSize: file.size,
+        name: uploadError instanceof Error ? uploadError.name : typeof uploadError,
+        message: uploadError instanceof Error ? uploadError.message : String(uploadError),
+        status: uploadError && typeof uploadError === 'object' && 'status' in uploadError
+          ? (uploadError as { status?: unknown }).status
+          : undefined,
+      });
+      const nextStep = transferStage === 'storage-put'
+        ? 'O CSV não foi enviado. Verifique a conexão e tente novamente; se persistir, encaminhe os detalhes técnicos ao suporte.'
+        : 'Tente novamente. Se persistir, encaminhe os detalhes técnicos ao suporte.';
+      setError(getDetailedFailureMessage(
+        uploadError,
+        'Não foi possível concluir a validação do CSV.',
+        nextStep,
+      ));
     }
   };
   const isBusy = phase !== 'idle';
@@ -1393,11 +1485,63 @@ export function NewCampaignPage({ user }: { user: SessionUser }) {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const createDraft = useCreateCampaignDraft();
+  const draftCreationStarted = useRef(false);
+
+  useEffect(() => {
+    if (draftCreationStarted.current) return;
+    draftCreationStarted.current = true;
+    createDraft.mutate(
+      { data: {} },
+      {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+        },
+      },
+    );
+  }, [createDraft.mutate, queryClient]);
+
   return (
     <Shell user={user} title="Nova campanha" eyebrow="Campanhas / Criar" mobileNavOpen={mobileNavOpen} setMobileNavOpen={setMobileNavOpen}>
       <div className="mx-auto max-w-4xl animate-rise-in-delay">
-        <div className="mb-7 flex items-center gap-3"><Link href="/" className="action-button action-button-secondary !px-3" data-testid="link-back-campaigns"><ArrowLeft size={15} /></Link><div><p className="text-sm font-bold text-[#263044]">Voltar para a lista</p><p className="mt-1 text-xs text-[#85858b]">Preencha os metadados essenciais antes da importação.</p></div></div>
-         <CampaignForm onSaved={(campaign) => { queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() }); setLocation(`/campaigns/${campaign.id}`); }} />
+        <div className="mb-7 flex items-center gap-3"><Link href="/" className="action-button action-button-secondary !px-3" data-testid="link-back-campaigns"><ArrowLeft size={15} /></Link><div><p className="text-sm font-bold text-[#263044]">Voltar para a lista</p><p className="mt-1 text-xs text-[#85858b]">O rascunho é criado automaticamente para permitir uploads antes de salvar os campos.</p></div></div>
+        {createDraft.data ? (
+          <CampaignForm
+            key={createDraft.data.id}
+            draftId={createDraft.data.id}
+            onSaved={(campaign) => {
+              void queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+              setLocation(`/campaigns/${campaign.id}`);
+            }}
+          />
+        ) : (
+          <div className="rounded-2xl border border-[#e5ddd0] bg-white p-6" role={createDraft.isError ? 'alert' : 'status'}>
+            <div className="flex items-center gap-3 text-sm font-semibold text-[#263044]">
+              {createDraft.isPending ? <LoaderCircle size={17} className="animate-spin text-[#d35f2a]" /> : <CircleAlert size={17} className="text-[#d35f2a]" />}
+              {createDraft.isError ? 'Não foi possível iniciar o rascunho.' : 'Preparando um rascunho para esta campanha…'}
+            </div>
+            {createDraft.isError && (
+              <>
+                <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[#6d7180]">
+                  {getDetailedFailureMessage(createDraft.error, 'Falha ao criar o rascunho.', 'Tente novamente. O rascunho ainda não foi criado.')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => createDraft.mutate({ data: {} }, {
+                    onSuccess: () => {
+                      void queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+                    },
+                  })}
+                  disabled={createDraft.isPending}
+                  className="action-button action-button-secondary mt-4"
+                  data-testid="button-retry-create-draft"
+                >
+                  <RefreshCw size={14} /> Tentar novamente
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </Shell>
   );

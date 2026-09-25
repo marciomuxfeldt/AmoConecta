@@ -247,6 +247,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /campaigns/drafts:
+    post:
+      operationId: createCampaignDraft
+      tags: [campaigns]
+      summary: Inicia um rascunho de campanha para edição e uploads
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CampaignDraftInput"
+      responses:
+        "201":
+          description: Rascunho criado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Configuração do remetente inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao criar o rascunho
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailedError"
   /campaigns/{campaignId}:
     parameters:
       - name: campaignId
@@ -727,7 +765,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                $ref: "#/components/schemas/DetailedError"
   /campaigns/{campaignId}/imports/upload-url:
     parameters:
       - name: campaignId
@@ -772,7 +810,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                $ref: "#/components/schemas/DetailedError"
   /campaigns/{campaignId}/imports/validate:
     parameters:
       - name: campaignId
@@ -927,6 +965,44 @@ components:
           type: string
       required:
         - error
+    DetailedError:
+      type: object
+      properties:
+        error:
+          type: string
+        request_id:
+          type: string
+        technical_error:
+          $ref: "#/components/schemas/TechnicalError"
+      required:
+        - error
+        - request_id
+        - technical_error
+    TechnicalError:
+      type: object
+      properties:
+        name:
+          type: string
+        message:
+          type: string
+        code:
+          type: ["string", "null"]
+        details:
+          type: ["string", "null"]
+        hint:
+          type: ["string", "null"]
+        cause:
+          type: ["string", "null"]
+      required:
+        - name
+        - message
+        - code
+        - details
+        - hint
+        - cause
+    CampaignDraftInput:
+      type: object
+      additionalProperties: false
     LoginInput:
       type: object
       properties:

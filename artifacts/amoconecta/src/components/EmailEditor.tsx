@@ -179,6 +179,30 @@ function uploadSignedImage(
 ) {
   return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    const rejectWithDiagnostics = (
+      kind: "http" | "network" | "aborted",
+      eventType: string | null = null,
+    ) => {
+      const diagnostic = {
+        stage: "storage-put",
+        kind,
+        status: xhr.status,
+        statusText: xhr.statusText || null,
+        responseText: xhr.responseText || null,
+        eventType,
+      };
+      const status = xhr.status > 0
+        ? `HTTP ${xhr.status}${xhr.statusText ? ` ${xhr.statusText}` : ""}`
+        : "sem resposta HTTP (status 0)";
+      const response = xhr.responseText ? ` Resposta do Storage: ${xhr.responseText}` : "";
+      const message = kind === "http"
+        ? `O Storage recusou o upload (${status}).${response}`
+        : kind === "aborted"
+          ? `O navegador interrompeu o upload antes de receber resposta do Storage (${status}).`
+          : `Não houve resposta HTTP do Storage (${status}); a falha pode ser de rede ou CORS.`;
+      xhrRef.current = null;
+      reject(Object.assign(new Error(message), { diagnostic }));
+    };
     xhrRef.current = xhr;
     xhr.open("PUT", signedUrl);
     xhr.upload.onprogress = (event) => {
@@ -191,19 +215,67 @@ function uploadSignedImage(
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
       } else {
-        reject(new Error(`Upload recusado (${xhr.status}).`));
+        rejectWithDiagnostics("http");
       }
     };
     xhr.onerror = () => {
-      xhrRef.current = null;
-      reject(new Error("Não foi possível enviar a imagem."));
+      rejectWithDiagnostics("network", "error");
     };
     xhr.onabort = () => {
-      xhrRef.current = null;
-      reject(new Error("O upload foi interrompido."));
+      rejectWithDiagnostics("aborted", "abort");
     };
     xhr.send(body);
   });
+}
+
+function imageUploadFailureMessage(
+  error: unknown,
+  uploadStage: "image-processing" | "requesting-upload-url" | "storage-put",
+): string {
+  const record = error && typeof error === "object"
+    ? error as Record<string, unknown>
+    : {};
+  const diagnostic = record.diagnostic && typeof record.diagnostic === "object"
+    ? record.diagnostic as Record<string, unknown>
+    : null;
+  if (diagnostic?.kind === "aborted") {
+    return `${error instanceof Error ? error.message : "O upload foi interrompido."} Mantenha a tela aberta e tente novamente.`;
+  }
+  if (diagnostic?.kind === "network") {
+    return `${error instanceof Error ? error.message : "Falha de rede ao enviar a imagem."} Verifique a conexão; se persistir, peça à equipe técnica para conferir a configuração CORS do Storage.`;
+  }
+  if (uploadStage === "requesting-upload-url" && record.name === "TypeError") {
+    return "A solicitação para preparar o upload falhou sem resposta HTTP (possível falha de rede ou proxy). A imagem não foi enviada; verifique a conexão e tente novamente.";
+  }
+  const data = record.data && typeof record.data === "object"
+    ? record.data as Record<string, unknown>
+    : {};
+  const technical = data.technical_error && typeof data.technical_error === "object"
+    ? data.technical_error as Record<string, unknown>
+    : null;
+  const technicalDetails = technical
+    ? [
+        technical.name,
+        technical.message,
+        technical.code,
+        technical.details,
+        technical.hint,
+        technical.cause,
+      ].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ")
+    : null;
+  const status = typeof record.status === "number"
+    ? ` (HTTP ${record.status}${typeof record.statusText === "string" && record.statusText ? ` ${record.statusText}` : ""})`
+    : "";
+  const message = typeof data.error === "string"
+    ? data.error
+    : error instanceof Error && error.message
+      ? error.message
+      : "Não foi possível enviar a imagem.";
+  const details = technicalDetails ? ` Causa técnica: ${technicalDetails}.` : "";
+  const requestId = typeof data.request_id === "string"
+    ? ` Referência da requisição: ${data.request_id}.`
+    : "";
+  return `${message}${status}.${details}${requestId} A imagem não foi enviada. Tente novamente; se persistir, encaminhe estes detalhes à equipe técnica.`;
 }
 
 function insertLink() {
@@ -346,7 +418,7 @@ function BlockCard({
     const file = selectedFile ?? retryFileRef.current;
     if (disabled || !file || block.type !== "image") return;
     if (!campaignId) {
-      setImageUpload({ ...idleImageUploadState, phase: "error", error: "Salve a campanha antes de enviar uma imagem." });
+      setImageUpload({ ...idleImageUploadState, phase: "error", error: "O rascunho ainda não está pronto para receber imagens. Aguarde e tente novamente." });
       return;
     }
     const allowed = Object.values(RequestEmailImageUploadInputMimeType) as string[];
@@ -361,9 +433,11 @@ function BlockCard({
       : null;
     setImageUpload({ phase: "processing", progress: null, previewUrl, processedBytes: null, warning, error: null });
     onUploadingChange?.(block.id, true);
+    let uploadStage: "image-processing" | "requesting-upload-url" | "storage-put" = "image-processing";
     try {
       const compressedFile = await compressImageForUpload(file);
       setImageUpload((current) => ({ ...current, phase: "uploading", progress: 0, processedBytes: compressedFile.size }));
+      uploadStage = "requesting-upload-url";
       const signed = await upload.mutateAsync({
         campaignId,
         data: {
@@ -372,6 +446,7 @@ function BlockCard({
           mime_type: compressedFile.type as RequestEmailImageUploadInputMimeType,
         },
       });
+      uploadStage = "storage-put";
       const body = new FormData();
       body.append("cacheControl", "31536000");
       body.append("", compressedFile);
@@ -391,11 +466,32 @@ function BlockCard({
       }
         setImageUpload({ ...idleImageUploadState, processedBytes: compressedFile.size });
     } catch (error) {
+      const record = error && typeof error === "object"
+        ? error as Record<string, unknown>
+        : {};
+      const diagnostic = record.diagnostic && typeof record.diagnostic === "object"
+        ? record.diagnostic as Record<string, unknown>
+        : null;
+      const data = record.data && typeof record.data === "object"
+        ? record.data as Record<string, unknown>
+        : null;
+      console.error("Campaign image upload failed", {
+        stage: uploadStage,
+        campaignId,
+        fileName: file.name,
+        fileSize: file.size,
+        contentType: file.type,
+        status: typeof record.status === "number" ? record.status : diagnostic?.status,
+        statusText: typeof record.statusText === "string" ? record.statusText : diagnostic?.statusText,
+        response: data ?? diagnostic ?? null,
+        errorName: error instanceof Error ? error.name : typeof error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
       setImageUpload((current) => ({
         ...current,
         phase: "error",
         progress: null,
-        error: error instanceof Error ? error.message : "Não foi possível enviar a imagem.",
+        error: imageUploadFailureMessage(error, uploadStage),
       }));
     } finally {
       onUploadingChange?.(block.id, false);

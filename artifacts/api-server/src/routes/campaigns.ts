@@ -1,6 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import {
   CreateCampaignBody,
+  CreateCampaignDraftBody,
+  CreateCampaignDraftResponse,
   CreateCampaignResponse,
   ClearCampaignRecipientsResponse,
   GetCampaignRecipientSummaryResponse,
@@ -16,7 +18,10 @@ import {
 } from "@workspace/api-zod";
 import { getSupabaseUser } from "./auth";
 import { supabaseAdminClient } from "../lib/supabase";
-import { getTechnicalError } from "../lib/technical-error";
+import {
+  getPublicTechnicalError,
+  getTechnicalError,
+} from "../lib/technical-error";
 import {
   normalizeEmailBlocks,
   validateEmailButtonDestinations,
@@ -59,8 +64,9 @@ function logSupabaseError(
   req: Request,
   operation: string,
   error: unknown,
+  context: Record<string, unknown> = {},
 ): void {
-  req.log.error({ technicalError: getTechnicalError(error) }, operation);
+  req.log.error({ ...context, technicalError: getTechnicalError(error) }, operation);
 }
 
 function logCampaignTestError(
@@ -632,6 +638,56 @@ router.get("/campaigns", async (req, res) => {
   }
 });
 
+router.post("/campaigns/drafts", async (req, res): Promise<void> => {
+  const parsed = CreateCampaignDraftBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(422).json({ error: formatValidationError(parsed.error) });
+    return;
+  }
+  try {
+    const session = await getSupabaseUser(req, res);
+    if (!session) {
+      res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+
+    const draftInput = withDefaultSender({
+      nome: "Nova campanha",
+      assunto: "",
+      remetente_nome: configuredSenderName() || "AmoConecta",
+      corpo: [],
+    });
+    const senderError = senderValidationError(draftInput.remetente_email);
+    if (senderError) {
+      res.status(422).json({ error: senderError });
+      return;
+    }
+
+    const { data, error } = await supabaseAdminClient()
+      .from("campanha")
+      .insert(campaignPayload(draftInput))
+      .select(CAMPAIGN_COLUMNS)
+      .single();
+    if (error) {
+      logSupabaseError(req, "Supabase campaign draft initialization failed", error);
+      res.status(502).json({
+        error: "Não foi possível iniciar o rascunho.",
+        request_id: String(req.id),
+        technical_error: getPublicTechnicalError(error),
+      });
+      return;
+    }
+    res.status(201).json(CreateCampaignDraftResponse.parse(data));
+  } catch (error) {
+    logSupabaseError(req, "Campaign draft initialization failed", error);
+    res.status(502).json({
+      error: "Não foi possível iniciar o rascunho.",
+      request_id: String(req.id),
+      technical_error: getPublicTechnicalError(error),
+    });
+  }
+});
+
 router.post("/campaigns", async (req, res) => {
   if (rejectServerOwnedCampaignFields(req, res)) return;
   const parsed = CreateCampaignBody.safeParse(withDefaultSender(req.body ?? {}));
@@ -1032,8 +1088,22 @@ router.post("/campaigns/:campaignId/assets/upload-url", async (req, res) => {
       .from(EMAIL_ASSET_BUCKET)
       .createSignedUploadUrl(path);
     if (error) {
-      logSupabaseError(req, "Supabase email asset signed upload URL creation failed", error);
-      res.status(502).json({ error: "Não foi possível preparar o upload da imagem." });
+      logSupabaseError(
+        req,
+        "Supabase email asset signed upload URL creation failed",
+        error,
+        {
+          campaignId: req.params.campaignId,
+          fileName: body.data.nome_arquivo,
+          contentType: body.data.mime_type,
+          fileSize: body.data.tamanho,
+        },
+      );
+      res.status(502).json({
+        error: "Não foi possível preparar o upload da imagem.",
+        request_id: String(req.id),
+        technical_error: getPublicTechnicalError(error),
+      });
       return;
     }
     const publicUrl = client.storage.from(EMAIL_ASSET_BUCKET).getPublicUrl(path).data.publicUrl;
@@ -1047,8 +1117,22 @@ router.post("/campaigns/:campaignId/assets/upload-url", async (req, res) => {
       }),
     );
   } catch (error) {
-    logSupabaseError(req, "Campaign email asset upload URL request failed", error);
-    res.status(502).json({ error: "Não foi possível preparar o upload da imagem." });
+    logSupabaseError(
+      req,
+      "Campaign email asset upload URL request failed",
+      error,
+      {
+        campaignId: req.params.campaignId,
+        fileName: body.data.nome_arquivo,
+        contentType: body.data.mime_type,
+        fileSize: body.data.tamanho,
+      },
+    );
+    res.status(502).json({
+      error: "Não foi possível preparar o upload da imagem.",
+      request_id: String(req.id),
+      technical_error: getPublicTechnicalError(error),
+    });
   }
 });
 

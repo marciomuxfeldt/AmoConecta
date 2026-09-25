@@ -23,11 +23,13 @@ import type {
   AuthSession,
   Campaign,
   CampaignDefaults,
+  CampaignDraftInput,
   CampaignListItem,
   CampaignRecipientSummary,
   CampaignRecipientsCleared,
   CampaignResumeInput,
   CreateCampaignInput,
+  DetailedError,
   EmailImageUploadUrl,
   Error,
   HealthStatus,
@@ -796,6 +798,94 @@ export const useCreateCampaign = <TError = ErrorType<Error>,
         TContext
       > => {
       return useMutation(getCreateCampaignMutationOptions(options));
+    }
+
+export const getCreateCampaignDraftUrl = () => {
+
+
+
+
+  return `/api/campaigns/drafts`
+}
+
+/**
+ * @summary Inicia um rascunho de campanha para edição e uploads
+ */
+export const createCampaignDraft = async (campaignDraftInput: CampaignDraftInput, options?: Parameters<typeof customFetch>[1]): Promise<Campaign> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<Campaign>(getCreateCampaignDraftUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(campaignDraftInput)
+  }
+);}
+
+
+
+
+
+export const getCreateCampaignDraftMutationKey = () => ['createCampaignDraft'] as const;
+
+export const getCreateCampaignDraftMutationOptions = <TError = ErrorType<Error | DetailedError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCampaignDraft>>, TError,CreateCampaignDraftMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createCampaignDraft>>, TError,CreateCampaignDraftMutationVariables, TContext> => {
+
+const mutationKey = getCreateCampaignDraftMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createCampaignDraft>>, CreateCampaignDraftMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createCampaignDraft(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateCampaignDraftMutationResult = NonNullable<Awaited<ReturnType<typeof createCampaignDraft>>>
+    export type CreateCampaignDraftMutationBody = BodyType<CampaignDraftInput>
+    export type CreateCampaignDraftMutationError = ErrorType<Error | DetailedError>
+    export type CreateCampaignDraftMutationVariables = {data: BodyType<CampaignDraftInput>}
+
+    /**
+ * @summary Inicia um rascunho de campanha para edição e uploads
+ */
+export const useCreateCampaignDraft = <TError = ErrorType<Error | DetailedError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCampaignDraft>>, TError,CreateCampaignDraftMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createCampaignDraft>>,
+        TError,
+        CreateCampaignDraftMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateCampaignDraftMutationOptions(options));
     }
 
 export const getGetCampaignUrl = (campaignId: string,) => {
@@ -1632,7 +1722,7 @@ return customFetch<EmailImageUploadUrl>(getRequestCampaignAssetUploadUrlUrl(camp
 
 export const getRequestCampaignAssetUploadUrlMutationKey = () => ['requestCampaignAssetUploadUrl'] as const;
 
-export const getRequestCampaignAssetUploadUrlMutationOptions = <TError = ErrorType<Error>,
+export const getRequestCampaignAssetUploadUrlMutationOptions = <TError = ErrorType<Error | DetailedError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestCampaignAssetUploadUrl>>, TError,RequestCampaignAssetUploadUrlMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof requestCampaignAssetUploadUrl>>, TError,RequestCampaignAssetUploadUrlMutationVariables, TContext> => {
 
@@ -1661,13 +1751,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RequestCampaignAssetUploadUrlMutationResult = NonNullable<Awaited<ReturnType<typeof requestCampaignAssetUploadUrl>>>
     export type RequestCampaignAssetUploadUrlMutationBody = BodyType<RequestEmailImageUploadInput>
-    export type RequestCampaignAssetUploadUrlMutationError = ErrorType<Error>
+    export type RequestCampaignAssetUploadUrlMutationError = ErrorType<Error | DetailedError>
     export type RequestCampaignAssetUploadUrlMutationVariables = {campaignId: string;data: BodyType<RequestEmailImageUploadInput>}
 
     /**
  * @summary Gera URL assinada para upload de imagem do e-mail
  */
-export const useRequestCampaignAssetUploadUrl = <TError = ErrorType<Error>,
+export const useRequestCampaignAssetUploadUrl = <TError = ErrorType<Error | DetailedError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestCampaignAssetUploadUrl>>, TError,RequestCampaignAssetUploadUrlMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof requestCampaignAssetUploadUrl>>,
@@ -1721,7 +1811,7 @@ return customFetch<ImportUploadUrl>(getRequestCampaignImportUploadUrlUrl(campaig
 
 export const getRequestCampaignImportUploadUrlMutationKey = () => ['requestCampaignImportUploadUrl'] as const;
 
-export const getRequestCampaignImportUploadUrlMutationOptions = <TError = ErrorType<Error>,
+export const getRequestCampaignImportUploadUrlMutationOptions = <TError = ErrorType<Error | DetailedError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestCampaignImportUploadUrl>>, TError,RequestCampaignImportUploadUrlMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof requestCampaignImportUploadUrl>>, TError,RequestCampaignImportUploadUrlMutationVariables, TContext> => {
 
@@ -1750,13 +1840,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RequestCampaignImportUploadUrlMutationResult = NonNullable<Awaited<ReturnType<typeof requestCampaignImportUploadUrl>>>
     export type RequestCampaignImportUploadUrlMutationBody = BodyType<RequestImportUploadInput>
-    export type RequestCampaignImportUploadUrlMutationError = ErrorType<Error>
+    export type RequestCampaignImportUploadUrlMutationError = ErrorType<Error | DetailedError>
     export type RequestCampaignImportUploadUrlMutationVariables = {campaignId: string;data: BodyType<RequestImportUploadInput>}
 
     /**
  * @summary Gera URL assinada para upload do CSV
  */
-export const useRequestCampaignImportUploadUrl = <TError = ErrorType<Error>,
+export const useRequestCampaignImportUploadUrl = <TError = ErrorType<Error | DetailedError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestCampaignImportUploadUrl>>, TError,RequestCampaignImportUploadUrlMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof requestCampaignImportUploadUrl>>,

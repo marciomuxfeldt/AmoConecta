@@ -16,6 +16,7 @@ import {
 } from "../lib/csv-import";
 import { logger } from "../lib/logger";
 import {
+  getPublicTechnicalError,
   getTechnicalError,
   getTechnicalErrorText,
 } from "../lib/technical-error";
@@ -29,8 +30,13 @@ const IMPORT_JOB_COLUMNS =
 const IMPORT_JOB_STATUSES = ["pendente", "processando", "concluida", "erro"] as const;
 type ImportJobStatus = (typeof IMPORT_JOB_STATUSES)[number];
 
-function logSupabaseError(req: Request, operation: string, error: unknown) {
-  req.log.error({ technicalError: getTechnicalError(error) }, operation);
+function logSupabaseError(
+  req: Request,
+  operation: string,
+  error: unknown,
+  context: Record<string, unknown> = {},
+) {
+  req.log.error({ ...context, technicalError: getTechnicalError(error) }, operation);
 }
 
 function safeFileName(fileName: string): string {
@@ -182,8 +188,21 @@ router.post("/campaigns/:campaignId/imports/upload-url", async (req, res) => {
       .from(IMPORT_BUCKET)
       .createSignedUploadUrl(path);
     if (error) {
-      logSupabaseError(req, "Supabase signed upload URL creation failed", error);
-      res.status(502).json({ error: "Não foi possível preparar o upload." });
+      logSupabaseError(
+        req,
+        "Supabase signed upload URL creation failed",
+        error,
+        {
+          campaignId: req.params.campaignId,
+          fileName: body.data.nome_arquivo,
+          fileSize: body.data.tamanho,
+        },
+      );
+      res.status(502).json({
+        error: "Não foi possível preparar o upload do CSV.",
+        request_id: String(req.id),
+        technical_error: getPublicTechnicalError(error),
+      });
       return;
     }
     res.json(
@@ -195,8 +214,21 @@ router.post("/campaigns/:campaignId/imports/upload-url", async (req, res) => {
       }),
     );
   } catch (error) {
-    logSupabaseError(req, "Import upload URL request failed", error);
-    res.status(502).json({ error: "Não foi possível preparar o upload." });
+    logSupabaseError(
+      req,
+      "Import upload URL request failed",
+      error,
+      {
+        campaignId: req.params.campaignId,
+        fileName: body.data.nome_arquivo,
+        fileSize: body.data.tamanho,
+      },
+    );
+    res.status(502).json({
+      error: "Não foi possível preparar o upload do CSV.",
+      request_id: String(req.id),
+      technical_error: getPublicTechnicalError(error),
+    });
   }
 });
 

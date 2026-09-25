@@ -263,6 +263,82 @@ export const CreateCampaignResponse = zod.object({
 
 
 /**
+ * @summary Inicia um rascunho de campanha para edição e uploads
+ */
+export const CreateCampaignDraftBody = zod.object({
+
+})
+
+export const createCampaignDraftResponsePreheaderMax = 100;
+
+export const createCampaignDraftResponseTetoHoraMin = 0;
+
+export const createCampaignDraftResponseTetoDiaMin = 0;
+
+export const createCampaignDraftResponseEnviadosHoraMin = 0;
+
+export const createCampaignDraftResponseEnviadosDiaMin = 0;
+
+
+
+
+export const createCampaignDraftResponseCorpoItemTwoAltMax = 160;
+
+
+export const createCampaignDraftResponseCorpoItemThreeLabelMax = 120;
+
+
+
+
+export const CreateCampaignDraftResponse = zod.object({
+  "id": zod.string().uuid(),
+  "nome": zod.string(),
+  "assunto": zod.string(),
+  "preheader": zod.string().max(createCampaignDraftResponsePreheaderMax).nullable(),
+  "assunto_lembrete": zod.string().nullable(),
+  "remetente_nome": zod.string(),
+  "remetente_email": zod.string().email(),
+  "reply_to": zod.string().email().nullable(),
+  "valor_credito": zod.number().nullable(),
+  "validade_credito": zod.coerce.date().nullable(),
+  "teto_hora": zod.number().int().min(createCampaignDraftResponseTetoHoraMin).nullable(),
+  "teto_dia": zod.number().int().min(createCampaignDraftResponseTetoDiaMin).nullable(),
+  "pausa_motivo": zod.string().nullish(),
+  "pausa_taxa_bounce": zod.number().nullish(),
+  "pausa_taxa_reclamacao": zod.number().nullish(),
+  "pausada_em": zod.coerce.date().nullish(),
+  "enviados_hora": zod.number().int().min(createCampaignDraftResponseEnviadosHoraMin).optional(),
+  "enviados_dia": zod.number().int().min(createCampaignDraftResponseEnviadosDiaMin).optional(),
+  "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida', 'cancelada']),
+  "agendada_para": zod.coerce.date().nullable(),
+  "lembrete_ativo": zod.boolean(),
+  "lembrete_horas": zod.number().int().min(1),
+  "teste_enviado": zod.boolean(),
+  "teste_enviado_em": zod.coerce.date().nullable(),
+  "corpo": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url(),
+  "alt": zod.string().max(createCampaignDraftResponseCorpoItemTwoAltMax),
+  "href": zod.string().url().nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(createCampaignDraftResponseCorpoItemThreeLabelMax),
+  "href": zod.string().url()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])),
+  "criado_em": zod.coerce.date()
+})
+
+
+/**
  * @summary Consulta uma campanha
  */
 export const GetCampaignParams = zod.object({

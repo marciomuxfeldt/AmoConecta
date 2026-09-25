@@ -8,10 +8,39 @@ export type TechnicalError = {
   cause: TechnicalError | string | null;
 };
 
+export type PublicTechnicalError = {
+  name: string;
+  message: string;
+  code: string | null;
+  details: string | null;
+  hint: string | null;
+  cause: string | null;
+};
+
 export function getTechnicalError(error: unknown): TechnicalError {
   const seen = new WeakSet<object>();
   if (typeof error === "object" && error !== null) seen.add(error);
   return getTechnicalErrorAt(error, seen, 0);
+}
+
+export function getPublicTechnicalError(error: unknown): PublicTechnicalError {
+  return withoutStack(getTechnicalError(error));
+}
+
+function withoutStack(error: TechnicalError): PublicTechnicalError {
+  const cause = error.cause;
+  return {
+    name: error.name,
+    message: error.message,
+    code: error.code,
+    details: error.details,
+    hint: error.hint,
+    cause: cause && typeof cause === "object"
+      ? JSON.stringify(withoutStack(cause))
+      : typeof cause === "string"
+        ? cause
+        : null,
+  };
 }
 
 function getTechnicalErrorAt(

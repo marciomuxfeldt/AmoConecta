@@ -32,6 +32,27 @@ export interface Error {
   error: string;
 }
 
+export interface TechnicalError {
+  name: string;
+  message: string;
+  /** @nullable */
+  code: string | null;
+  /** @nullable */
+  details: string | null;
+  /** @nullable */
+  hint: string | null;
+  /** @nullable */
+  cause: string | null;
+}
+
+export interface DetailedError {
+  error: string;
+  request_id: string;
+  technical_error: TechnicalError;
+}
+
+export interface CampaignDraftInput { [key: string]: unknown }
+
 export interface LoginInput {
   email: string;
   /** @minLength 1 */
