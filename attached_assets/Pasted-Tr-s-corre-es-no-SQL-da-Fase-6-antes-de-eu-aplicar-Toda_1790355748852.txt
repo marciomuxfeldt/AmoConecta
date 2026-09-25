@@ -1,0 +1,55 @@
+Três correções no SQL da Fase 6, antes de eu aplicar. Todas na parte de
+desengajamento crônico.
+
+1. ÍNDICE QUE NÃO SERVE PARA A CONSULTA QUE ELE DEVERIA SERVIR
+
+   O índice é sobre lower(email):
+     destinatario_email_original_entrega_idx on (lower(email), entregue_em, campanha_id)
+
+   Mas a consulta de refresh_chronic_disengagement agrupa por lower(btrim(email)).
+   Expressões diferentes: o Postgres não usa o índice, e a consulta vira varredura
+   completa da tabela.
+
+   Padronize. Escolha uma forma — sugiro lower(btrim(email)) — e use a MESMA em todo
+   índice, trigger, função e consulta. Me diga onde mais essa divergência existe.
+
+2. O REFRESH REESCREVE A TABELA INTEIRA
+
+   refresh_chronic_disengagement faz:
+     select distinct lower(btrim(email)) from destinatario
+   e junta esse resultado de volta contra a tabela toda, atualizando todas as linhas
+   cujo estado divergir.
+
+   Com 500 mil destinatários por campanha e várias campanhas, essa tabela chega a
+   milhões de linhas. Essa consulta roda a cada execução vencida do worker, que tem
+   timeout de 2 minutos — se ela passar disso, é morta no meio, deixando o cálculo
+   pela metade e possivelmente linhas travadas.
+
+   Faça o refresh processar em lotes limitados, com marcação de progresso, de modo
+   que cada execução do worker faça uma parte e termine rápido. Me diga qual limite
+   por execução você escolheu e por quê.
+
+3. O ESTADO ESTÁ REPLICADO EM CADA LINHA, NÃO POR PESSOA
+
+   desengajado_cronico é coluna de destinatario, então a mesma pessoa tem o flag
+   repetido em toda campanha de que participou. Atualizar uma pessoa significa
+   escrever em dezenas de linhas, e é isso que torna o refresh caro.
+
+   O estado é da PESSOA, não do envio. Avalie mover para uma tabela própria com uma
+   linha por e-mail normalizado — contendo o flag, desde quando, e a data da última
+   apuração. As consultas de importação e envio passam a consultar essa tabela, como
+   já fazem com supressao.
+
+   Se você achar que a mudança é grande demais agora, me diga o custo estimado de
+   cada caminho e eu decido. Não implemente sem me responder.
+
+4. O TRIGGER RODA UMA VEZ POR LINHA IMPORTADA
+
+   destinatario_inherit_chronic_disengagement é BEFORE INSERT em cada linha, e faz
+   uma subconsulta EXISTS para cada uma. Numa importação de 19 mil linhas são 19 mil
+   subconsultas; na base completa, 500 mil.
+
+   Me diga o impacto medido disso numa importação grande. Se for relevante, a herança
+   do estado deve acontecer uma vez ao final da importação, não linha a linha.
+
+Não aplique nada no banco. Me devolva o SQL final e as respostas.
