@@ -73,7 +73,6 @@ export type WorkerRecipient = {
   status: string;
   tentativas: number;
   resend_email_id?: string | null;
-  desengajado_cronico?: boolean | null;
 };
 
 export class WorkerConfigurationError extends Error {}
@@ -230,10 +229,11 @@ async function loadCampaign(campaignId: string): Promise<Campaign | null> {
 
 async function loadSuppressedEmails(emails: string[]): Promise<Set<string>> {
   if (emails.length === 0) return new Set();
+  const normalizedEmails = [...new Set(emails.map(normalize))];
   const { data, error } = await supabaseAdminClient()
     .from("supressao")
     .select("email")
-    .in("email", emails);
+    .in("email", normalizedEmails);
   if (error) throw error;
   return new Set(
     (data ?? [])

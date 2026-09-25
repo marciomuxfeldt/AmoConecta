@@ -121,6 +121,10 @@ create trigger evento_email_normalize_email
 -- Suppression lookups deliberately compare the normalized recipient expression
 -- to the raw suppression column so this existing unique index is usable.
 -- Collapse historical case/whitespace duplicates before normalizing that column.
+create index if not exists supressao_email_normalizado_migration_idx
+  on public.supressao (lower(btrim(email)))
+  where email is not null;
+
 delete from public.supressao s
 using public.supressao keeper
 where s.email is not null
@@ -132,6 +136,8 @@ update public.supressao
 set email = nullif(lower(btrim(email)), '')
 where email is not null
   and email is distinct from nullif(lower(btrim(email)), '');
+
+drop index if exists public.supressao_email_normalizado_migration_idx;
 
 drop trigger if exists supressao_normalize_email on public.supressao;
 create trigger supressao_normalize_email
@@ -155,6 +161,14 @@ alter table public.evento_email
 alter table public.evento_email
   add constraint evento_email_email_normalizado_check
   check (email is null or email = lower(btrim(email))) not valid;
+
+update public.evento_email
+set email = nullif(lower(btrim(email)), '')
+where email is not null
+  and email is distinct from nullif(lower(btrim(email)), '');
+
+alter table public.evento_email
+  validate constraint evento_email_email_normalizado_check;
 
 create index if not exists evento_email_campanha_email_tipo_idx
   on public.evento_email (campanha_id, email, tipo);
