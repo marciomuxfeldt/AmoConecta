@@ -38,6 +38,14 @@ test("allows all addresses on an explicitly listed domain", () => {
     assert.equal(isRecipientAllowed("time+campanha@AMO.DELIVERY"), true);
     assert.equal(isRecipientAllowed("pessoa@outro.delivery"), false);
     assert.equal(getSafetyMode().allowlist_count, 1);
+
+    const projection = buildRecipientDeliveryProjection(
+      Array.from({ length: 8 }, (_, index) => `equipe-${index}@amo.delivery`),
+      new Set(),
+    );
+    assert.equal(projection.total_na_lista, 8);
+    assert.equal(projection.permitidos_modo_teste, 8);
+    assert.equal(projection.bloqueados_modo_teste, 0);
   });
 });
 

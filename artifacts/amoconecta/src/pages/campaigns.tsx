@@ -1716,12 +1716,13 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       setOperationError(buttonDestinationErrors.map((issue) => issue.message).join(' '));
       return;
     }
+    const listedTotal = recipientSummaryQuery.data?.total_na_lista;
     const total = recipientSummaryQuery.data?.receberao_de_fato;
-    if (total == null) {
+    if (listedTotal == null || total == null) {
       setOperationError('Aguarde a contagem atual dos destinatários antes de agendar.');
       return;
     }
-    if (total === 0) {
+    if (listedTotal === 0) {
       setOperationError('A lista está vazia. Importe ao menos um destinatário antes de agendar.');
       return;
     }
@@ -1735,8 +1736,16 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
   const confirmSchedule = () => {
     const total = recipientSummaryQuery.data?.receberao_de_fato ?? 0;
     if (total === 0) {
-      setScheduleDialogOpen(false);
-      setOperationError('A lista está vazia. Importe ao menos um destinatário antes de agendar.');
+      const listedTotal = recipientSummaryQuery.data?.total_na_lista ?? 0;
+      const allowlisted = recipientSummaryQuery.data?.permitidos_modo_teste ?? 0;
+      const blocked = recipientSummaryQuery.data?.bloqueados_modo_teste ?? 0;
+      setOperationError(
+        listedTotal === 0
+          ? 'A lista está vazia. Importe ao menos um destinatário antes de agendar.'
+          : safetyModeQuery.data?.envio_liberado === false
+            ? `Há ${formatNumber(listedTotal)} destinatários na lista, mas nenhum está liberado. Allowlist: ${formatNumber(allowlisted)} liberados e ${formatNumber(blocked)} bloqueados.`
+            : `Há ${formatNumber(listedTotal)} destinatários na lista, mas nenhum está apto a receber; verifique as supressões.`,
+      );
       return;
     }
     if (total > 5000 && scheduleConfirmation.trim() !== String(total)) return;
@@ -1762,12 +1771,19 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
     <div id="dialog-schedule-confirmation" className="mt-6 rounded-2xl border-2 border-[#d35f2a] bg-[#fff8ef] p-5 sm:p-6" role="dialog" aria-labelledby="schedule-confirmation-title" data-testid="dialog-schedule-confirmation">
       <p className="section-kicker text-[#a64220]">Confirmação de agendamento</p>
       <h3 id="schedule-confirmation-title" className="mt-2 text-lg font-extrabold text-[#263044]">Revise o tamanho do disparo antes de continuar.</h3>
-      <p className="mt-2 text-sm leading-6 text-[#6d7180]">A lista atual tem <strong className="text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.receberao_de_fato)}</strong> destinatários que receberão de fato.</p>
+      <p className="mt-2 text-sm leading-6 text-[#6d7180]">Há <strong className="font-extrabold tabular-nums text-[#263044]">{formatNumber(recipientSummaryQuery.data?.total_na_lista)}</strong> destinatários na lista; <strong className="text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.receberao_de_fato)}</strong> receberão de fato.</p>
       {safetyModeQuery.data && !safetyModeQuery.data.envio_liberado && (
-        <div className="mt-5 grid gap-3 sm:grid-cols-2" data-testid="schedule-safety-counts">
-          <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#417846]">{formatNumber(recipientSummaryQuery.data?.permitidos_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Na allowlist e liberados</span></div>
-          <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.bloqueados_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Bloqueados pelo modo de segurança</span></div>
-        </div>
+        <>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2" data-testid="schedule-safety-counts">
+            <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#417846]">{formatNumber(recipientSummaryQuery.data?.permitidos_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Liberados pela allowlist</span></div>
+            <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.bloqueados_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Bloqueados pela allowlist</span></div>
+          </div>
+          {(recipientSummaryQuery.data?.total_na_lista ?? 0) > 0 && (recipientSummaryQuery.data?.receberao_de_fato ?? 0) === 0 && (
+            <p className="mt-4 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" role="alert" data-testid="schedule-no-allowlisted-recipients">
+              A lista contém destinatários, mas nenhum está apto a receber. Revise os bloqueios da allowlist e as supressões antes de agendar.
+            </p>
+          )}
+        </>
       )}
       {(recipientSummaryQuery.data?.receberao_de_fato ?? 0) > 5000 ? (
         <label className="mt-5 block text-xs font-bold text-[#565c6a]">Digite {formatNumber(recipientSummaryQuery.data?.receberao_de_fato)} para confirmar<input value={scheduleConfirmation} onChange={(event) => setScheduleConfirmation(event.target.value.replace(/\D/g, ''))} inputMode="numeric" className="field-control mt-2" placeholder={String(recipientSummaryQuery.data?.receberao_de_fato)} data-testid="input-schedule-confirmation" /></label>

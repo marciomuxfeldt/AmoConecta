@@ -819,8 +819,11 @@ async function validateSchedule(
     supabaseAdminClient(),
     campaign.id,
   );
-  if (delivery.receberao_de_fato === 0) {
+  if (delivery.total_na_lista === 0) {
     return "A lista está vazia. Importe ao menos um destinatário antes de agendar.";
+  }
+  if (delivery.receberao_de_fato === 0) {
+    return "Há destinatários na lista, mas nenhum está apto a receber. Confira o modo de segurança e a lista de supressão.";
   }
   if (
     delivery.receberao_de_fato > 5000 &&
