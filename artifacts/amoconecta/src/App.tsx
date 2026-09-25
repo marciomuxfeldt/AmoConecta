@@ -24,6 +24,8 @@ import { Route, Router as WouterRouter, Switch, useLocation } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import NotFound from '@/pages/not-found';
 import { CampaignDetailPage, CampaignsPage, NewCampaignPage } from '@/pages/campaigns';
+import EmailSettingsPage from '@/pages/email-settings';
+import BiExportsPage from '@/pages/bi-exports';
 
 const queryClient = new QueryClient();
 
@@ -144,7 +146,9 @@ function Router() {
     <Switch>
       <Route path="/login">{authenticated ? <CampaignsPage user={user} /> : <LoginPage />}</Route>
       <Route path="/campaigns/new">{authenticated ? <NewCampaignPage user={user} /> : <LoginPage />}</Route>
-      <Route path="/campaigns/:campaignId">{(params) => authenticated ? <CampaignDetailPage user={user} campaignId={params.campaignId ?? ''} /> : <LoginPage />}</Route>
+  <Route path="/campaigns/:campaignId">{(params) => authenticated ? <CampaignDetailPage user={user} campaignId={params.campaignId ?? ''} /> : <LoginPage />}</Route>
+  <Route path="/settings">{authenticated ? <EmailSettingsPage user={user} /> : <LoginPage />}</Route>
+  <Route path="/bi-exports">{authenticated ? <BiExportsPage user={user} /> : <LoginPage />}</Route>
       <Route path="/">{authenticated ? <CampaignsPage user={user} /> : <LoginPage />}</Route>
       <Route component={NotFound} />
     </Switch>

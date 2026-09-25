@@ -1,6 +1,11 @@
 import { Router, type IRouter } from "express";
+import { GetCampaignDefaultsResponse } from "@workspace/api-zod";
 import { getSupabaseUser } from "./auth";
 import { getSafetyMode } from "../lib/safety-mode";
+import {
+  countChronicDisengagedContacts,
+  getEmailBrandingSettings,
+} from "../lib/email-branding";
 import {
   configuredReplyToEmail,
   configuredSenderEmail,
@@ -33,13 +38,28 @@ router.get("/campaign-defaults", async (req, res) => {
     });
     return;
   }
-    res.json({
-      remetente_email: senderEmail,
-      remetente_nome: configuredSenderName(),
-      reply_to: configuredReplyToEmail(),
-      teto_hora: 100,
-      teto_dia: 1000,
+  try {
+    const [branding, disengagedCount] = await Promise.all([
+      getEmailBrandingSettings(),
+      countChronicDisengagedContacts(),
+    ]);
+    res.json(
+      GetCampaignDefaultsResponse.parse({
+        remetente_email: senderEmail,
+        remetente_nome: configuredSenderName(),
+        reply_to: configuredReplyToEmail(),
+        teto_hora: 100,
+        teto_dia: 1000,
+        cor_botao_email: branding.cor_botao_email,
+        desengajados_total: disengagedCount,
+      }),
+    );
+  } catch (error) {
+    req.log.error({ err: error }, "Campaign defaults could not load final-phase settings");
+    res.status(503).json({
+      error: "Aplique a migração final do AmoConecta para carregar as configurações de e-mail.",
     });
+  }
 });
 
 export default router;

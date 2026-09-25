@@ -42,5 +42,13 @@ export interface CampaignRecipientSummary {
   status: RecipientStatusSummary;
   reputacao: RecipientReputationSummary;
   metricas_email: CampaignEmailMetrics;
+  status_lembrete: RecipientStatusSummary;
+  metricas_email_lembrete: CampaignEmailMetrics;
+  /** @minimum 0 */
+  desengajados_total: number;
+  /** @minimum 0 */
+  desengajados_na_lista: number;
+  /** @minimum 0 */
+  bloqueados_desengajados: number;
   recencia: RecipientRecencyBucket[];
 }

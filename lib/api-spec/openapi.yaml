@@ -18,6 +18,10 @@ tags:
     description: Campanhas de e-mail
   - name: safety
     description: Estado seguro da operação de envios
+  - name: settings
+    description: Identidade visual global dos e-mails
+  - name: engagement
+    description: Engajamento e exportação para BI
 paths:
   /webhooks/resend:
     post:
@@ -140,6 +144,195 @@ paths:
                 $ref: "#/components/schemas/Error"
         "503":
           description: Configuração de remetente ausente ou inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /email-branding:
+    get:
+      operationId: getEmailBranding
+      tags: [settings]
+      summary: Retorna a identidade visual dos e-mails
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Configuração global atual
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailBranding"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      operationId: updateEmailBranding
+      tags: [settings]
+      summary: Atualiza a cor global dos botões de e-mail
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailBrandingUpdate"
+      responses:
+        "200":
+          description: Configuração atualizada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailBranding"
+        "400":
+          description: Cor inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /engagement/summary:
+    get:
+      operationId: getEngagementSummary
+      tags: [engagement]
+      summary: Retorna a quantidade atual de contatos desengajados
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Resumo de engajamento
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngagementSummary"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /bi-exports:
+    get:
+      operationId: listBiExports
+      tags: [engagement]
+      summary: Lista exportações BI recentes
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Exportações recentes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiExportJobsResponse"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createBiExport
+      tags: [engagement]
+      summary: Solicita uma exportação BI assíncrona
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BiExportRequest"
+      responses:
+        "202":
+          description: Exportação enfileirada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiExportJob"
+        "400":
+          description: Filtros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /bi-exports/{exportId}:
+    get:
+      operationId: getBiExport
+      tags: [engagement]
+      summary: Consulta o andamento de uma exportação
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: exportId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Estado da exportação
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiExportJob"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Exportação não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /bi-exports/{exportId}/download:
+    get:
+      operationId: downloadBiExport
+      tags: [engagement]
+      summary: Baixa o arquivo CSV gerado
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: exportId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Arquivo CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Arquivo inexistente ou expirado
           content:
             application/json:
               schema:
@@ -952,12 +1145,126 @@ components:
         teto_dia:
           type: integer
           minimum: 0
+        cor_botao_email:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+        desengajados_total:
+          type: integer
+          minimum: 0
       required:
         - remetente_email
         - remetente_nome
         - reply_to
         - teto_hora
         - teto_dia
+        - cor_botao_email
+        - desengajados_total
+    EmailBranding:
+      type: object
+      properties:
+        cor_botao_email:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+        atualizado_em:
+          type: string
+          format: date-time
+      required: [cor_botao_email, atualizado_em]
+    EmailBrandingUpdate:
+      type: object
+      properties:
+        cor_botao_email:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+      required: [cor_botao_email]
+    EngagementSummary:
+      type: object
+      properties:
+        desengajados_total:
+          type: integer
+          minimum: 0
+        calculado_em:
+          type: ["string", "null"]
+          format: date-time
+      required: [desengajados_total, calculado_em]
+    BiExportFilter:
+      type: string
+      enum: [todos, clicaram, abriram_sem_clicar, nao_abriram, bounce_ou_reclamacao]
+    BiExportRequest:
+      type: object
+      properties:
+        campanha_id:
+          type: ["string", "null"]
+          format: uuid
+        periodo_inicio:
+          type: ["string", "null"]
+          format: date
+        periodo_fim:
+          type: ["string", "null"]
+          format: date
+        filtro:
+          $ref: "#/components/schemas/BiExportFilter"
+      required: [campanha_id, periodo_inicio, periodo_fim, filtro]
+    BiExportJob:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        campanha_id:
+          type: ["string", "null"]
+          format: uuid
+        filtro:
+          $ref: "#/components/schemas/BiExportFilter"
+        periodo_inicio:
+          type: ["string", "null"]
+          format: date
+        periodo_fim:
+          type: ["string", "null"]
+          format: date
+        status:
+          type: string
+          enum: [pendente, processando, concluida, erro, expirada]
+        total_linhas:
+          type: ["integer", "null"]
+          minimum: 0
+        linhas_processadas:
+          type: integer
+          minimum: 0
+        criado_em:
+          type: string
+          format: date-time
+        concluido_em:
+          type: ["string", "null"]
+          format: date-time
+        expira_em:
+          type: ["string", "null"]
+          format: date-time
+        erro:
+          type: ["string", "null"]
+        disponivel_para_download:
+          type: boolean
+      required:
+        - id
+        - campanha_id
+        - filtro
+        - periodo_inicio
+        - periodo_fim
+        - status
+        - total_linhas
+        - linhas_processadas
+        - criado_em
+        - concluido_em
+        - expira_em
+        - erro
+        - disponivel_para_download
+    BiExportJobsResponse:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/BiExportJob"
+      required: [jobs]
     Error:
       type: object
       properties:
@@ -1206,11 +1513,24 @@ components:
           $ref: "#/components/schemas/RecipientReputationSummary"
         metricas_email:
           $ref: "#/components/schemas/CampaignEmailMetrics"
+        status_lembrete:
+          $ref: "#/components/schemas/RecipientStatusSummary"
+        metricas_email_lembrete:
+          $ref: "#/components/schemas/CampaignEmailMetrics"
+        desengajados_total:
+          type: integer
+          minimum: 0
+        desengajados_na_lista:
+          type: integer
+          minimum: 0
+        bloqueados_desengajados:
+          type: integer
+          minimum: 0
         recencia:
           type: array
           items:
             $ref: "#/components/schemas/RecipientRecencyBucket"
-      required: [campanha_id, total, total_na_lista, suprimidos_no_envio, permitidos_modo_teste, bloqueados_modo_teste, receberao_de_fato, status, reputacao, metricas_email, recencia]
+      required: [campanha_id, total, total_na_lista, suprimidos_no_envio, permitidos_modo_teste, bloqueados_modo_teste, receberao_de_fato, status, reputacao, metricas_email, status_lembrete, metricas_email_lembrete, desengajados_total, desengajados_na_lista, bloqueados_desengajados, recencia]
     CampaignRecipientsCleared:
       type: object
       properties:
@@ -1282,6 +1602,15 @@ components:
           maxLength: 100
         assunto_lembrete:
           type: ["string", "null"]
+        corpo_lembrete:
+          type: ["array", "null"]
+          items:
+            $ref: "#/components/schemas/EmailBlock"
+        cor_botao_snapshot:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+        incluir_desengajados:
+          type: boolean
         remetente_nome:
           type: string
         remetente_email:
@@ -1321,11 +1650,10 @@ components:
         agendada_para:
           type: ["string", "null"]
           format: date-time
-        lembrete_ativo:
-          type: boolean
         lembrete_horas:
           type: integer
-          minimum: 1
+          minimum: 24
+          maximum: 168
         teste_enviado:
           type: boolean
         teste_enviado_em:
@@ -1353,8 +1681,10 @@ components:
         - teto_dia
         - status
         - agendada_para
-        - lembrete_ativo
         - lembrete_horas
+        - corpo_lembrete
+        - cor_botao_snapshot
+        - incluir_desengajados
         - teste_enviado
         - teste_enviado_em
         - corpo
@@ -1373,6 +1703,10 @@ components:
           maxLength: 100
         assunto_lembrete:
           type: ["string", "null"]
+        corpo_lembrete:
+          type: ["array", "null"]
+          items:
+            $ref: "#/components/schemas/EmailBlock"
         remetente_nome:
           type: string
           minLength: 1
@@ -1396,12 +1730,12 @@ components:
         agendada_para:
           type: ["string", "null"]
           format: date-time
-        lembrete_ativo:
-          type: boolean
         lembrete_horas:
           type: integer
           minimum: 24
           maximum: 168
+        incluir_desengajados:
+          type: boolean
         corpo:
           type: array
           items:
@@ -1426,6 +1760,10 @@ components:
           maxLength: 100
         assunto_lembrete:
           type: ["string", "null"]
+        corpo_lembrete:
+          type: ["array", "null"]
+          items:
+            $ref: "#/components/schemas/EmailBlock"
         remetente_nome:
           type: string
           minLength: 1
@@ -1449,12 +1787,12 @@ components:
         agendada_para:
           type: ["string", "null"]
           format: date-time
-        lembrete_ativo:
-          type: boolean
         lembrete_horas:
           type: integer
           minimum: 24
           maximum: 168
+        incluir_desengajados:
+          type: boolean
         corpo:
           type: array
           items:
@@ -1489,12 +1827,14 @@ components:
         src:
           type: string
           format: uri
+          pattern: "^https://"
         alt:
           type: string
           maxLength: 160
         href:
           type: ["string", "null"]
           format: uri
+          pattern: "^https://"
       required: [id, type, src, alt]
     EmailButtonBlock:
       type: object
@@ -1512,6 +1852,7 @@ components:
         href:
           type: string
           format: uri
+          pattern: "^https://"
       required: [id, type, label, href]
     EmailDividerBlock:
       type: object

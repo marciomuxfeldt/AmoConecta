@@ -19,6 +19,8 @@ export interface CreateCampaignInput {
   preheader?: string | null;
   /** @nullable */
   assunto_lembrete?: string | null;
+  /** @nullable */
+  corpo_lembrete?: EmailBlock[] | null;
   /** @minLength 1 */
   remetente_nome: string;
   remetente_email: string;
@@ -34,11 +36,11 @@ export interface CreateCampaignInput {
   teto_dia?: number;
   /** @nullable */
   agendada_para?: Date | null;
-  lembrete_ativo?: boolean;
   /**
      * @minimum 24
      * @maximum 168
      */
   lembrete_horas?: number;
+  incluir_desengajados?: boolean;
   corpo?: EmailBlock[];
 }

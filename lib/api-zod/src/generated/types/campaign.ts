@@ -19,6 +19,11 @@ export interface Campaign {
   preheader: string | null;
   /** @nullable */
   assunto_lembrete: string | null;
+  /** @nullable */
+  corpo_lembrete: EmailBlock[] | null;
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  cor_botao_snapshot: string;
+  incluir_desengajados: boolean;
   remetente_nome: string;
   remetente_email: string;
   /** @nullable */
@@ -52,8 +57,10 @@ export interface Campaign {
   status: CampaignStatus;
   /** @nullable */
   agendada_para: Date | null;
-  lembrete_ativo: boolean;
-  /** @minimum 1 */
+  /**
+     * @minimum 24
+     * @maximum 168
+     */
   lembrete_horas: number;
   teste_enviado: boolean;
   /** @nullable */

@@ -1,3 +1,5 @@
+import { getHttpsUrlSuggestion, isStrictHttpsUrl } from "./https-url";
+
 export type EmailBlockType = "text" | "image" | "button" | "divider";
 
 export type TextBlock = {
@@ -42,12 +44,22 @@ export type EmailPreviewOptions = {
   unsubscribeUrl?: string;
   reason?: string;
   preheader?: string | null;
+  /** Campaign button background, as a hex CSS color. */
+  buttonColor?: string;
+};
+
+export type EmailBlockUrlIssue = {
+  blockId: string;
+  index: number;
+  field: string;
+  message: string;
+  suggestion?: string;
 };
 
 const ALLOWED_TAGS = new Set(["strong", "b", "em", "i", "a", "br"]);
 const DEFAULT_UNSUBSCRIBE_URL = "#descadastro";
 const DEFAULT_REASON =
-  "Você está recebendo este e-mail porque se cadastrou para receber comunicações da AmoConecta.";
+  "Você está recebendo este e-mail porque se cadastrou para receber comunicações da Amo Ofertas.";
 
 function escapeHtml(value: string): string {
   return value
@@ -59,7 +71,7 @@ function escapeHtml(value: string): string {
 }
 
 function safeUrl(value: string | undefined, fallback = "#"): string {
-  return value && /^(?:https?):\/\/[^\s]+$/iu.test(value) ? value : fallback;
+  return value && isStrictHttpsUrl(value) ? value : fallback;
 }
 
 function readAttribute(attributes: string, name: string): string | null {
@@ -137,6 +149,33 @@ function replaceNameToken(value: string, name: string | null | undefined): strin
     .trim();
 }
 
+const DEFAULT_BUTTON_COLOR = "#e96527";
+
+function normalizeButtonColor(value: string | undefined): string {
+  return typeof value === "string" && /^#[\da-f]{3}(?:[\da-f]{3})?$/iu.test(value)
+    ? value
+    : DEFAULT_BUTTON_COLOR;
+}
+
+function relativeLuminance(hex: string): number {
+  const normalized = hex.slice(1);
+  const channels = normalized.length === 3
+    ? normalized.split("").map((part) => Number.parseInt(part + part, 16))
+    : [0, 2, 4].map((offset) => Number.parseInt(normalized.slice(offset, offset + 2), 16));
+  const luminance = channels
+    .map((channel) => channel / 255)
+    .map((channel) => (channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
+    .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+  return luminance;
+}
+
+function readableButtonTextColor(background: string): "#ffffff" | "#1f2937" {
+  const luminance = relativeLuminance(background);
+  const whiteContrast = 1.05 / (luminance + 0.05);
+  const darkContrast = (luminance + 0.05) / (relativeLuminance("#1f2937") + 0.05);
+  return whiteContrast >= 4.5 || whiteContrast >= darkContrast ? "#ffffff" : "#1f2937";
+}
+
 export function interpolateName(value: string, name?: string | null): string {
   return replaceNameToken(value, name);
 }
@@ -159,7 +198,9 @@ function renderBlock(block: EmailBlock, options: EmailPreviewOptions): string {
   }
 
   if (block.type === "button") {
-    return `<tr><td style="padding:0 32px 24px;text-align:center;"><a href="${escapeHtml(safeUrl(block.href))}" style="display:inline-block;background-color:#e96527;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;line-height:20px;padding:12px 22px;text-decoration:none;border-radius:6px;">${replaceTemplateTokens(block.label, options, true)}</a></td></tr>`;
+    const buttonColor = normalizeButtonColor(options.buttonColor);
+    const buttonTextColor = readableButtonTextColor(buttonColor);
+    return `<tr><td style="padding:0 32px 24px;text-align:center;"><a href="${escapeHtml(safeUrl(block.href))}" style="display:inline-block;background-color:${buttonColor};color:${buttonTextColor};font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;line-height:20px;padding:12px 22px;text-decoration:none;border-radius:6px;">${replaceTemplateTokens(block.label, options, true)}</a></td></tr>`;
   }
 
   return '<tr><td style="padding:0 32px 24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid #e5ddd0;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>';
@@ -177,7 +218,7 @@ export function renderEmailHtml(
     : "";
   const body = blocks.map((block) => renderBlock(block, options)).join("");
 
-  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AmoConecta</title></head><body style="margin:0;padding:0;background-color:#f4f0e9;">${hiddenPreheader}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#f4f0e9;"><tr><td align="center" style="padding:24px 12px;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#fffdf9;"><tr><td style="padding:30px 32px 24px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase;color:#247b79;">AmoConecta</td></tr>${body}<tr><td style="padding:20px 32px 28px;border-top:1px solid #e5ddd0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#777984;text-align:center;">${reason}<br><a href="${escapeHtml(unsubscribeUrl)}" style="color:#247b79;text-decoration:underline;">Descadastrar-se</a></td></tr></table></td></tr></table></body></html>`;
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Amo Ofertas</title></head><body style="margin:0;padding:0;background-color:#f4f0e9;">${hiddenPreheader}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#f4f0e9;"><tr><td align="center" style="padding:24px 12px;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#fffdf9;"><tr><td style="padding:30px 32px 24px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase;color:#247b79;">Amo Ofertas</td></tr>${body}<tr><td style="padding:20px 32px 28px;border-top:1px solid #e5ddd0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#777984;text-align:center;">${reason}<br><a href="${escapeHtml(unsubscribeUrl)}" style="color:#247b79;text-decoration:underline;">Descadastrar-se</a></td></tr></table></td></tr></table></body></html>`;
 }
 
 function htmlToPlainText(value: string): string {
@@ -305,32 +346,19 @@ export function validateEmailButtonDestinations(
       }];
     }
 
-    const URLConstructor = (
-      globalThis as unknown as {
-        URL: new (value: string) => { protocol: string; hostname: string };
-      }
-    ).URL;
-    let url: { protocol: string; hostname: string };
-    try {
-      url = new URLConstructor(href);
-    } catch {
+    if (!isStrictHttpsUrl(href)) {
       return [{
         blockId,
         index,
         kind: "invalid",
-        message: `O ${identity} precisa de uma URL válida começando com http:// ou https://.`,
+        message: `O ${identity} precisa de uma URL válida e segura começando com https://.`,
       }];
     }
 
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return [{
-        blockId,
-        index,
-        kind: "invalid",
-        message: `O ${identity} precisa de uma URL válida começando com http:// ou https://.`,
-      }];
-    }
-
+    const URLConstructor = (globalThis as unknown as {
+      URL: new (value: string) => { hostname: string };
+    }).URL;
+    const url = new URLConstructor(href);
     const hostname = url.hostname.toLowerCase().replace(/\.$/u, "");
     const testHost = TEST_BUTTON_HOSTS.find(
       (host) => hostname === host || hostname.endsWith(`.${host}`),
@@ -346,6 +374,49 @@ export function validateEmailButtonDestinations(
 
     return [];
   });
+}
+
+/**
+ * Checks URL-bearing block fields without changing the supplied blocks.
+ * Bare hostnames receive a suggestion, but callers must explicitly confirm
+ * and apply it.
+ */
+export function validateEmailBlockUrls(value: unknown): EmailBlockUrlIssue[] {
+  if (!Array.isArray(value)) return [];
+
+  const issues: EmailBlockUrlIssue[] = [];
+  const addIssue = (block: Record<string, unknown>, index: number, field: string, value: unknown) => {
+    if (isStrictHttpsUrl(value)) return;
+    const blockId = typeof block.id === "string" && block.id ? block.id : `block-${index}`;
+    const suggestion = getHttpsUrlSuggestion(value);
+    issues.push({
+      blockId,
+      index,
+      field,
+      message: `O campo ${field} precisa de uma URL válida e segura começando com https://.`,
+      ...(suggestion ? { suggestion } : {}),
+    });
+  };
+
+  value.forEach((candidate, arrayIndex) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return;
+    const block = candidate as Record<string, unknown>;
+    const index = arrayIndex + 1;
+    if (block.type === "button") {
+      addIssue(block, index, "href", block.href);
+    } else if (block.type === "image") {
+      addIssue(block, index, "src", block.src);
+      if (typeof block.href === "string") addIssue(block, index, "href", block.href);
+    } else if (block.type === "text" && typeof block.html === "string") {
+      const anchorPattern = /<\s*a\b([^>]*)>/giu;
+      let match: RegExpExecArray | null;
+      while ((match = anchorPattern.exec(block.html)) !== null) {
+        const href = readAttribute(match[1], "href");
+        addIssue(block, index, "html.href", href);
+      }
+    }
+  });
+  return issues;
 }
 
 export function isEmailBlockType(value: unknown): value is EmailBlockType {

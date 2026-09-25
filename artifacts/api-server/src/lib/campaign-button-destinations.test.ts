@@ -30,25 +30,28 @@ test("normalization preserves an empty href so scheduling can report it as missi
   assert.deepEqual(validateEmailButtonDestinations(blocks).map(({ kind }) => kind), ["missing"]);
 });
 
-test("accepts real HTTP and HTTPS destinations and rejects invalid protocols", () => {
-  assert.deepEqual(validateEmailButtonDestinations([
+test("accepts only HTTPS destinations and rejects insecure protocols", () => {
+  const issues = validateEmailButtonDestinations([
     { id: "https", type: "button", label: "HTTPS", href: "https://shop.amo.delivery/oferta" },
     { id: "http", type: "button", label: "HTTP", href: "http://shop.amo.delivery/oferta" },
-  ]), []);
+  ]);
+  assert.deepEqual(issues.map(({ blockId, kind }) => ({ blockId, kind })), [
+    { blockId: "http", kind: "invalid" },
+  ]);
 
   const [issue] = validateEmailButtonDestinations([
     { id: "ftp", type: "button", label: "FTP", href: "ftp://shop.amo.delivery/oferta" },
   ]);
   assert.equal(issue.kind, "invalid");
-  assert.match(issue.message, /botão 1.*http:\/\/ ou https:\/\//u);
+  assert.match(issue.message, /botão 1.*https:\/\//u);
 });
 
 test("rejects example domains, their subdomains, and localhost including ports", () => {
   const issues = validateEmailButtonDestinations([
     { id: "example-com", type: "button", label: "A", href: "https://example.com/oferta" },
     { id: "sub-example-com", type: "button", label: "B", href: "https://mail.example.com/oferta" },
-    { id: "example-org", type: "button", label: "C", href: "http://example.org/" },
-    { id: "localhost", type: "button", label: "D", href: "http://localhost:3000/" },
+    { id: "example-org", type: "button", label: "C", href: "https://example.org/" },
+    { id: "localhost", type: "button", label: "D", href: "https://localhost:3000/" },
   ]);
 
   assert.deepEqual(issues.map(({ kind }) => kind), [

@@ -62,6 +62,8 @@ test("keeps Gmail aliases distinct for recipient and suppression counts", () => 
       permitidos_modo_teste: 1,
       bloqueados_modo_teste: 0,
       receberao_de_fato: 1,
+      desengajados_na_lista: 0,
+      bloqueados_desengajados: 0,
     });
   });
 });

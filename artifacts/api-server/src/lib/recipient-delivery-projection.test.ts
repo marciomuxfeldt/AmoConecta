@@ -14,6 +14,8 @@ test("projects suppressed recipients before the worker processes them", () => {
     permitidos_modo_teste: 0,
     bloqueados_modo_teste: 11,
     receberao_de_fato: 0,
+    desengajados_na_lista: 0,
+    bloqueados_desengajados: 0,
   });
 });
 
@@ -29,6 +31,8 @@ test("normalizes recipient and suppression e-mails before crossing the lists", (
       permitidos_modo_teste: 0,
       bloqueados_modo_teste: 0,
       receberao_de_fato: 0,
+      desengajados_na_lista: 0,
+      bloqueados_desengajados: 0,
     },
   );
 });

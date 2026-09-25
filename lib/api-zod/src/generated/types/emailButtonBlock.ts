@@ -16,5 +16,6 @@ export interface EmailButtonBlock {
      * @maxLength 120
      */
   label: string;
+  /** @pattern ^https:// */
   href: string;
 }

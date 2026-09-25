@@ -61,6 +61,9 @@ export const getCampaignDefaultsResponseTetoHoraMin = 0;
 
 export const getCampaignDefaultsResponseTetoDiaMin = 0;
 
+export const getCampaignDefaultsResponseCorBotaoEmailRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
+export const getCampaignDefaultsResponseDesengajadosTotalMin = 0;
+
 
 
 export const GetCampaignDefaultsResponse = zod.object({
@@ -68,8 +71,155 @@ export const GetCampaignDefaultsResponse = zod.object({
   "remetente_nome": zod.string(),
   "reply_to": zod.string().email().nullable(),
   "teto_hora": zod.number().int().min(getCampaignDefaultsResponseTetoHoraMin),
-  "teto_dia": zod.number().int().min(getCampaignDefaultsResponseTetoDiaMin)
+  "teto_dia": zod.number().int().min(getCampaignDefaultsResponseTetoDiaMin),
+  "cor_botao_email": zod.string().regex(getCampaignDefaultsResponseCorBotaoEmailRegExp),
+  "desengajados_total": zod.number().int().min(getCampaignDefaultsResponseDesengajadosTotalMin)
 })
+
+
+/**
+ * @summary Retorna a identidade visual dos e-mails
+ */
+export const getEmailBrandingResponseCorBotaoEmailRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
+
+
+export const GetEmailBrandingResponse = zod.object({
+  "cor_botao_email": zod.string().regex(getEmailBrandingResponseCorBotaoEmailRegExp),
+  "atualizado_em": zod.coerce.date()
+})
+
+
+/**
+ * @summary Atualiza a cor global dos botões de e-mail
+ */
+export const updateEmailBrandingBodyCorBotaoEmailRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
+
+
+export const UpdateEmailBrandingBody = zod.object({
+  "cor_botao_email": zod.string().regex(updateEmailBrandingBodyCorBotaoEmailRegExp)
+})
+
+export const updateEmailBrandingResponseCorBotaoEmailRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
+
+
+export const UpdateEmailBrandingResponse = zod.object({
+  "cor_botao_email": zod.string().regex(updateEmailBrandingResponseCorBotaoEmailRegExp),
+  "atualizado_em": zod.coerce.date()
+})
+
+
+/**
+ * @summary Retorna a quantidade atual de contatos desengajados
+ */
+export const getEngagementSummaryResponseDesengajadosTotalMin = 0;
+
+
+
+export const GetEngagementSummaryResponse = zod.object({
+  "desengajados_total": zod.number().int().min(getEngagementSummaryResponseDesengajadosTotalMin),
+  "calculado_em": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Lista exportações BI recentes
+ */
+export const listBiExportsResponseJobsItemTotalLinhasMin = 0;
+
+export const listBiExportsResponseJobsItemLinhasProcessadasMin = 0;
+
+
+
+export const ListBiExportsResponse = zod.object({
+  "jobs": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid().nullable(),
+  "filtro": zod.enum(['todos', 'clicaram', 'abriram_sem_clicar', 'nao_abriram', 'bounce_ou_reclamacao']),
+  "periodo_inicio": zod.coerce.date().nullable(),
+  "periodo_fim": zod.coerce.date().nullable(),
+  "status": zod.enum(['pendente', 'processando', 'concluida', 'erro', 'expirada']),
+  "total_linhas": zod.number().int().min(listBiExportsResponseJobsItemTotalLinhasMin).nullable(),
+  "linhas_processadas": zod.number().int().min(listBiExportsResponseJobsItemLinhasProcessadasMin),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable(),
+  "expira_em": zod.coerce.date().nullable(),
+  "erro": zod.string().nullable(),
+  "disponivel_para_download": zod.boolean()
+}))
+})
+
+
+/**
+ * @summary Solicita uma exportação BI assíncrona
+ */
+export const CreateBiExportBody = zod.object({
+  "campanha_id": zod.string().uuid().nullable(),
+  "periodo_inicio": zod.coerce.date().nullable(),
+  "periodo_fim": zod.coerce.date().nullable(),
+  "filtro": zod.enum(['todos', 'clicaram', 'abriram_sem_clicar', 'nao_abriram', 'bounce_ou_reclamacao'])
+})
+
+export const createBiExportResponseTotalLinhasMin = 0;
+
+export const createBiExportResponseLinhasProcessadasMin = 0;
+
+
+
+export const CreateBiExportResponse = zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid().nullable(),
+  "filtro": zod.enum(['todos', 'clicaram', 'abriram_sem_clicar', 'nao_abriram', 'bounce_ou_reclamacao']),
+  "periodo_inicio": zod.coerce.date().nullable(),
+  "periodo_fim": zod.coerce.date().nullable(),
+  "status": zod.enum(['pendente', 'processando', 'concluida', 'erro', 'expirada']),
+  "total_linhas": zod.number().int().min(createBiExportResponseTotalLinhasMin).nullable(),
+  "linhas_processadas": zod.number().int().min(createBiExportResponseLinhasProcessadasMin),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable(),
+  "expira_em": zod.coerce.date().nullable(),
+  "erro": zod.string().nullable(),
+  "disponivel_para_download": zod.boolean()
+})
+
+
+/**
+ * @summary Consulta o andamento de uma exportação
+ */
+export const GetBiExportParams = zod.object({
+  "exportId": zod.coerce.string().uuid()
+})
+
+export const getBiExportResponseTotalLinhasMin = 0;
+
+export const getBiExportResponseLinhasProcessadasMin = 0;
+
+
+
+export const GetBiExportResponse = zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid().nullable(),
+  "filtro": zod.enum(['todos', 'clicaram', 'abriram_sem_clicar', 'nao_abriram', 'bounce_ou_reclamacao']),
+  "periodo_inicio": zod.coerce.date().nullable(),
+  "periodo_fim": zod.coerce.date().nullable(),
+  "status": zod.enum(['pendente', 'processando', 'concluida', 'erro', 'expirada']),
+  "total_linhas": zod.number().int().min(getBiExportResponseTotalLinhasMin).nullable(),
+  "linhas_processadas": zod.number().int().min(getBiExportResponseLinhasProcessadasMin),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable(),
+  "expira_em": zod.coerce.date().nullable(),
+  "erro": zod.string().nullable(),
+  "disponivel_para_download": zod.boolean()
+})
+
+
+/**
+ * @summary Baixa o arquivo CSV gerado
+ */
+export const DownloadBiExportParams = zod.object({
+  "exportId": zod.coerce.string().uuid()
+})
+
+export const DownloadBiExportResponse = zod.unknown()
 
 
 /**
@@ -140,6 +290,17 @@ export const ListCampaignsResponse = zod.array(ListCampaignsResponseItem)
 export const createCampaignBodyPreheaderMax = 100;
 
 
+
+export const createCampaignBodyCorpoLembreteItemTwoSrcRegExp = new RegExp('^https:/');
+export const createCampaignBodyCorpoLembreteItemTwoAltMax = 160;
+
+export const createCampaignBodyCorpoLembreteItemTwoHrefRegExp = new RegExp('^https:/');
+
+export const createCampaignBodyCorpoLembreteItemThreeLabelMax = 120;
+
+export const createCampaignBodyCorpoLembreteItemThreeHrefRegExp = new RegExp('^https:/');
+
+
 export const createCampaignBodyTetoHoraMin = 0;
 
 export const createCampaignBodyTetoDiaMin = 0;
@@ -149,11 +310,14 @@ export const createCampaignBodyLembreteHorasMax = 168;
 
 
 
+export const createCampaignBodyCorpoItemTwoSrcRegExp = new RegExp('^https:/');
 export const createCampaignBodyCorpoItemTwoAltMax = 160;
 
+export const createCampaignBodyCorpoItemTwoHrefRegExp = new RegExp('^https:/');
 
 export const createCampaignBodyCorpoItemThreeLabelMax = 120;
 
+export const createCampaignBodyCorpoItemThreeHrefRegExp = new RegExp('^https:/');
 
 
 
@@ -162,6 +326,25 @@ export const CreateCampaignBody = zod.object({
   "assunto": zod.string().min(1),
   "preheader": zod.string().max(createCampaignBodyPreheaderMax).nullish(),
   "assunto_lembrete": zod.string().nullish(),
+  "corpo_lembrete": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url().regex(createCampaignBodyCorpoLembreteItemTwoSrcRegExp),
+  "alt": zod.string().max(createCampaignBodyCorpoLembreteItemTwoAltMax),
+  "href": zod.string().url().regex(createCampaignBodyCorpoLembreteItemTwoHrefRegExp).nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(createCampaignBodyCorpoLembreteItemThreeLabelMax),
+  "href": zod.string().url().regex(createCampaignBodyCorpoLembreteItemThreeHrefRegExp)
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).nullish(),
   "remetente_nome": zod.string().min(1),
   "remetente_email": zod.string().email(),
   "reply_to": zod.string().email().nullish(),
@@ -170,8 +353,8 @@ export const CreateCampaignBody = zod.object({
   "teto_hora": zod.number().int().min(createCampaignBodyTetoHoraMin).optional(),
   "teto_dia": zod.number().int().min(createCampaignBodyTetoDiaMin).optional(),
   "agendada_para": zod.coerce.date().nullish(),
-  "lembrete_ativo": zod.boolean().optional(),
   "lembrete_horas": zod.number().int().min(createCampaignBodyLembreteHorasMin).max(createCampaignBodyLembreteHorasMax).optional(),
+  "incluir_desengajados": zod.boolean().optional(),
   "corpo": zod.array(zod.union([zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['text']),
@@ -179,14 +362,14 @@ export const CreateCampaignBody = zod.object({
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['image']),
-  "src": zod.string().url(),
+  "src": zod.string().url().regex(createCampaignBodyCorpoItemTwoSrcRegExp),
   "alt": zod.string().max(createCampaignBodyCorpoItemTwoAltMax),
-  "href": zod.string().url().nullish()
+  "href": zod.string().url().regex(createCampaignBodyCorpoItemTwoHrefRegExp).nullish()
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['button']),
   "label": zod.string().min(1).max(createCampaignBodyCorpoItemThreeLabelMax),
-  "href": zod.string().url()
+  "href": zod.string().url().regex(createCampaignBodyCorpoItemThreeHrefRegExp)
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
@@ -195,6 +378,18 @@ export const CreateCampaignBody = zod.object({
 
 export const createCampaignResponsePreheaderMax = 100;
 
+
+
+export const createCampaignResponseCorpoLembreteItemTwoSrcRegExp = new RegExp('^https:/');
+export const createCampaignResponseCorpoLembreteItemTwoAltMax = 160;
+
+export const createCampaignResponseCorpoLembreteItemTwoHrefRegExp = new RegExp('^https:/');
+
+export const createCampaignResponseCorpoLembreteItemThreeLabelMax = 120;
+
+export const createCampaignResponseCorpoLembreteItemThreeHrefRegExp = new RegExp('^https:/');
+
+export const createCampaignResponseCorBotaoSnapshotRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
 export const createCampaignResponseTetoHoraMin = 0;
 
 export const createCampaignResponseTetoDiaMin = 0;
@@ -203,14 +398,19 @@ export const createCampaignResponseEnviadosHoraMin = 0;
 
 export const createCampaignResponseEnviadosDiaMin = 0;
 
+export const createCampaignResponseLembreteHorasMin = 24;
+export const createCampaignResponseLembreteHorasMax = 168;
 
 
 
+export const createCampaignResponseCorpoItemTwoSrcRegExp = new RegExp('^https:/');
 export const createCampaignResponseCorpoItemTwoAltMax = 160;
 
+export const createCampaignResponseCorpoItemTwoHrefRegExp = new RegExp('^https:/');
 
 export const createCampaignResponseCorpoItemThreeLabelMax = 120;
 
+export const createCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https:/');
 
 
 
@@ -220,6 +420,27 @@ export const CreateCampaignResponse = zod.object({
   "assunto": zod.string(),
   "preheader": zod.string().max(createCampaignResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
+  "corpo_lembrete": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url().regex(createCampaignResponseCorpoLembreteItemTwoSrcRegExp),
+  "alt": zod.string().max(createCampaignResponseCorpoLembreteItemTwoAltMax),
+  "href": zod.string().url().regex(createCampaignResponseCorpoLembreteItemTwoHrefRegExp).nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(createCampaignResponseCorpoLembreteItemThreeLabelMax),
+  "href": zod.string().url().regex(createCampaignResponseCorpoLembreteItemThreeHrefRegExp)
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).nullable(),
+  "cor_botao_snapshot": zod.string().regex(createCampaignResponseCorBotaoSnapshotRegExp),
+  "incluir_desengajados": zod.boolean(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
   "reply_to": zod.string().email().nullable(),
@@ -235,8 +456,7 @@ export const CreateCampaignResponse = zod.object({
   "enviados_dia": zod.number().int().min(createCampaignResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida', 'cancelada']),
   "agendada_para": zod.coerce.date().nullable(),
-  "lembrete_ativo": zod.boolean(),
-  "lembrete_horas": zod.number().int().min(1),
+  "lembrete_horas": zod.number().int().min(createCampaignResponseLembreteHorasMin).max(createCampaignResponseLembreteHorasMax),
   "teste_enviado": zod.boolean(),
   "teste_enviado_em": zod.coerce.date().nullable(),
   "corpo": zod.array(zod.union([zod.object({
@@ -246,14 +466,14 @@ export const CreateCampaignResponse = zod.object({
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['image']),
-  "src": zod.string().url(),
+  "src": zod.string().url().regex(createCampaignResponseCorpoItemTwoSrcRegExp),
   "alt": zod.string().max(createCampaignResponseCorpoItemTwoAltMax),
-  "href": zod.string().url().nullish()
+  "href": zod.string().url().regex(createCampaignResponseCorpoItemTwoHrefRegExp).nullish()
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['button']),
   "label": zod.string().min(1).max(createCampaignResponseCorpoItemThreeLabelMax),
-  "href": zod.string().url()
+  "href": zod.string().url().regex(createCampaignResponseCorpoItemThreeHrefRegExp)
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
@@ -271,6 +491,18 @@ export const CreateCampaignDraftBody = zod.object({
 
 export const createCampaignDraftResponsePreheaderMax = 100;
 
+
+
+export const createCampaignDraftResponseCorpoLembreteItemTwoSrcRegExp = new RegExp('^https:/');
+export const createCampaignDraftResponseCorpoLembreteItemTwoAltMax = 160;
+
+export const createCampaignDraftResponseCorpoLembreteItemTwoHrefRegExp = new RegExp('^https:/');
+
+export const createCampaignDraftResponseCorpoLembreteItemThreeLabelMax = 120;
+
+export const createCampaignDraftResponseCorpoLembreteItemThreeHrefRegExp = new RegExp('^https:/');
+
+export const createCampaignDraftResponseCorBotaoSnapshotRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
 export const createCampaignDraftResponseTetoHoraMin = 0;
 
 export const createCampaignDraftResponseTetoDiaMin = 0;
@@ -279,14 +511,19 @@ export const createCampaignDraftResponseEnviadosHoraMin = 0;
 
 export const createCampaignDraftResponseEnviadosDiaMin = 0;
 
+export const createCampaignDraftResponseLembreteHorasMin = 24;
+export const createCampaignDraftResponseLembreteHorasMax = 168;
 
 
 
+export const createCampaignDraftResponseCorpoItemTwoSrcRegExp = new RegExp('^https:/');
 export const createCampaignDraftResponseCorpoItemTwoAltMax = 160;
 
+export const createCampaignDraftResponseCorpoItemTwoHrefRegExp = new RegExp('^https:/');
 
 export const createCampaignDraftResponseCorpoItemThreeLabelMax = 120;
 
+export const createCampaignDraftResponseCorpoItemThreeHrefRegExp = new RegExp('^https:/');
 
 
 
@@ -296,6 +533,27 @@ export const CreateCampaignDraftResponse = zod.object({
   "assunto": zod.string(),
   "preheader": zod.string().max(createCampaignDraftResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
+  "corpo_lembrete": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url().regex(createCampaignDraftResponseCorpoLembreteItemTwoSrcRegExp),
+  "alt": zod.string().max(createCampaignDraftResponseCorpoLembreteItemTwoAltMax),
+  "href": zod.string().url().regex(createCampaignDraftResponseCorpoLembreteItemTwoHrefRegExp).nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(createCampaignDraftResponseCorpoLembreteItemThreeLabelMax),
+  "href": zod.string().url().regex(createCampaignDraftResponseCorpoLembreteItemThreeHrefRegExp)
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).nullable(),
+  "cor_botao_snapshot": zod.string().regex(createCampaignDraftResponseCorBotaoSnapshotRegExp),
+  "incluir_desengajados": zod.boolean(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
   "reply_to": zod.string().email().nullable(),
@@ -311,8 +569,7 @@ export const CreateCampaignDraftResponse = zod.object({
   "enviados_dia": zod.number().int().min(createCampaignDraftResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida', 'cancelada']),
   "agendada_para": zod.coerce.date().nullable(),
-  "lembrete_ativo": zod.boolean(),
-  "lembrete_horas": zod.number().int().min(1),
+  "lembrete_horas": zod.number().int().min(createCampaignDraftResponseLembreteHorasMin).max(createCampaignDraftResponseLembreteHorasMax),
   "teste_enviado": zod.boolean(),
   "teste_enviado_em": zod.coerce.date().nullable(),
   "corpo": zod.array(zod.union([zod.object({
@@ -322,14 +579,14 @@ export const CreateCampaignDraftResponse = zod.object({
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['image']),
-  "src": zod.string().url(),
+  "src": zod.string().url().regex(createCampaignDraftResponseCorpoItemTwoSrcRegExp),
   "alt": zod.string().max(createCampaignDraftResponseCorpoItemTwoAltMax),
-  "href": zod.string().url().nullish()
+  "href": zod.string().url().regex(createCampaignDraftResponseCorpoItemTwoHrefRegExp).nullish()
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['button']),
   "label": zod.string().min(1).max(createCampaignDraftResponseCorpoItemThreeLabelMax),
-  "href": zod.string().url()
+  "href": zod.string().url().regex(createCampaignDraftResponseCorpoItemThreeHrefRegExp)
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
@@ -347,6 +604,18 @@ export const GetCampaignParams = zod.object({
 
 export const getCampaignResponsePreheaderMax = 100;
 
+
+
+export const getCampaignResponseCorpoLembreteItemTwoSrcRegExp = new RegExp('^https:/');
+export const getCampaignResponseCorpoLembreteItemTwoAltMax = 160;
+
+export const getCampaignResponseCorpoLembreteItemTwoHrefRegExp = new RegExp('^https:/');
+
+export const getCampaignResponseCorpoLembreteItemThreeLabelMax = 120;
+
+export const getCampaignResponseCorpoLembreteItemThreeHrefRegExp = new RegExp('^https:/');
+
+export const getCampaignResponseCorBotaoSnapshotRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
 export const getCampaignResponseTetoHoraMin = 0;
 
 export const getCampaignResponseTetoDiaMin = 0;
@@ -355,14 +624,19 @@ export const getCampaignResponseEnviadosHoraMin = 0;
 
 export const getCampaignResponseEnviadosDiaMin = 0;
 
+export const getCampaignResponseLembreteHorasMin = 24;
+export const getCampaignResponseLembreteHorasMax = 168;
 
 
 
+export const getCampaignResponseCorpoItemTwoSrcRegExp = new RegExp('^https:/');
 export const getCampaignResponseCorpoItemTwoAltMax = 160;
 
+export const getCampaignResponseCorpoItemTwoHrefRegExp = new RegExp('^https:/');
 
 export const getCampaignResponseCorpoItemThreeLabelMax = 120;
 
+export const getCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https:/');
 
 
 
@@ -372,6 +646,27 @@ export const GetCampaignResponse = zod.object({
   "assunto": zod.string(),
   "preheader": zod.string().max(getCampaignResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
+  "corpo_lembrete": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url().regex(getCampaignResponseCorpoLembreteItemTwoSrcRegExp),
+  "alt": zod.string().max(getCampaignResponseCorpoLembreteItemTwoAltMax),
+  "href": zod.string().url().regex(getCampaignResponseCorpoLembreteItemTwoHrefRegExp).nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(getCampaignResponseCorpoLembreteItemThreeLabelMax),
+  "href": zod.string().url().regex(getCampaignResponseCorpoLembreteItemThreeHrefRegExp)
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).nullable(),
+  "cor_botao_snapshot": zod.string().regex(getCampaignResponseCorBotaoSnapshotRegExp),
+  "incluir_desengajados": zod.boolean(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
   "reply_to": zod.string().email().nullable(),
@@ -387,8 +682,7 @@ export const GetCampaignResponse = zod.object({
   "enviados_dia": zod.number().int().min(getCampaignResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida', 'cancelada']),
   "agendada_para": zod.coerce.date().nullable(),
-  "lembrete_ativo": zod.boolean(),
-  "lembrete_horas": zod.number().int().min(1),
+  "lembrete_horas": zod.number().int().min(getCampaignResponseLembreteHorasMin).max(getCampaignResponseLembreteHorasMax),
   "teste_enviado": zod.boolean(),
   "teste_enviado_em": zod.coerce.date().nullable(),
   "corpo": zod.array(zod.union([zod.object({
@@ -398,14 +692,14 @@ export const GetCampaignResponse = zod.object({
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['image']),
-  "src": zod.string().url(),
+  "src": zod.string().url().regex(getCampaignResponseCorpoItemTwoSrcRegExp),
   "alt": zod.string().max(getCampaignResponseCorpoItemTwoAltMax),
-  "href": zod.string().url().nullish()
+  "href": zod.string().url().regex(getCampaignResponseCorpoItemTwoHrefRegExp).nullish()
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['button']),
   "label": zod.string().min(1).max(getCampaignResponseCorpoItemThreeLabelMax),
-  "href": zod.string().url()
+  "href": zod.string().url().regex(getCampaignResponseCorpoItemThreeHrefRegExp)
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
@@ -426,6 +720,17 @@ export const UpdateCampaignParams = zod.object({
 export const updateCampaignBodyPreheaderMax = 100;
 
 
+
+export const updateCampaignBodyCorpoLembreteItemTwoSrcRegExp = new RegExp('^https:/');
+export const updateCampaignBodyCorpoLembreteItemTwoAltMax = 160;
+
+export const updateCampaignBodyCorpoLembreteItemTwoHrefRegExp = new RegExp('^https:/');
+
+export const updateCampaignBodyCorpoLembreteItemThreeLabelMax = 120;
+
+export const updateCampaignBodyCorpoLembreteItemThreeHrefRegExp = new RegExp('^https:/');
+
+
 export const updateCampaignBodyTetoHoraMin = 0;
 
 export const updateCampaignBodyTetoDiaMin = 0;
@@ -435,11 +740,14 @@ export const updateCampaignBodyLembreteHorasMax = 168;
 
 
 
+export const updateCampaignBodyCorpoItemTwoSrcRegExp = new RegExp('^https:/');
 export const updateCampaignBodyCorpoItemTwoAltMax = 160;
 
+export const updateCampaignBodyCorpoItemTwoHrefRegExp = new RegExp('^https:/');
 
 export const updateCampaignBodyCorpoItemThreeLabelMax = 120;
 
+export const updateCampaignBodyCorpoItemThreeHrefRegExp = new RegExp('^https:/');
 
 
 
@@ -448,6 +756,25 @@ export const UpdateCampaignBody = zod.object({
   "assunto": zod.string().min(1).optional(),
   "preheader": zod.string().max(updateCampaignBodyPreheaderMax).nullish(),
   "assunto_lembrete": zod.string().nullish(),
+  "corpo_lembrete": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url().regex(updateCampaignBodyCorpoLembreteItemTwoSrcRegExp),
+  "alt": zod.string().max(updateCampaignBodyCorpoLembreteItemTwoAltMax),
+  "href": zod.string().url().regex(updateCampaignBodyCorpoLembreteItemTwoHrefRegExp).nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(updateCampaignBodyCorpoLembreteItemThreeLabelMax),
+  "href": zod.string().url().regex(updateCampaignBodyCorpoLembreteItemThreeHrefRegExp)
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).nullish(),
   "remetente_nome": zod.string().min(1).optional(),
   "remetente_email": zod.string().email().optional(),
   "reply_to": zod.string().email().nullish(),
@@ -456,8 +783,8 @@ export const UpdateCampaignBody = zod.object({
   "teto_hora": zod.number().int().min(updateCampaignBodyTetoHoraMin).optional(),
   "teto_dia": zod.number().int().min(updateCampaignBodyTetoDiaMin).optional(),
   "agendada_para": zod.coerce.date().nullish(),
-  "lembrete_ativo": zod.boolean().optional(),
   "lembrete_horas": zod.number().int().min(updateCampaignBodyLembreteHorasMin).max(updateCampaignBodyLembreteHorasMax).optional(),
+  "incluir_desengajados": zod.boolean().optional(),
   "corpo": zod.array(zod.union([zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['text']),
@@ -465,14 +792,14 @@ export const UpdateCampaignBody = zod.object({
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['image']),
-  "src": zod.string().url(),
+  "src": zod.string().url().regex(updateCampaignBodyCorpoItemTwoSrcRegExp),
   "alt": zod.string().max(updateCampaignBodyCorpoItemTwoAltMax),
-  "href": zod.string().url().nullish()
+  "href": zod.string().url().regex(updateCampaignBodyCorpoItemTwoHrefRegExp).nullish()
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['button']),
   "label": zod.string().min(1).max(updateCampaignBodyCorpoItemThreeLabelMax),
-  "href": zod.string().url()
+  "href": zod.string().url().regex(updateCampaignBodyCorpoItemThreeHrefRegExp)
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
@@ -481,6 +808,18 @@ export const UpdateCampaignBody = zod.object({
 
 export const updateCampaignResponsePreheaderMax = 100;
 
+
+
+export const updateCampaignResponseCorpoLembreteItemTwoSrcRegExp = new RegExp('^https:/');
+export const updateCampaignResponseCorpoLembreteItemTwoAltMax = 160;
+
+export const updateCampaignResponseCorpoLembreteItemTwoHrefRegExp = new RegExp('^https:/');
+
+export const updateCampaignResponseCorpoLembreteItemThreeLabelMax = 120;
+
+export const updateCampaignResponseCorpoLembreteItemThreeHrefRegExp = new RegExp('^https:/');
+
+export const updateCampaignResponseCorBotaoSnapshotRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
 export const updateCampaignResponseTetoHoraMin = 0;
 
 export const updateCampaignResponseTetoDiaMin = 0;
@@ -489,14 +828,19 @@ export const updateCampaignResponseEnviadosHoraMin = 0;
 
 export const updateCampaignResponseEnviadosDiaMin = 0;
 
+export const updateCampaignResponseLembreteHorasMin = 24;
+export const updateCampaignResponseLembreteHorasMax = 168;
 
 
 
+export const updateCampaignResponseCorpoItemTwoSrcRegExp = new RegExp('^https:/');
 export const updateCampaignResponseCorpoItemTwoAltMax = 160;
 
+export const updateCampaignResponseCorpoItemTwoHrefRegExp = new RegExp('^https:/');
 
 export const updateCampaignResponseCorpoItemThreeLabelMax = 120;
 
+export const updateCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https:/');
 
 
 
@@ -506,6 +850,27 @@ export const UpdateCampaignResponse = zod.object({
   "assunto": zod.string(),
   "preheader": zod.string().max(updateCampaignResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
+  "corpo_lembrete": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url().regex(updateCampaignResponseCorpoLembreteItemTwoSrcRegExp),
+  "alt": zod.string().max(updateCampaignResponseCorpoLembreteItemTwoAltMax),
+  "href": zod.string().url().regex(updateCampaignResponseCorpoLembreteItemTwoHrefRegExp).nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(updateCampaignResponseCorpoLembreteItemThreeLabelMax),
+  "href": zod.string().url().regex(updateCampaignResponseCorpoLembreteItemThreeHrefRegExp)
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).nullable(),
+  "cor_botao_snapshot": zod.string().regex(updateCampaignResponseCorBotaoSnapshotRegExp),
+  "incluir_desengajados": zod.boolean(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
   "reply_to": zod.string().email().nullable(),
@@ -521,8 +886,7 @@ export const UpdateCampaignResponse = zod.object({
   "enviados_dia": zod.number().int().min(updateCampaignResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida', 'cancelada']),
   "agendada_para": zod.coerce.date().nullable(),
-  "lembrete_ativo": zod.boolean(),
-  "lembrete_horas": zod.number().int().min(1),
+  "lembrete_horas": zod.number().int().min(updateCampaignResponseLembreteHorasMin).max(updateCampaignResponseLembreteHorasMax),
   "teste_enviado": zod.boolean(),
   "teste_enviado_em": zod.coerce.date().nullable(),
   "corpo": zod.array(zod.union([zod.object({
@@ -532,14 +896,14 @@ export const UpdateCampaignResponse = zod.object({
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['image']),
-  "src": zod.string().url(),
+  "src": zod.string().url().regex(updateCampaignResponseCorpoItemTwoSrcRegExp),
   "alt": zod.string().max(updateCampaignResponseCorpoItemTwoAltMax),
-  "href": zod.string().url().nullish()
+  "href": zod.string().url().regex(updateCampaignResponseCorpoItemTwoHrefRegExp).nullish()
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['button']),
   "label": zod.string().min(1).max(updateCampaignResponseCorpoItemThreeLabelMax),
-  "href": zod.string().url()
+  "href": zod.string().url().regex(updateCampaignResponseCorpoItemThreeHrefRegExp)
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
@@ -577,6 +941,18 @@ export const ScheduleCampaignBody = zod.object({
 
 export const scheduleCampaignResponsePreheaderMax = 100;
 
+
+
+export const scheduleCampaignResponseCorpoLembreteItemTwoSrcRegExp = new RegExp('^https:/');
+export const scheduleCampaignResponseCorpoLembreteItemTwoAltMax = 160;
+
+export const scheduleCampaignResponseCorpoLembreteItemTwoHrefRegExp = new RegExp('^https:/');
+
+export const scheduleCampaignResponseCorpoLembreteItemThreeLabelMax = 120;
+
+export const scheduleCampaignResponseCorpoLembreteItemThreeHrefRegExp = new RegExp('^https:/');
+
+export const scheduleCampaignResponseCorBotaoSnapshotRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
 export const scheduleCampaignResponseTetoHoraMin = 0;
 
 export const scheduleCampaignResponseTetoDiaMin = 0;
@@ -585,14 +961,19 @@ export const scheduleCampaignResponseEnviadosHoraMin = 0;
 
 export const scheduleCampaignResponseEnviadosDiaMin = 0;
 
+export const scheduleCampaignResponseLembreteHorasMin = 24;
+export const scheduleCampaignResponseLembreteHorasMax = 168;
 
 
 
+export const scheduleCampaignResponseCorpoItemTwoSrcRegExp = new RegExp('^https:/');
 export const scheduleCampaignResponseCorpoItemTwoAltMax = 160;
 
+export const scheduleCampaignResponseCorpoItemTwoHrefRegExp = new RegExp('^https:/');
 
 export const scheduleCampaignResponseCorpoItemThreeLabelMax = 120;
 
+export const scheduleCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https:/');
 
 
 
@@ -602,6 +983,27 @@ export const ScheduleCampaignResponse = zod.object({
   "assunto": zod.string(),
   "preheader": zod.string().max(scheduleCampaignResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
+  "corpo_lembrete": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url().regex(scheduleCampaignResponseCorpoLembreteItemTwoSrcRegExp),
+  "alt": zod.string().max(scheduleCampaignResponseCorpoLembreteItemTwoAltMax),
+  "href": zod.string().url().regex(scheduleCampaignResponseCorpoLembreteItemTwoHrefRegExp).nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(scheduleCampaignResponseCorpoLembreteItemThreeLabelMax),
+  "href": zod.string().url().regex(scheduleCampaignResponseCorpoLembreteItemThreeHrefRegExp)
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).nullable(),
+  "cor_botao_snapshot": zod.string().regex(scheduleCampaignResponseCorBotaoSnapshotRegExp),
+  "incluir_desengajados": zod.boolean(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
   "reply_to": zod.string().email().nullable(),
@@ -617,8 +1019,7 @@ export const ScheduleCampaignResponse = zod.object({
   "enviados_dia": zod.number().int().min(scheduleCampaignResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida', 'cancelada']),
   "agendada_para": zod.coerce.date().nullable(),
-  "lembrete_ativo": zod.boolean(),
-  "lembrete_horas": zod.number().int().min(1),
+  "lembrete_horas": zod.number().int().min(scheduleCampaignResponseLembreteHorasMin).max(scheduleCampaignResponseLembreteHorasMax),
   "teste_enviado": zod.boolean(),
   "teste_enviado_em": zod.coerce.date().nullable(),
   "corpo": zod.array(zod.union([zod.object({
@@ -628,14 +1029,14 @@ export const ScheduleCampaignResponse = zod.object({
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['image']),
-  "src": zod.string().url(),
+  "src": zod.string().url().regex(scheduleCampaignResponseCorpoItemTwoSrcRegExp),
   "alt": zod.string().max(scheduleCampaignResponseCorpoItemTwoAltMax),
-  "href": zod.string().url().nullish()
+  "href": zod.string().url().regex(scheduleCampaignResponseCorpoItemTwoHrefRegExp).nullish()
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['button']),
   "label": zod.string().min(1).max(scheduleCampaignResponseCorpoItemThreeLabelMax),
-  "href": zod.string().url()
+  "href": zod.string().url().regex(scheduleCampaignResponseCorpoItemThreeHrefRegExp)
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
@@ -653,6 +1054,18 @@ export const PauseCampaignParams = zod.object({
 
 export const pauseCampaignResponsePreheaderMax = 100;
 
+
+
+export const pauseCampaignResponseCorpoLembreteItemTwoSrcRegExp = new RegExp('^https:/');
+export const pauseCampaignResponseCorpoLembreteItemTwoAltMax = 160;
+
+export const pauseCampaignResponseCorpoLembreteItemTwoHrefRegExp = new RegExp('^https:/');
+
+export const pauseCampaignResponseCorpoLembreteItemThreeLabelMax = 120;
+
+export const pauseCampaignResponseCorpoLembreteItemThreeHrefRegExp = new RegExp('^https:/');
+
+export const pauseCampaignResponseCorBotaoSnapshotRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
 export const pauseCampaignResponseTetoHoraMin = 0;
 
 export const pauseCampaignResponseTetoDiaMin = 0;
@@ -661,14 +1074,19 @@ export const pauseCampaignResponseEnviadosHoraMin = 0;
 
 export const pauseCampaignResponseEnviadosDiaMin = 0;
 
+export const pauseCampaignResponseLembreteHorasMin = 24;
+export const pauseCampaignResponseLembreteHorasMax = 168;
 
 
 
+export const pauseCampaignResponseCorpoItemTwoSrcRegExp = new RegExp('^https:/');
 export const pauseCampaignResponseCorpoItemTwoAltMax = 160;
 
+export const pauseCampaignResponseCorpoItemTwoHrefRegExp = new RegExp('^https:/');
 
 export const pauseCampaignResponseCorpoItemThreeLabelMax = 120;
 
+export const pauseCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https:/');
 
 
 
@@ -678,6 +1096,27 @@ export const PauseCampaignResponse = zod.object({
   "assunto": zod.string(),
   "preheader": zod.string().max(pauseCampaignResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
+  "corpo_lembrete": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url().regex(pauseCampaignResponseCorpoLembreteItemTwoSrcRegExp),
+  "alt": zod.string().max(pauseCampaignResponseCorpoLembreteItemTwoAltMax),
+  "href": zod.string().url().regex(pauseCampaignResponseCorpoLembreteItemTwoHrefRegExp).nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(pauseCampaignResponseCorpoLembreteItemThreeLabelMax),
+  "href": zod.string().url().regex(pauseCampaignResponseCorpoLembreteItemThreeHrefRegExp)
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).nullable(),
+  "cor_botao_snapshot": zod.string().regex(pauseCampaignResponseCorBotaoSnapshotRegExp),
+  "incluir_desengajados": zod.boolean(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
   "reply_to": zod.string().email().nullable(),
@@ -693,8 +1132,7 @@ export const PauseCampaignResponse = zod.object({
   "enviados_dia": zod.number().int().min(pauseCampaignResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida', 'cancelada']),
   "agendada_para": zod.coerce.date().nullable(),
-  "lembrete_ativo": zod.boolean(),
-  "lembrete_horas": zod.number().int().min(1),
+  "lembrete_horas": zod.number().int().min(pauseCampaignResponseLembreteHorasMin).max(pauseCampaignResponseLembreteHorasMax),
   "teste_enviado": zod.boolean(),
   "teste_enviado_em": zod.coerce.date().nullable(),
   "corpo": zod.array(zod.union([zod.object({
@@ -704,14 +1142,14 @@ export const PauseCampaignResponse = zod.object({
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['image']),
-  "src": zod.string().url(),
+  "src": zod.string().url().regex(pauseCampaignResponseCorpoItemTwoSrcRegExp),
   "alt": zod.string().max(pauseCampaignResponseCorpoItemTwoAltMax),
-  "href": zod.string().url().nullish()
+  "href": zod.string().url().regex(pauseCampaignResponseCorpoItemTwoHrefRegExp).nullish()
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['button']),
   "label": zod.string().min(1).max(pauseCampaignResponseCorpoItemThreeLabelMax),
-  "href": zod.string().url()
+  "href": zod.string().url().regex(pauseCampaignResponseCorpoItemThreeHrefRegExp)
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
@@ -733,6 +1171,18 @@ export const ResumeCampaignBody = zod.object({
 
 export const resumeCampaignResponsePreheaderMax = 100;
 
+
+
+export const resumeCampaignResponseCorpoLembreteItemTwoSrcRegExp = new RegExp('^https:/');
+export const resumeCampaignResponseCorpoLembreteItemTwoAltMax = 160;
+
+export const resumeCampaignResponseCorpoLembreteItemTwoHrefRegExp = new RegExp('^https:/');
+
+export const resumeCampaignResponseCorpoLembreteItemThreeLabelMax = 120;
+
+export const resumeCampaignResponseCorpoLembreteItemThreeHrefRegExp = new RegExp('^https:/');
+
+export const resumeCampaignResponseCorBotaoSnapshotRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
 export const resumeCampaignResponseTetoHoraMin = 0;
 
 export const resumeCampaignResponseTetoDiaMin = 0;
@@ -741,14 +1191,19 @@ export const resumeCampaignResponseEnviadosHoraMin = 0;
 
 export const resumeCampaignResponseEnviadosDiaMin = 0;
 
+export const resumeCampaignResponseLembreteHorasMin = 24;
+export const resumeCampaignResponseLembreteHorasMax = 168;
 
 
 
+export const resumeCampaignResponseCorpoItemTwoSrcRegExp = new RegExp('^https:/');
 export const resumeCampaignResponseCorpoItemTwoAltMax = 160;
 
+export const resumeCampaignResponseCorpoItemTwoHrefRegExp = new RegExp('^https:/');
 
 export const resumeCampaignResponseCorpoItemThreeLabelMax = 120;
 
+export const resumeCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https:/');
 
 
 
@@ -758,6 +1213,27 @@ export const ResumeCampaignResponse = zod.object({
   "assunto": zod.string(),
   "preheader": zod.string().max(resumeCampaignResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
+  "corpo_lembrete": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url().regex(resumeCampaignResponseCorpoLembreteItemTwoSrcRegExp),
+  "alt": zod.string().max(resumeCampaignResponseCorpoLembreteItemTwoAltMax),
+  "href": zod.string().url().regex(resumeCampaignResponseCorpoLembreteItemTwoHrefRegExp).nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(resumeCampaignResponseCorpoLembreteItemThreeLabelMax),
+  "href": zod.string().url().regex(resumeCampaignResponseCorpoLembreteItemThreeHrefRegExp)
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).nullable(),
+  "cor_botao_snapshot": zod.string().regex(resumeCampaignResponseCorBotaoSnapshotRegExp),
+  "incluir_desengajados": zod.boolean(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
   "reply_to": zod.string().email().nullable(),
@@ -773,8 +1249,7 @@ export const ResumeCampaignResponse = zod.object({
   "enviados_dia": zod.number().int().min(resumeCampaignResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida', 'cancelada']),
   "agendada_para": zod.coerce.date().nullable(),
-  "lembrete_ativo": zod.boolean(),
-  "lembrete_horas": zod.number().int().min(1),
+  "lembrete_horas": zod.number().int().min(resumeCampaignResponseLembreteHorasMin).max(resumeCampaignResponseLembreteHorasMax),
   "teste_enviado": zod.boolean(),
   "teste_enviado_em": zod.coerce.date().nullable(),
   "corpo": zod.array(zod.union([zod.object({
@@ -784,14 +1259,14 @@ export const ResumeCampaignResponse = zod.object({
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['image']),
-  "src": zod.string().url(),
+  "src": zod.string().url().regex(resumeCampaignResponseCorpoItemTwoSrcRegExp),
   "alt": zod.string().max(resumeCampaignResponseCorpoItemTwoAltMax),
-  "href": zod.string().url().nullish()
+  "href": zod.string().url().regex(resumeCampaignResponseCorpoItemTwoHrefRegExp).nullish()
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['button']),
   "label": zod.string().min(1).max(resumeCampaignResponseCorpoItemThreeLabelMax),
-  "href": zod.string().url()
+  "href": zod.string().url().regex(resumeCampaignResponseCorpoItemThreeHrefRegExp)
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
@@ -809,6 +1284,18 @@ export const CancelCampaignParams = zod.object({
 
 export const cancelCampaignResponsePreheaderMax = 100;
 
+
+
+export const cancelCampaignResponseCorpoLembreteItemTwoSrcRegExp = new RegExp('^https:/');
+export const cancelCampaignResponseCorpoLembreteItemTwoAltMax = 160;
+
+export const cancelCampaignResponseCorpoLembreteItemTwoHrefRegExp = new RegExp('^https:/');
+
+export const cancelCampaignResponseCorpoLembreteItemThreeLabelMax = 120;
+
+export const cancelCampaignResponseCorpoLembreteItemThreeHrefRegExp = new RegExp('^https:/');
+
+export const cancelCampaignResponseCorBotaoSnapshotRegExp = new RegExp('^#[0-9a-fA-F]{6}$');
 export const cancelCampaignResponseTetoHoraMin = 0;
 
 export const cancelCampaignResponseTetoDiaMin = 0;
@@ -817,14 +1304,19 @@ export const cancelCampaignResponseEnviadosHoraMin = 0;
 
 export const cancelCampaignResponseEnviadosDiaMin = 0;
 
+export const cancelCampaignResponseLembreteHorasMin = 24;
+export const cancelCampaignResponseLembreteHorasMax = 168;
 
 
 
+export const cancelCampaignResponseCorpoItemTwoSrcRegExp = new RegExp('^https:/');
 export const cancelCampaignResponseCorpoItemTwoAltMax = 160;
 
+export const cancelCampaignResponseCorpoItemTwoHrefRegExp = new RegExp('^https:/');
 
 export const cancelCampaignResponseCorpoItemThreeLabelMax = 120;
 
+export const cancelCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https:/');
 
 
 
@@ -834,6 +1326,27 @@ export const CancelCampaignResponse = zod.object({
   "assunto": zod.string(),
   "preheader": zod.string().max(cancelCampaignResponsePreheaderMax).nullable(),
   "assunto_lembrete": zod.string().nullable(),
+  "corpo_lembrete": zod.array(zod.union([zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['text']),
+  "html": zod.string()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['image']),
+  "src": zod.string().url().regex(cancelCampaignResponseCorpoLembreteItemTwoSrcRegExp),
+  "alt": zod.string().max(cancelCampaignResponseCorpoLembreteItemTwoAltMax),
+  "href": zod.string().url().regex(cancelCampaignResponseCorpoLembreteItemTwoHrefRegExp).nullish()
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['button']),
+  "label": zod.string().min(1).max(cancelCampaignResponseCorpoLembreteItemThreeLabelMax),
+  "href": zod.string().url().regex(cancelCampaignResponseCorpoLembreteItemThreeHrefRegExp)
+}),zod.object({
+  "id": zod.string().min(1),
+  "type": zod.enum(['divider'])
+})])).nullable(),
+  "cor_botao_snapshot": zod.string().regex(cancelCampaignResponseCorBotaoSnapshotRegExp),
+  "incluir_desengajados": zod.boolean(),
   "remetente_nome": zod.string(),
   "remetente_email": zod.string().email(),
   "reply_to": zod.string().email().nullable(),
@@ -849,8 +1362,7 @@ export const CancelCampaignResponse = zod.object({
   "enviados_dia": zod.number().int().min(cancelCampaignResponseEnviadosDiaMin).optional(),
   "status": zod.enum(['rascunho', 'agendada', 'enviando', 'pausada', 'concluida', 'cancelada']),
   "agendada_para": zod.coerce.date().nullable(),
-  "lembrete_ativo": zod.boolean(),
-  "lembrete_horas": zod.number().int().min(1),
+  "lembrete_horas": zod.number().int().min(cancelCampaignResponseLembreteHorasMin).max(cancelCampaignResponseLembreteHorasMax),
   "teste_enviado": zod.boolean(),
   "teste_enviado_em": zod.coerce.date().nullable(),
   "corpo": zod.array(zod.union([zod.object({
@@ -860,14 +1372,14 @@ export const CancelCampaignResponse = zod.object({
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['image']),
-  "src": zod.string().url(),
+  "src": zod.string().url().regex(cancelCampaignResponseCorpoItemTwoSrcRegExp),
   "alt": zod.string().max(cancelCampaignResponseCorpoItemTwoAltMax),
-  "href": zod.string().url().nullish()
+  "href": zod.string().url().regex(cancelCampaignResponseCorpoItemTwoHrefRegExp).nullish()
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['button']),
   "label": zod.string().min(1).max(cancelCampaignResponseCorpoItemThreeLabelMax),
-  "href": zod.string().url()
+  "href": zod.string().url().regex(cancelCampaignResponseCorpoItemThreeHrefRegExp)
 }),zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
@@ -976,6 +1488,64 @@ export const getCampaignRecipientSummaryResponseMetricasEmailDescadastrosQuantid
 
 export const getCampaignRecipientSummaryResponseMetricasEmailDescadastrosPercentualMin = 0;
 
+export const getCampaignRecipientSummaryResponseStatusLembretePendenteMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusLembreteEnviadoMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusLembreteEntregueMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusLembreteBloqueadoMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusLembreteSuprimidoMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusLembreteErroMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteEnviadosQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteEnviadosPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteEntreguesQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteEntreguesPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteAberturasQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteAberturasPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteCliquesQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteCliquesPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesPermanentesQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesPermanentesPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesTemporariosQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesTemporariosPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesIndeterminadosQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesIndeterminadosPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteReclamacoesQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteReclamacoesPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteDescadastrosQuantidadeMin = 0;
+
+export const getCampaignRecipientSummaryResponseMetricasEmailLembreteDescadastrosPercentualMin = 0;
+
+export const getCampaignRecipientSummaryResponseDesengajadosTotalMin = 0;
+
+export const getCampaignRecipientSummaryResponseDesengajadosNaListaMin = 0;
+
+export const getCampaignRecipientSummaryResponseBloqueadosDesengajadosMin = 0;
+
 export const getCampaignRecipientSummaryResponseRecenciaItemQuantidadeMin = 0;
 
 
@@ -1052,6 +1622,59 @@ export const GetCampaignRecipientSummaryResponse = zod.object({
   "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailDescadastrosPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
 })
 }),
+  "status_lembrete": zod.object({
+  "pendente": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembretePendenteMin),
+  "enviado": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteEnviadoMin),
+  "entregue": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteEntregueMin),
+  "bloqueado": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteBloqueadoMin),
+  "suprimido": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteSuprimidoMin),
+  "erro": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteErroMin)
+}),
+  "metricas_email_lembrete": zod.object({
+  "enviados": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteEnviadosQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteEnviadosPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
+}),
+  "entregues": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteEntreguesQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteEntreguesPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
+}),
+  "aberturas": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteAberturasQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteAberturasPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
+}),
+  "cliques": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteCliquesQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteCliquesPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
+}),
+  "bounces": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
+}),
+  "bounces_permanentes": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesPermanentesQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesPermanentesPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
+}),
+  "bounces_temporarios": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesTemporariosQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesTemporariosPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
+}),
+  "bounces_indeterminados": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesIndeterminadosQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteBouncesIndeterminadosPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
+}),
+  "reclamacoes": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteReclamacoesQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteReclamacoesPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
+}),
+  "descadastros": zod.object({
+  "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteDescadastrosQuantidadeMin),
+  "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteDescadastrosPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
+})
+}),
+  "desengajados_total": zod.number().int().min(getCampaignRecipientSummaryResponseDesengajadosTotalMin),
+  "desengajados_na_lista": zod.number().int().min(getCampaignRecipientSummaryResponseDesengajadosNaListaMin),
+  "bloqueados_desengajados": zod.number().int().min(getCampaignRecipientSummaryResponseBloqueadosDesengajadosMin),
   "recencia": zod.array(zod.object({
   "faixa": zod.string(),
   "quantidade": zod.number().int().min(getCampaignRecipientSummaryResponseRecenciaItemQuantidadeMin)

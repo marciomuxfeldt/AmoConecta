@@ -23,6 +23,7 @@ import {
   normalizeEmailBlocks,
   renderEmailHtml,
   sanitizeRichTextHtml,
+  validateEmailBlockUrls,
 } from "@workspace/email-template";
 import {
   RequestEmailImageUploadInputMimeType,
@@ -34,12 +35,18 @@ type EmailEditorProps = {
   onChange: (blocks: EmailBlock[]) => void;
   campaignId?: string;
   subject: string;
+  buttonColor?: string;
+  previewBlocks?: EmailBlock[];
+  previewSubject?: string;
+  contentKind?: "main" | "reminder";
   valorCredito?: number | null;
   validadeCredito?: string | null;
   disabled?: boolean;
   buttonHrefErrors?: ReadonlyMap<string, string>;
+  blockUrlErrors?: ReadonlyMap<string, string>;
   onUploadingChange?: (blockId: string, uploading: boolean) => void;
   onSendTest?: () => void;
+  showTestButton?: boolean;
   testPending?: boolean;
   testError?: string | null;
   testSent?: boolean;
@@ -278,10 +285,45 @@ function imageUploadFailureMessage(
   return `${message}${status}.${details}${requestId} A imagem não foi enviada. Tente novamente; se persistir, encaminhe estes detalhes à equipe técnica.`;
 }
 
+function isStrictHttps(value: string) {
+  if (!value.startsWith("https://") || /\s/u.test(value)) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function suggestedHttps(value: string) {
+  if (!value || /\s/u.test(value) || value.startsWith("//") || /^[a-z][a-z\d+.-]*:/iu.test(value)) return null;
+  const candidate = `https://${value}`;
+  try {
+    const parsed = new URL(candidate);
+    return parsed.hostname && (parsed.hostname.includes(".") || parsed.hostname === "localhost") ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
 function insertLink() {
-  const href = window.prompt("Destino do link", "https://");
-  if (!href?.trim()) return;
-  document.execCommand("createLink", false, href.trim());
+  const entered = window.prompt("Destino do link", "https://");
+  const raw = entered?.trim();
+  if (!raw) return null;
+  let href = raw;
+  if (!isStrictHttps(href)) {
+    const suggestion = suggestedHttps(href);
+    if (!suggestion) {
+      window.alert("Informe uma URL válida começando com https://.");
+      return null;
+    }
+    if (!window.confirm(`Você quis dizer ${suggestion}? Confirme para aplicar o complemento https://.`)) {
+      return null;
+    }
+    href = suggestion;
+  }
+  document.execCommand("createLink", false, href);
+  return href;
 }
 
 function RichTextBlock({
@@ -323,7 +365,7 @@ function RichTextBlock({
         <span className="mr-1 px-1.5 font-mono text-[9px] uppercase tracking-[.14em] text-[#99959a]">Formatação</span>
         <button type="button" disabled={disabled} onMouseDown={(event) => { event.preventDefault(); command("bold"); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Aplicar negrito" title="Negrito" data-testid={`button-bold-${block.id}`}><Bold size={14} /></button>
         <button type="button" disabled={disabled} onMouseDown={(event) => { event.preventDefault(); command("italic"); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Aplicar itálico" title="Itálico" data-testid={`button-italic-${block.id}`}><Italic size={14} /></button>
-        <button type="button" disabled={disabled} onMouseDown={(event) => { event.preventDefault(); insertLink(); if (editorRef.current) onChange(sanitizeRichTextHtml(editorRef.current.innerHTML)); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Adicionar link ao texto" title="Adicionar link" data-testid={`button-link-${block.id}`}><Link2 size={14} /></button>
+         <button type="button" disabled={disabled} onMouseDown={(event) => { event.preventDefault(); const inserted = insertLink(); if (inserted && editorRef.current) onChange(sanitizeRichTextHtml(editorRef.current.innerHTML)); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Adicionar link ao texto" title="Adicionar link" data-testid={`button-link-${block.id}`}><Link2 size={14} /></button>
         <span className="ml-auto font-mono text-[9px] uppercase tracking-[.1em] text-[#99959a]">Use {"{{nome}}"} na saudação</span>
       </div>
       <div
@@ -363,6 +405,7 @@ function BlockCard({
   onUploadingChange,
   disabled = false,
   buttonHrefError,
+  blockUrlErrors,
 }: {
   block: EmailBlock;
   index: number;
@@ -378,6 +421,7 @@ function BlockCard({
   onUploadingChange?: (blockId: string, uploading: boolean) => void;
   disabled?: boolean;
   buttonHrefError?: string;
+  blockUrlErrors?: ReadonlyMap<string, string>;
 }) {
   const upload = useRequestCampaignAssetUploadUrl();
   const [imageUpload, setImageUpload] = useState<ImageUploadState>(idleImageUploadState);
@@ -403,6 +447,17 @@ function BlockCard({
 
   const update = (next: EmailBlock) => {
     if (!disabled) onChange(updateBlock(blocks, block.id, () => next));
+  };
+  const urlIssue = (field: string) => validateEmailBlockUrls([block]).find((issue) => (
+    issue.field === field &&
+    !(block.type === "image" && field === "href" && !block.href?.trim())
+  ));
+  const urlError = (field: string) => blockUrlErrors?.get(`${block.id}:${field}`) ?? urlIssue(field)?.message;
+  const urlSuggestion = (field: string) => urlIssue(field)?.suggestion;
+  const applyUrlSuggestion = (field: string, suggestion: string) => {
+    if (block.type === "image" && field === "src") update({ ...block, src: suggestion });
+    if (block.type === "image" && field === "href") update({ ...block, href: suggestion });
+    if (block.type === "button" && field === "href") update({ ...block, href: suggestion });
   };
   const updateText = useMemo(
     () => (html: string) => {
@@ -518,7 +573,12 @@ function BlockCard({
         <button type="button" disabled={disabled} onClick={onRemove} className="focus-ring ml-auto rounded-lg p-2 text-[#a64220] opacity-75 transition-colors hover:bg-[#fff0e9] hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Remover bloco ${index + 1}, ${blockLabels[block.type]}`} title="Remover bloco" data-testid={`button-remove-${block.id}`}><Trash2 size={14} /></button>
       </div>
 
-      {block.type === "text" && <MemoizedRichTextBlock key={`${block.id}:${resetKey}`} block={block} onChange={updateText} disabled={disabled} />}
+       {block.type === "text" && (
+         <>
+           <MemoizedRichTextBlock key={`${block.id}:${resetKey}`} block={block} onChange={updateText} disabled={disabled} />
+           {urlError("html.href") && <p className="mt-2 rounded-lg border border-[#efc9ba] bg-[#fff0e9] px-3 py-2 text-[11px] leading-4 text-[#a64220]" role="alert" data-testid={`error-text-link-${block.id}`}>{urlError("html.href")}</p>}
+         </>
+       )}
 
       {block.type === "image" && (
         <div className="space-y-3">
@@ -538,7 +598,20 @@ function BlockCard({
              {imageUpload.phase === "error" ? <button type="button" disabled={disabled} onClick={() => { void uploadImage(); }} className="action-button action-button-secondary !border-[#efc9ba] !text-[#a64220] disabled:cursor-not-allowed disabled:opacity-40" data-testid={`button-retry-image-upload-${block.id}`}><RefreshCw size={14} /> Tentar novamente</button> : <div />}
              <div><label htmlFor={`image-alt-${block.id}`} className="field-label">Texto alternativo</label><input id={`image-alt-${block.id}`} disabled={disabled} value={block.alt} onChange={(event) => update({ ...block, alt: event.target.value.slice(0, 160) })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Descreva a imagem" aria-label="Texto alternativo da imagem" data-testid={`input-image-alt-${block.id}`} /><p className="mt-1.5 text-[10px] leading-4 text-[#8d8780]">Sem texto alternativo, a imagem aparece como espaço vazio para quem bloqueia imagens.</p></div>
           </div>
-        <div><label htmlFor={`image-href-${block.id}`} className="field-label">Link da imagem <span className="font-normal text-[#99959a]">· opcional</span></label><input id={`image-href-${block.id}`} disabled={disabled} value={block.href ?? ""} onChange={(event) => update({ ...block, href: event.target.value })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="https://..." aria-label="Link opcional da imagem" data-testid={`input-image-link-${block.id}`} /></div>
+         <div className="grid gap-3 sm:grid-cols-2">
+           <div>
+             <label htmlFor={`image-src-${block.id}`} className="field-label">URL da imagem</label>
+             <input id={`image-src-${block.id}`} disabled={disabled} value={block.src} onChange={(event) => update({ ...block, src: event.target.value })} className={`field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7] ${urlError("src") ? "!border-[#bd4f26] !bg-[#fff7f2]" : ""}`} placeholder="https://..." aria-label="URL segura da imagem" aria-invalid={Boolean(urlError("src"))} data-testid={`input-image-src-${block.id}`} />
+             {urlError("src") && <p className="mt-1.5 text-[11px] font-semibold leading-4 text-[#a64220]" role="alert" data-testid={`error-image-src-${block.id}`}>{urlError("src")}</p>}
+             {urlSuggestion("src") && <button type="button" disabled={disabled} onClick={() => applyUrlSuggestion("src", urlSuggestion("src")!)} className="mt-1.5 text-left text-[10px] font-bold text-[#247b79] underline disabled:opacity-40" data-testid={`button-suggest-image-src-${block.id}`}>Aplicar sugestão: {urlSuggestion("src")}</button>}
+           </div>
+           <div>
+             <label htmlFor={`image-href-${block.id}`} className="field-label">Link da imagem <span className="font-normal text-[#99959a]">· opcional</span></label>
+             <input id={`image-href-${block.id}`} disabled={disabled} value={block.href ?? ""} onChange={(event) => update({ ...block, href: event.target.value })} className={`field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7] ${urlError("href") ? "!border-[#bd4f26] !bg-[#fff7f2]" : ""}`} placeholder="https://..." aria-label="Link opcional da imagem" aria-invalid={Boolean(urlError("href"))} data-testid={`input-image-link-${block.id}`} />
+             {urlError("href") && <p className="mt-1.5 text-[11px] font-semibold leading-4 text-[#a64220]" role="alert" data-testid={`error-image-link-${block.id}`}>{urlError("href")}</p>}
+             {urlSuggestion("href") && <button type="button" disabled={disabled} onClick={() => applyUrlSuggestion("href", urlSuggestion("href")!)} className="mt-1.5 text-left text-[10px] font-bold text-[#247b79] underline disabled:opacity-40" data-testid={`button-suggest-image-link-${block.id}`}>Aplicar sugestão: {urlSuggestion("href")}</button>}
+           </div>
+         </div>
            {imageUpload.phase === "error" && imageUpload.error && <p className="rounded-lg border border-[#efc9ba] bg-[#fff0e9] px-3 py-2 text-xs text-[#a64220]" role="alert">{imageUpload.error}</p>}
         </div>
       )}
@@ -546,7 +619,7 @@ function BlockCard({
       {block.type === "button" && (
         <div className="grid gap-3 sm:grid-cols-2">
           <div><label htmlFor={`button-label-${block.id}`} className="field-label">Texto do botão</label><input id={`button-label-${block.id}`} disabled={disabled} value={block.label} onChange={(event) => update({ ...block, label: event.target.value.slice(0, 120) })} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Ex.: Ver oferta" aria-label="Rótulo do botão" data-testid={`input-button-label-${block.id}`} /></div>
-          <div><label htmlFor={`button-href-${block.id}`} className="field-label">Destino do clique</label><input id={`button-href-${block.id}`} disabled={disabled} value={block.href} onChange={(event) => update({ ...block, href: event.target.value })} className={`field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7] ${buttonHrefError ? "!border-[#bd4f26] !bg-[#fff7f2]" : ""}`} placeholder="https://..." aria-label="Destino do botão" aria-invalid={Boolean(buttonHrefError)} aria-describedby={buttonHrefError ? `button-href-error-${block.id}` : undefined} data-testid={`input-button-link-${block.id}`} />{buttonHrefError && <p id={`button-href-error-${block.id}`} className="mt-1.5 text-[11px] font-semibold leading-4 text-[#a64220]" role="alert" data-testid={`error-button-link-${block.id}`}>{buttonHrefError}</p>}</div>
+           <div><label htmlFor={`button-href-${block.id}`} className="field-label">Destino do clique</label><input id={`button-href-${block.id}`} disabled={disabled} value={block.href} onChange={(event) => update({ ...block, href: event.target.value })} className={`field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7] ${buttonHrefError || urlError("href") ? "!border-[#bd4f26] !bg-[#fff7f2]" : ""}`} placeholder="https://..." aria-label="Destino do botão" aria-invalid={Boolean(buttonHrefError || urlError("href"))} aria-describedby={buttonHrefError ? `button-href-error-${block.id}` : undefined} data-testid={`input-button-link-${block.id}`} />{buttonHrefError && <p id={`button-href-error-${block.id}`} className="mt-1.5 text-[11px] font-semibold leading-4 text-[#a64220]" role="alert" data-testid={`error-button-link-${block.id}`}>{buttonHrefError}</p>}{!buttonHrefError && urlError("href") && <p className="mt-1.5 text-[11px] font-semibold leading-4 text-[#a64220]" role="alert" data-testid={`error-button-url-${block.id}`}>{urlError("href")}</p>}{urlSuggestion("href") && <button type="button" disabled={disabled} onClick={() => applyUrlSuggestion("href", urlSuggestion("href")!)} className="mt-1.5 text-left text-[10px] font-bold text-[#247b79] underline disabled:opacity-40" data-testid={`button-suggest-button-link-${block.id}`}>Aplicar sugestão: {urlSuggestion("href")}</button>}</div>
         </div>
       )}
 
@@ -559,12 +632,18 @@ export function EmailEditor({
   blocks,
   onChange,
   buttonHrefErrors,
+  blockUrlErrors,
   campaignId,
   subject,
+  buttonColor,
+  previewBlocks,
+  previewSubject,
+  contentKind = "main",
   valorCredito,
   validadeCredito,
   onUploadingChange,
   onSendTest,
+  showTestButton = true,
   testPending = false,
   testError = null,
   testSent = false,
@@ -574,24 +653,29 @@ export function EmailEditor({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [previewName, setPreviewName] = useState("Marina");
+  const [previewKind, setPreviewKind] = useState<"main" | "reminder">(contentKind);
   const normalizedBlocks = useMemo(() => normalizeEmailBlocks(blocks), [blocks]);
+  const normalizedPreviewBlocks = useMemo(() => normalizeEmailBlocks(previewBlocks ?? []), [previewBlocks]);
+  const activePreviewBlocks = previewKind === contentKind ? normalizedBlocks : normalizedPreviewBlocks;
+  const activePreviewSubject = previewKind === contentKind ? subject : (previewSubject ?? "");
   const previewHtml = useMemo(
-    () => renderEmailHtml(normalizedBlocks, {
+    () => renderEmailHtml(activePreviewBlocks, {
       name: previewName || null,
       valorCredito,
       validadeCredito,
+      buttonColor,
     }),
-    [normalizedBlocks, previewName, valorCredito, validadeCredito],
+    [activePreviewBlocks, previewName, valorCredito, validadeCredito, buttonColor],
   );
   const missingVariables = useMemo(() => {
-    const source = `${subject}\n${normalizedBlocks.map((block) => (
+    const source = `${activePreviewSubject}\n${activePreviewBlocks.map((block) => (
       block.type === "text" ? block.html : block.type === "button" ? block.label : block.type === "image" ? block.alt : ""
     )).join("\n")}`;
     return [
       source.match(/\{\{\s*valor_credito\s*\}\}/iu) && valorCredito == null ? "valor do crédito" : null,
       source.match(/\{\{\s*validade_credito\s*\}\}/iu) && !validadeCredito ? "validade do crédito" : null,
     ].filter((value): value is string => Boolean(value));
-  }, [normalizedBlocks, subject, valorCredito, validadeCredito]);
+  }, [activePreviewBlocks, activePreviewSubject, valorCredito, validadeCredito]);
   const editorSessionKey = campaignId ?? "new-campaign";
 
   const addBlock = (type: EmailBlock["type"]) => {
@@ -616,15 +700,15 @@ export function EmailEditor({
       <div className="border-b border-[#eee7dc] bg-[#fbf9f5] p-5 sm:p-7">
         <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
           <div><div className="flex items-center gap-3"><p className="section-kicker">04 · Corpo do e-mail</p><span className="rounded-full bg-[#f1f7f5] px-2.5 py-1 font-mono text-[9px] uppercase tracking-[.1em] text-[#247b79]">Editor ativo</span></div><h2 className="mt-2 text-xl font-extrabold tracking-[-.05em] text-[#263044] sm:text-2xl">Monte a mensagem bloco a bloco.</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-[#747783]">A ordem é sua. Veja a leitura final ao lado enquanto prepara uma mensagem pronta para chegar bem.</p></div>
-          <button type="button" onClick={onSendTest} disabled={!campaignId || !onSendTest || testPending || Boolean(testDisabledReason)} title={testDisabledReason ?? (!campaignId ? "Salve a campanha antes de enviar um teste" : undefined)} className="action-button action-button-secondary disabled:cursor-not-allowed disabled:opacity-50" aria-describedby="test-send-note" data-testid="button-send-test">{testPending ? <LoaderCircle size={14} className="animate-spin" /> : <ExternalLink size={14} />} {testPending ? "Enviando…" : "Enviar teste"}</button>
+           {showTestButton && <button type="button" onClick={onSendTest} disabled={!campaignId || !onSendTest || testPending || Boolean(testDisabledReason)} title={testDisabledReason ?? (!campaignId ? "Salve a campanha antes de enviar um teste" : undefined)} className="action-button action-button-secondary disabled:cursor-not-allowed disabled:opacity-50" aria-describedby="test-send-note" data-testid="button-send-test">{testPending ? <LoaderCircle size={14} className="animate-spin" /> : <ExternalLink size={14} />} {testPending ? "Enviando…" : "Enviar teste"}</button>}
         </div>
-        <p id="test-send-note" className={`mt-2 text-right font-mono text-[9px] uppercase tracking-[.08em] lg:pr-1 ${testError ? "text-[#a64220]" : testSent ? "text-[#247b79]" : "text-[#aaa3a1]"}`}>{testError ?? (testSent ? "Teste enviado para o e-mail da sua sessão." : testDisabledReason ?? (campaignId ? "O teste respeita supressão e a lista de segurança." : "Salve a campanha antes de enviar um teste."))}</p>
+         {showTestButton && <p id="test-send-note" className={`mt-2 text-right font-mono text-[9px] uppercase tracking-[.08em] lg:pr-1 ${testError ? "text-[#a64220]" : testSent ? "text-[#247b79]" : "text-[#aaa3a1]"}`}>{testError ?? (testSent ? "Teste enviado para o e-mail da sua sessão." : testDisabledReason ?? (campaignId ? "O teste respeita supressão e a lista de segurança." : "Salve a campanha antes de enviar um teste."))}</p>}
       </div>
       <div className="grid gap-7 p-5 sm:p-7 xl:grid-cols-[minmax(0,.9fr)_minmax(360px,1.1fr)]">
         <div>
           <div className="mb-4 flex items-end justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-[.13em] text-[#d35f2a]">Composição</p><p className="mt-1 text-sm font-extrabold text-[#263044]">Blocos editáveis</p><p className="mt-1 text-[11px] text-[#92939a]">{blocks.length} {blocks.length === 1 ? "bloco" : "blocos"} · arraste para reordenar</p></div><span className="rounded-full bg-[#f1f7f5] px-3 py-1.5 font-mono text-[9px] uppercase tracking-[.1em] text-[#247b79]">Sem limite</span></div>
           <div className="space-y-3">
-              {blocks.map((block, index) => <BlockCard key={block.id} block={block} index={index} blocks={blocks} onChange={onChange} onRemove={() => removeBlock(block.id)} onDragStart={() => setDraggingId(block.id)} onDrop={() => { reorder(block.id); setDraggingId(null); }} onDragEnd={() => setDraggingId(null)} dragging={draggingId === block.id} campaignId={campaignId} resetKey={editorSessionKey} onUploadingChange={onUploadingChange} disabled={disabled} buttonHrefError={block.type === "button" ? buttonHrefErrors?.get(block.id) : undefined} />)}
+               {blocks.map((block, index) => <BlockCard key={block.id} block={block} index={index} blocks={blocks} onChange={onChange} onRemove={() => removeBlock(block.id)} onDragStart={() => setDraggingId(block.id)} onDrop={() => { reorder(block.id); setDraggingId(null); }} onDragEnd={() => setDraggingId(null)} dragging={draggingId === block.id} campaignId={campaignId} resetKey={editorSessionKey} onUploadingChange={onUploadingChange} disabled={disabled} buttonHrefError={block.type === "button" ? buttonHrefErrors?.get(block.id) : undefined} blockUrlErrors={blockUrlErrors} />)}
             {blocks.length === 0 && <div className="rounded-2xl border border-dashed border-[#d8cdbd] bg-[#f8f3ec] px-5 py-12 text-center"><div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-[#d7ef56] text-[#263044]"><Plus size={18} /></div><p className="mt-4 text-sm font-bold text-[#42495b]">Comece pelo primeiro bloco</p><p className="mt-1 text-xs leading-5 text-[#85858b]">A prévia já mostra o rodapé fixo enquanto você cria.</p></div>}
           </div>
           <div className="mt-5 rounded-2xl border border-[#eee7dc] bg-[#f8f3ec] p-3"><p className="mb-2 px-1 font-mono text-[9px] uppercase tracking-[.12em] text-[#99959a]">Adicionar ao e-mail</p><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -632,7 +716,7 @@ export function EmailEditor({
           </div></div>
         </div>
         <div className="min-w-0">
-           <div className="mb-4 flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><p className="font-mono text-[10px] uppercase tracking-[.13em] text-[#d35f2a]">Verificação</p><span className="h-1.5 w-1.5 rounded-full bg-[#63a76f]" /><span className="font-mono text-[9px] uppercase tracking-[.1em] text-[#63a76f]">Ao vivo</span></div><p className="mt-1 text-sm font-extrabold text-[#263044]">Pré-visualização</p><p className="mt-1 max-w-md text-[11px] leading-5 text-[#92939a]">Assunto: {interpolateEmailText(interpolateName(subject || "Sem assunto", previewName || null), { valorCredito, validadeCredito })}</p></div><div className="flex rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-1" role="group" aria-label="Tamanho da prévia"><button type="button" onClick={() => setPreviewMode("desktop")} className={`focus-ring rounded-lg p-2.5 transition-colors ${previewMode === "desktop" ? "bg-white text-[#247b79] shadow-sm" : "text-[#92939a] hover:text-[#42495b]"}`} aria-label="Mostrar prévia desktop" aria-pressed={previewMode === "desktop"} title="Desktop" data-testid="button-preview-desktop"><Monitor size={14} /></button><button type="button" onClick={() => setPreviewMode("mobile")} className={`focus-ring rounded-lg p-2.5 transition-colors ${previewMode === "mobile" ? "bg-white text-[#247b79] shadow-sm" : "text-[#92939a] hover:text-[#42495b]"}`} aria-label="Mostrar prévia celular" aria-pressed={previewMode === "mobile"} title="Celular" data-testid="button-preview-mobile"><Smartphone size={14} /></button></div></div>
+           <div className="mb-4 flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><p className="font-mono text-[10px] uppercase tracking-[.13em] text-[#d35f2a]">Verificação</p><span className="h-1.5 w-1.5 rounded-full bg-[#63a76f]" /><span className="font-mono text-[9px] uppercase tracking-[.1em] text-[#63a76f]">Ao vivo</span></div><p className="mt-1 text-sm font-extrabold tracking-[-.02em] text-[#263044]">Pré-visualização · {previewKind === "reminder" ? "lembrete" : "campanha principal"}</p><p className="mt-1 max-w-md text-[11px] leading-5 text-[#92939a]">Assunto: {interpolateEmailText(interpolateName(activePreviewSubject || "Sem assunto", previewName || null), { valorCredito, validadeCredito })}</p></div><div className="flex flex-wrap justify-end gap-2"><div className="flex rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-1" role="group" aria-label="Conteúdo da prévia">{previewBlocks && <><button type="button" onClick={() => setPreviewKind("main")} className={`focus-ring rounded-lg px-2.5 py-2 font-mono text-[9px] uppercase tracking-[.08em] transition-colors ${previewKind === "main" ? "bg-white text-[#247b79] shadow-sm" : "text-[#92939a] hover:text-[#42495b]"}`} aria-pressed={previewKind === "main"} data-testid="button-preview-main-content">Principal</button><button type="button" onClick={() => setPreviewKind("reminder")} className={`focus-ring rounded-lg px-2.5 py-2 font-mono text-[9px] uppercase tracking-[.08em] transition-colors ${previewKind === "reminder" ? "bg-white text-[#247b79] shadow-sm" : "text-[#92939a] hover:text-[#42495b]"}`} aria-pressed={previewKind === "reminder"} data-testid="button-preview-reminder-content">Lembrete</button></>}</div><div className="flex rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-1" role="group" aria-label="Tamanho da prévia"><button type="button" onClick={() => setPreviewMode("desktop")} className={`focus-ring rounded-lg p-2.5 transition-colors ${previewMode === "desktop" ? "bg-white text-[#247b79] shadow-sm" : "text-[#92939a] hover:text-[#42495b]"}`} aria-label="Mostrar prévia desktop" aria-pressed={previewMode === "desktop"} title="Desktop" data-testid="button-preview-desktop"><Monitor size={14} /></button><button type="button" onClick={() => setPreviewMode("mobile")} className={`focus-ring rounded-lg p-2.5 transition-colors ${previewMode === "mobile" ? "bg-white text-[#247b79] shadow-sm" : "text-[#92939a] hover:text-[#42495b]"}`} aria-label="Mostrar prévia celular" aria-pressed={previewMode === "mobile"} title="Celular" data-testid="button-preview-mobile"><Smartphone size={14} /></button></div></div></div>
           <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-[#eee7dc] bg-[#f8f3ec] p-2.5"><label className="px-1 text-[10px] font-bold uppercase tracking-[.08em] text-[#85858b]" htmlFor="email-preview-name">Nome do destinatário</label><input id="email-preview-name" value={previewName} onChange={(event) => setPreviewName(event.target.value)} className="field-control !w-40 !py-2 text-xs shrink-0" placeholder="Vazio = sem nome" data-testid="input-preview-name" /><button type="button" onClick={() => setPreviewName("")} className="focus-ring rounded-lg px-2 py-1 text-[10px] font-bold text-[#247b79] transition-colors hover:bg-[#e5f0ed]" data-testid="button-preview-no-name">Sem nome</button></div>
           <div className="flex min-h-[500px] justify-center overflow-auto rounded-2xl border border-[#dcd3c5] bg-[#e9e1d6] p-3 shadow-inner sm:p-5">
             <iframe title={`Prévia do e-mail em modo ${previewMode === "desktop" ? "desktop" : "celular"}`} srcDoc={previewHtml} className="h-[620px] shrink-0 border-0 bg-white shadow-[0_12px_30px_rgba(38,48,68,.12)] transition-[width] duration-200" style={{ width: previewMode === "desktop" ? 600 : 360, maxWidth: "100%" }} data-testid={`email-preview-${previewMode}`} />

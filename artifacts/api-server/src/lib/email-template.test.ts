@@ -26,6 +26,18 @@ test("renders Outlook-safe table markup and fixed footer", () => {
   assert.ok(html.indexOf("Ver oferta") < html.indexOf("Descadastrar-se"));
 });
 
+test("uses Amo Ofertas branding and renders the saved button color accessibly", () => {
+  const blocks = [
+    { id: "cta", type: "button" as const, label: "Ver ofertas", href: "https://shop.amo.delivery/oferta" },
+  ];
+  const darkButton = renderEmailHtml(blocks, { buttonColor: "#000000" });
+  const lightButton = renderEmailHtml(blocks, { buttonColor: "#ffffff" });
+
+  assert.match(darkButton, /<title>Amo Ofertas<\/title>/u);
+  assert.match(darkButton, /background-color:#000000;color:#ffffff/u);
+  assert.match(lightButton, /background-color:#ffffff;color:#1f2937/u);
+});
+
 test("renders an optional hidden inbox preheader before the email content", () => {
   const html = renderEmailHtml(
     [{ id: "first", type: "text", html: "Conteúdo da campanha" }],

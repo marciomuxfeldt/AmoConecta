@@ -21,6 +21,9 @@ import type {
 
 import type {
   AuthSession,
+  BiExportJob,
+  BiExportJobsResponse,
+  BiExportRequest,
   Campaign,
   CampaignDefaults,
   CampaignDraftInput,
@@ -30,7 +33,10 @@ import type {
   CampaignResumeInput,
   CreateCampaignInput,
   DetailedError,
+  EmailBranding,
+  EmailBrandingUpdate,
   EmailImageUploadUrl,
+  EngagementSummary,
   Error,
   HealthStatus,
   ImportUploadUrl,
@@ -384,6 +390,567 @@ export function useGetCampaignDefaults<TData = Awaited<ReturnType<typeof getCamp
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetCampaignDefaultsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetEmailBrandingUrl = () => {
+
+
+
+
+  return `/api/email-branding`
+}
+
+/**
+ * @summary Retorna a identidade visual dos e-mails
+ */
+export const getEmailBranding = async ( options?: Parameters<typeof customFetch>[1]): Promise<EmailBranding> => {
+
+  return customFetch<EmailBranding>(getGetEmailBrandingUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEmailBrandingQueryKey = () => {
+    return [
+    `/api/email-branding`
+    ] as const;
+    }
+
+
+export const getGetEmailBrandingQueryOptions = <TData = Awaited<ReturnType<typeof getEmailBranding>>, TError = ErrorType<Error>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEmailBranding>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEmailBrandingQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEmailBranding>>> = ({ signal }) => getEmailBranding({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEmailBranding>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetEmailBrandingQueryResult = NonNullable<Awaited<ReturnType<typeof getEmailBranding>>>
+export type GetEmailBrandingQueryError = ErrorType<Error>
+
+
+/**
+ * @summary Retorna a identidade visual dos e-mails
+ */
+
+export function useGetEmailBranding<TData = Awaited<ReturnType<typeof getEmailBranding>>, TError = ErrorType<Error>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEmailBranding>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetEmailBrandingQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateEmailBrandingUrl = () => {
+
+
+
+
+  return `/api/email-branding`
+}
+
+/**
+ * @summary Atualiza a cor global dos botões de e-mail
+ */
+export const updateEmailBranding = async (emailBrandingUpdate: EmailBrandingUpdate, options?: Parameters<typeof customFetch>[1]): Promise<EmailBranding> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<EmailBranding>(getUpdateEmailBrandingUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(emailBrandingUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateEmailBrandingMutationKey = () => ['updateEmailBranding'] as const;
+
+export const getUpdateEmailBrandingMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateEmailBranding>>, TError,UpdateEmailBrandingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateEmailBranding>>, TError,UpdateEmailBrandingMutationVariables, TContext> => {
+
+const mutationKey = getUpdateEmailBrandingMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateEmailBranding>>, UpdateEmailBrandingMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateEmailBranding(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateEmailBrandingMutationResult = NonNullable<Awaited<ReturnType<typeof updateEmailBranding>>>
+    export type UpdateEmailBrandingMutationBody = BodyType<EmailBrandingUpdate>
+    export type UpdateEmailBrandingMutationError = ErrorType<Error>
+    export type UpdateEmailBrandingMutationVariables = {data: BodyType<EmailBrandingUpdate>}
+
+    /**
+ * @summary Atualiza a cor global dos botões de e-mail
+ */
+export const useUpdateEmailBranding = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateEmailBranding>>, TError,UpdateEmailBrandingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateEmailBranding>>,
+        TError,
+        UpdateEmailBrandingMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateEmailBrandingMutationOptions(options));
+    }
+
+export const getGetEngagementSummaryUrl = () => {
+
+
+
+
+  return `/api/engagement/summary`
+}
+
+/**
+ * @summary Retorna a quantidade atual de contatos desengajados
+ */
+export const getEngagementSummary = async ( options?: Parameters<typeof customFetch>[1]): Promise<EngagementSummary> => {
+
+  return customFetch<EngagementSummary>(getGetEngagementSummaryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEngagementSummaryQueryKey = () => {
+    return [
+    `/api/engagement/summary`
+    ] as const;
+    }
+
+
+export const getGetEngagementSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getEngagementSummary>>, TError = ErrorType<Error>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEngagementSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEngagementSummaryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEngagementSummary>>> = ({ signal }) => getEngagementSummary({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEngagementSummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetEngagementSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getEngagementSummary>>>
+export type GetEngagementSummaryQueryError = ErrorType<Error>
+
+
+/**
+ * @summary Retorna a quantidade atual de contatos desengajados
+ */
+
+export function useGetEngagementSummary<TData = Awaited<ReturnType<typeof getEngagementSummary>>, TError = ErrorType<Error>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEngagementSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetEngagementSummaryQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListBiExportsUrl = () => {
+
+
+
+
+  return `/api/bi-exports`
+}
+
+/**
+ * @summary Lista exportações BI recentes
+ */
+export const listBiExports = async ( options?: Parameters<typeof customFetch>[1]): Promise<BiExportJobsResponse> => {
+
+  return customFetch<BiExportJobsResponse>(getListBiExportsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListBiExportsQueryKey = () => {
+    return [
+    `/api/bi-exports`
+    ] as const;
+    }
+
+
+export const getListBiExportsQueryOptions = <TData = Awaited<ReturnType<typeof listBiExports>>, TError = ErrorType<Error>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listBiExports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListBiExportsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listBiExports>>> = ({ signal }) => listBiExports({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listBiExports>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListBiExportsQueryResult = NonNullable<Awaited<ReturnType<typeof listBiExports>>>
+export type ListBiExportsQueryError = ErrorType<Error>
+
+
+/**
+ * @summary Lista exportações BI recentes
+ */
+
+export function useListBiExports<TData = Awaited<ReturnType<typeof listBiExports>>, TError = ErrorType<Error>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listBiExports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListBiExportsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateBiExportUrl = () => {
+
+
+
+
+  return `/api/bi-exports`
+}
+
+/**
+ * @summary Solicita uma exportação BI assíncrona
+ */
+export const createBiExport = async (biExportRequest: BiExportRequest, options?: Parameters<typeof customFetch>[1]): Promise<BiExportJob> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<BiExportJob>(getCreateBiExportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(biExportRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateBiExportMutationKey = () => ['createBiExport'] as const;
+
+export const getCreateBiExportMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createBiExport>>, TError,CreateBiExportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createBiExport>>, TError,CreateBiExportMutationVariables, TContext> => {
+
+const mutationKey = getCreateBiExportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createBiExport>>, CreateBiExportMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createBiExport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateBiExportMutationResult = NonNullable<Awaited<ReturnType<typeof createBiExport>>>
+    export type CreateBiExportMutationBody = BodyType<BiExportRequest>
+    export type CreateBiExportMutationError = ErrorType<Error>
+    export type CreateBiExportMutationVariables = {data: BodyType<BiExportRequest>}
+
+    /**
+ * @summary Solicita uma exportação BI assíncrona
+ */
+export const useCreateBiExport = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createBiExport>>, TError,CreateBiExportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createBiExport>>,
+        TError,
+        CreateBiExportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateBiExportMutationOptions(options));
+    }
+
+export const getGetBiExportUrl = (exportId: string,) => {
+
+
+
+
+  return `/api/bi-exports/${exportId}`
+}
+
+/**
+ * @summary Consulta o andamento de uma exportação
+ */
+export const getBiExport = async (exportId: string, options?: Parameters<typeof customFetch>[1]): Promise<BiExportJob> => {
+
+  return customFetch<BiExportJob>(getGetBiExportUrl(exportId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBiExportQueryKey = (exportId: string,) => {
+    return [
+    `/api/bi-exports/${exportId}`
+    ] as const;
+    }
+
+
+export const getGetBiExportQueryOptions = <TData = Awaited<ReturnType<typeof getBiExport>>, TError = ErrorType<Error>>(exportId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBiExport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBiExportQueryKey(exportId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBiExport>>> = ({ signal }) => getBiExport(exportId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: exportId !== null && exportId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBiExport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetBiExportQueryResult = NonNullable<Awaited<ReturnType<typeof getBiExport>>>
+export type GetBiExportQueryError = ErrorType<Error>
+
+
+/**
+ * @summary Consulta o andamento de uma exportação
+ */
+
+export function useGetBiExport<TData = Awaited<ReturnType<typeof getBiExport>>, TError = ErrorType<Error>>(
+ exportId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBiExport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetBiExportQueryOptions(exportId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDownloadBiExportUrl = (exportId: string,) => {
+
+
+
+
+  return `/api/bi-exports/${exportId}/download`
+}
+
+/**
+ * @summary Baixa o arquivo CSV gerado
+ */
+export const downloadBiExport = async (exportId: string, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getDownloadBiExportUrl(exportId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadBiExportQueryKey = (exportId: string,) => {
+    return [
+    `/api/bi-exports/${exportId}/download`
+    ] as const;
+    }
+
+
+export const getDownloadBiExportQueryOptions = <TData = Awaited<ReturnType<typeof downloadBiExport>>, TError = ErrorType<Error>>(exportId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadBiExport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadBiExportQueryKey(exportId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadBiExport>>> = ({ signal }) => downloadBiExport(exportId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: exportId !== null && exportId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadBiExport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type DownloadBiExportQueryResult = NonNullable<Awaited<ReturnType<typeof downloadBiExport>>>
+export type DownloadBiExportQueryError = ErrorType<Error>
+
+
+/**
+ * @summary Baixa o arquivo CSV gerado
+ */
+
+export function useDownloadBiExport<TData = Awaited<ReturnType<typeof downloadBiExport>>, TError = ErrorType<Error>>(
+ exportId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadBiExport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getDownloadBiExportQueryOptions(exportId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

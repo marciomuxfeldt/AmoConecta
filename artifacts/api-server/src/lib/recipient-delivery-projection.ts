@@ -13,11 +13,15 @@ export type RecipientDeliveryProjection = {
   permitidos_modo_teste: number;
   bloqueados_modo_teste: number;
   receberao_de_fato: number;
+  desengajados_na_lista?: number;
+  bloqueados_desengajados?: number;
 };
 
 export function buildRecipientDeliveryProjection(
   recipientEmails: readonly string[],
   suppressedEmails: ReadonlySet<string>,
+  chronicDisengagedEmails: ReadonlySet<string> = new Set(),
+  includeDisengaged = false,
 ): RecipientDeliveryProjection {
   const normalizedSuppressedEmails = new Set(
     [...suppressedEmails].map((email) => normalizeEmail(email)),
@@ -25,11 +29,19 @@ export function buildRecipientDeliveryProjection(
   const normalizedRecipients = recipientEmails
     .map(normalizeEmail)
     .filter(Boolean);
+  const normalizedChronicEmails = new Set(
+    [...chronicDisengagedEmails].map((email) => normalizeEmail(email)),
+  );
   const suprimidosNoEnvio = normalizedRecipients.filter((email) =>
     normalizedSuppressedEmails.has(email),
   ).length;
+  const disengagedInList = normalizedRecipients.filter((email) =>
+    normalizedChronicEmails.has(email),
+  );
   const recipientsAfterSuppression = normalizedRecipients.filter(
-    (email) => !normalizedSuppressedEmails.has(email),
+    (email) =>
+      !normalizedSuppressedEmails.has(email) &&
+      (includeDisengaged || !normalizedChronicEmails.has(email)),
   );
   const permitidosModoTeste = recipientsAfterSuppression.filter(isRecipientAllowed).length;
   const bloqueadosModoTeste =
@@ -41,25 +53,38 @@ export function buildRecipientDeliveryProjection(
     permitidos_modo_teste: permitidosModoTeste,
     bloqueados_modo_teste: bloqueadosModoTeste,
     receberao_de_fato: permitidosModoTeste,
+    desengajados_na_lista: disengagedInList.length,
+    bloqueados_desengajados: includeDisengaged
+      ? 0
+      : disengagedInList.filter(
+          (email) => !normalizedSuppressedEmails.has(normalizeEmail(email)),
+        ).length,
   };
 }
 
 export async function recipientDeliveryProjection(
   client: SupabaseClient,
   campaignId: string,
+  includeDisengaged?: boolean,
 ): Promise<RecipientDeliveryProjection> {
   const recipientEmails: string[] = [];
+  const chronicDisengagedEmails = new Set<string>();
   for (let offset = 0; ; offset += RECIPIENT_PAGE_SIZE) {
     const { data, error } = await client
       .from("destinatario")
-      .select("email")
+      .select("email,desengajado_cronico")
       .eq("campanha_id", campaignId)
       .eq("is_lembrete", false)
       .order("id", { ascending: true })
       .range(offset, offset + RECIPIENT_PAGE_SIZE - 1);
     if (error) throw error;
     for (const row of data ?? []) {
-      if (typeof row.email === "string") recipientEmails.push(row.email);
+      if (typeof row.email === "string") {
+        recipientEmails.push(row.email);
+        if (row.desengajado_cronico === true) {
+          chronicDisengagedEmails.add(row.email);
+        }
+      }
     }
     if (!data || data.length < RECIPIENT_PAGE_SIZE) break;
   }
@@ -71,5 +96,21 @@ export async function recipientDeliveryProjection(
     if (typeof row.email === "string") suppressedEmails.add(row.email);
   }
 
-  return buildRecipientDeliveryProjection(recipientEmails, suppressedEmails);
+  let shouldIncludeDisengaged = includeDisengaged;
+  if (shouldIncludeDisengaged == null) {
+    const { data: campaign, error: campaignError } = await client
+      .from("campanha")
+      .select("incluir_desengajados")
+      .eq("id", campaignId)
+      .maybeSingle();
+    if (campaignError) throw campaignError;
+    shouldIncludeDisengaged = campaign?.incluir_desengajados === true;
+  }
+
+  return buildRecipientDeliveryProjection(
+    recipientEmails,
+    suppressedEmails,
+    chronicDisengagedEmails,
+    shouldIncludeDisengaged,
+  );
 }

@@ -26,6 +26,91 @@ export interface CampaignDefaults {
   teto_hora: number;
   /** @minimum 0 */
   teto_dia: number;
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  cor_botao_email: string;
+  /** @minimum 0 */
+  desengajados_total: number;
+}
+
+export interface EmailBranding {
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  cor_botao_email: string;
+  atualizado_em: string;
+}
+
+export interface EmailBrandingUpdate {
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  cor_botao_email: string;
+}
+
+export interface EngagementSummary {
+  /** @minimum 0 */
+  desengajados_total: number;
+  /** @nullable */
+  calculado_em: string | null;
+}
+
+export type BiExportFilter = typeof BiExportFilter[keyof typeof BiExportFilter];
+
+
+export const BiExportFilter = {
+  todos: 'todos',
+  clicaram: 'clicaram',
+  abriram_sem_clicar: 'abriram_sem_clicar',
+  nao_abriram: 'nao_abriram',
+  bounce_ou_reclamacao: 'bounce_ou_reclamacao',
+} as const;
+
+export interface BiExportRequest {
+  /** @nullable */
+  campanha_id: string | null;
+  /** @nullable */
+  periodo_inicio: string | null;
+  /** @nullable */
+  periodo_fim: string | null;
+  filtro: BiExportFilter;
+}
+
+export type BiExportJobStatus = typeof BiExportJobStatus[keyof typeof BiExportJobStatus];
+
+
+export const BiExportJobStatus = {
+  pendente: 'pendente',
+  processando: 'processando',
+  concluida: 'concluida',
+  erro: 'erro',
+  expirada: 'expirada',
+} as const;
+
+export interface BiExportJob {
+  id: string;
+  /** @nullable */
+  campanha_id: string | null;
+  filtro: BiExportFilter;
+  /** @nullable */
+  periodo_inicio: string | null;
+  /** @nullable */
+  periodo_fim: string | null;
+  status: BiExportJobStatus;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  total_linhas: number | null;
+  /** @minimum 0 */
+  linhas_processadas: number;
+  criado_em: string;
+  /** @nullable */
+  concluido_em: string | null;
+  /** @nullable */
+  expira_em: string | null;
+  /** @nullable */
+  erro: string | null;
+  disponivel_para_download: boolean;
+}
+
+export interface BiExportJobsResponse {
+  jobs: BiExportJob[];
 }
 
 export interface Error {
@@ -192,6 +277,14 @@ export interface CampaignRecipientSummary {
   status: RecipientStatusSummary;
   reputacao: RecipientReputationSummary;
   metricas_email: CampaignEmailMetrics;
+  status_lembrete: RecipientStatusSummary;
+  metricas_email_lembrete: CampaignEmailMetrics;
+  /** @minimum 0 */
+  desengajados_total: number;
+  /** @minimum 0 */
+  desengajados_na_lista: number;
+  /** @minimum 0 */
+  bloqueados_desengajados: number;
   recencia: RecipientRecencyBucket[];
 }
 
@@ -271,10 +364,14 @@ export interface EmailImageBlock {
   /** @minLength 1 */
   id: string;
   type: EmailImageBlockType;
+  /** @pattern ^https:// */
   src: string;
   /** @maxLength 160 */
   alt: string;
-  /** @nullable */
+  /**
+     * @nullable
+     * @pattern ^https://
+     */
   href?: string | null;
 }
 
@@ -294,6 +391,7 @@ export interface EmailButtonBlock {
      * @maxLength 120
      */
   label: string;
+  /** @pattern ^https:// */
   href: string;
 }
 
@@ -323,6 +421,11 @@ export interface Campaign {
   preheader: string | null;
   /** @nullable */
   assunto_lembrete: string | null;
+  /** @nullable */
+  corpo_lembrete: EmailBlock[] | null;
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  cor_botao_snapshot: string;
+  incluir_desengajados: boolean;
   remetente_nome: string;
   remetente_email: string;
   /** @nullable */
@@ -356,8 +459,10 @@ export interface Campaign {
   status: CampaignStatus;
   /** @nullable */
   agendada_para: string | null;
-  lembrete_ativo: boolean;
-  /** @minimum 1 */
+  /**
+     * @minimum 24
+     * @maximum 168
+     */
   lembrete_horas: number;
   teste_enviado: boolean;
   /** @nullable */
@@ -378,6 +483,8 @@ export interface CreateCampaignInput {
   preheader?: string | null;
   /** @nullable */
   assunto_lembrete?: string | null;
+  /** @nullable */
+  corpo_lembrete?: EmailBlock[] | null;
   /** @minLength 1 */
   remetente_nome: string;
   remetente_email: string;
@@ -393,12 +500,12 @@ export interface CreateCampaignInput {
   teto_dia?: number;
   /** @nullable */
   agendada_para?: string | null;
-  lembrete_ativo?: boolean;
   /**
      * @minimum 24
      * @maximum 168
      */
   lembrete_horas?: number;
+  incluir_desengajados?: boolean;
   corpo?: EmailBlock[];
 }
 
@@ -417,6 +524,8 @@ export interface UpdateCampaignInput {
   preheader?: string | null;
   /** @nullable */
   assunto_lembrete?: string | null;
+  /** @nullable */
+  corpo_lembrete?: EmailBlock[] | null;
   /** @minLength 1 */
   remetente_nome?: string;
   remetente_email?: string;
@@ -432,12 +541,12 @@ export interface UpdateCampaignInput {
   teto_dia?: number;
   /** @nullable */
   agendada_para?: string | null;
-  lembrete_ativo?: boolean;
   /**
      * @minimum 24
      * @maximum 168
      */
   lembrete_horas?: number;
+  incluir_desengajados?: boolean;
   corpo?: EmailBlock[];
 }
 

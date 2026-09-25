@@ -17,7 +17,6 @@ const FIELD_LABELS: Record<string, string> = {
   teto_dia: "teto por dia",
   status: "status",
   agendada_para: "agendamento",
-  lembrete_ativo: "lembrete ativo",
   lembrete_horas: "horas até o lembrete",
   teste_enviado: "teste enviado",
   corpo: "corpo do e-mail",

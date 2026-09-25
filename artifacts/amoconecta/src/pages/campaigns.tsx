@@ -14,6 +14,7 @@ import {
   Menu,
   Pause,
   Play,
+  Plus,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -62,11 +63,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   type EmailBlock,
   normalizeEmailBlocks,
+  validateEmailBlockUrls,
   validateEmailButtonDestinations,
 } from '@workspace/email-template';
 import { EmailEditor } from '../components/EmailEditor';
 
-type SessionUser = { email: string } | null;
+export type SessionUser = { email: string } | null;
 
 const statusLabels: Record<string, string> = {
   rascunho: 'Rascunho',
@@ -259,20 +261,21 @@ function toDateInput(value: string | null | undefined) {
   return value.slice(0, 10);
 }
 
-function isHttpUrl(value: string) {
-  return /^https?:\/\/[^\s]+$/iu.test(value.trim());
-}
-
 function validateEmailBlocks(blocks: EmailBlock[]) {
   for (const block of blocks) {
     if (block.type === 'image') {
-      if (!block.src || !isHttpUrl(block.src)) return 'Envie uma imagem antes de salvar o bloco de imagem.';
-      if (block.href?.trim() && !isHttpUrl(block.href)) return 'O link opcional da imagem precisa começar com https:// ou http://.';
+      if (!block.src) return 'Envie uma imagem antes de salvar o bloco de imagem.';
     }
     if (block.type === 'button') {
       if (!block.label.trim()) return 'Informe o rótulo de todos os botões.';
     }
   }
+  const urlIssues = validateEmailBlockUrls(blocks.map((block) => (
+    block.type === 'image' && !block.href?.trim()
+      ? { ...block, href: undefined }
+      : block
+  )));
+  if (urlIssues.length > 0) return urlIssues.map((issue) => issue.message).join(' ');
   const buttonDestinationErrors = validateEmailButtonDestinations(blocks);
   if (buttonDestinationErrors.length > 0) {
     return buttonDestinationErrors.map((issue) => issue.message).join(' ');
@@ -304,7 +307,7 @@ function AmoMark({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function Shell({
+export function Shell({
   user,
   children,
   title,
@@ -351,6 +354,22 @@ function Shell({
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#d7ef56] text-[#263044]"><Mail size={15} /></span>
               Campanhas
             </Link>
+    <Link
+      href="/bi-exports"
+      onClick={() => setMobileNavOpen(false)}
+      className="focus-ring mt-2 flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[#d0d7e2] hover:bg-[#354157]"
+      data-testid="link-bi-exports"
+    >
+      Exportações BI
+    </Link>
+    <Link
+      href="/settings"
+      onClick={() => setMobileNavOpen(false)}
+      className="focus-ring mt-2 flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[#d0d7e2] hover:bg-[#354157]"
+      data-testid="link-email-settings"
+    >
+      Identidade do e-mail
+    </Link>
           </nav>
         </div>
         <div className="mt-auto rounded-2xl border border-[#3b475c] bg-[#2d3950] p-4">
@@ -528,9 +547,10 @@ type CampaignFormValues = {
   teto_hora: string;
   teto_dia: string;
   agendada_para: string;
-  lembrete_ativo: boolean;
   lembrete_horas: string;
   corpo: EmailBlock[];
+  corpo_lembrete: EmailBlock[];
+  incluir_desengajados: boolean;
 };
 
 function blankCampaign(
@@ -553,9 +573,10 @@ function blankCampaign(
     teto_hora: hourCap,
     teto_dia: dayCap,
     agendada_para: '',
-    lembrete_ativo: false,
     lembrete_horas: '48',
     corpo: [],
+    corpo_lembrete: [],
+    incluir_desengajados: false,
   };
 }
 
@@ -581,9 +602,10 @@ function campaignToForm(
     teto_hora: campaign.teto_hora == null ? '' : String(campaign.teto_hora),
     teto_dia: campaign.teto_dia == null ? '' : String(campaign.teto_dia),
     agendada_para: toDateTimeLocal(campaign.agendada_para),
-    lembrete_ativo: campaign.lembrete_ativo,
     lembrete_horas: String(campaign.lembrete_horas ?? 48),
     corpo: normalizeEmailBlocks(campaign.corpo),
+    corpo_lembrete: normalizeEmailBlocks(campaign.corpo_lembrete ?? []),
+    incluir_desengajados: campaign.incluir_desengajados,
   };
 }
 
@@ -593,6 +615,33 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 function campaignContentIsLocked(status?: string): boolean {
   return status === 'agendada' || status === 'enviando' || status === 'pausada';
+}
+
+function blocksForUrlValidation(blocks: EmailBlock[]) {
+  return blocks.map((block) => (
+    block.type === 'image' && !block.href?.trim()
+      ? { ...block, href: undefined }
+      : block
+  ));
+}
+
+function urlErrorsForBlocks(blocks: EmailBlock[]) {
+  return validateEmailBlockUrls(blocksForUrlValidation(blocks));
+}
+
+function reminderState(subject: string, blocks: EmailBlock[], mainSubject: string) {
+  const normalizedSubject = subject.trim().toLocaleLowerCase('pt-BR');
+  const normalizedMainSubject = mainSubject.trim().toLocaleLowerCase('pt-BR');
+  const hasSubject = Boolean(subject.trim());
+  const hasBody = blocks.length > 0;
+  const hasAny = hasSubject || hasBody;
+  const distinct = hasSubject && normalizedSubject !== normalizedMainSubject;
+  return {
+    hasAny,
+    complete: hasSubject && hasBody && distinct,
+    incomplete: hasAny && !(hasSubject && hasBody && distinct),
+    distinct,
+  };
 }
 
 function useUnsavedChangesGuard(isDirty: boolean) {
@@ -704,20 +753,40 @@ function CampaignForm({
       defaultsQuery.data?.teto_dia == null ? '1000' : String(defaultsQuery.data.teto_dia),
     ),
   });
+  const [reminderEditorOpen, setReminderEditorOpen] = useState(Boolean(campaign?.assunto_lembrete || campaign?.corpo_lembrete?.length));
   const saveLabel = campaign ? 'Salvar alterações' : draftId ? 'Salvar rascunho' : 'Criar campanha';
   const contentLocked = campaignContentIsLocked(campaign?.status);
   const emailBlocks = form.watch('corpo');
+  const reminderBlocks = form.watch('corpo_lembrete');
   const buttonHrefErrors = useMemo(
     () => new Map(
       validateEmailButtonDestinations(emailBlocks).map((issue) => [issue.blockId, issue.message] as const),
     ),
     [emailBlocks],
   );
+  const reminderButtonHrefErrors = useMemo(
+    () => new Map(
+      validateEmailButtonDestinations(reminderBlocks).map((issue) => [issue.blockId, issue.message] as const),
+    ),
+    [reminderBlocks],
+  );
+  const blockUrlErrors = useMemo(
+    () => new Map(urlErrorsForBlocks(emailBlocks).map((issue) => [`${issue.blockId}:${issue.field}`, issue.message] as const)),
+    [emailBlocks],
+  );
+  const reminderBlockUrlErrors = useMemo(
+    () => new Map(urlErrorsForBlocks(reminderBlocks).map((issue) => [`${issue.blockId}:${issue.field}`, issue.message] as const)),
+    [reminderBlocks],
+  );
   const emailSubject = form.watch('assunto');
+  const reminderSubject = form.watch('assunto_lembrete');
+  const includeDisengaged = form.watch('incluir_desengajados');
   const preheader = form.watch('preheader');
   const scheduledAt = form.watch('agendada_para');
   const scheduledAtLongLabel = formatLongDateTime(scheduledAt);
   const isDirty = form.formState.isDirty;
+  const currentReminderState = reminderState(reminderSubject, reminderBlocks, emailSubject);
+  const buttonColor = campaign?.cor_botao_snapshot ?? defaultsQuery.data?.cor_botao_email ?? '#e96527';
   useUnsavedChangesGuard(isDirty);
   const [uploadingBlockIds, setUploadingBlockIds] = useState<Set<string>>(() => new Set());
   const isUploadPending = uploadingBlockIds.size > 0;
@@ -744,6 +813,7 @@ function CampaignForm({
       defaultsQuery.data?.teto_hora == null ? '100' : String(defaultsQuery.data.teto_hora),
       defaultsQuery.data?.teto_dia == null ? '1000' : String(defaultsQuery.data.teto_dia),
     ));
+    setReminderEditorOpen(Boolean(campaign?.assunto_lembrete || campaign?.corpo_lembrete?.length));
   }, [
     campaign,
     defaultsQuery.data?.remetente_email,
@@ -782,11 +852,27 @@ function CampaignForm({
       form.setError('corpo', { type: 'validate', message: contentError });
       return false;
     }
+    const reminderContentError = validateEmailBlocks(values.corpo_lembrete);
+    if (reminderContentError) {
+      form.setError('corpo_lembrete', { type: 'validate', message: reminderContentError });
+      return false;
+    }
+    const reminder = reminderState(values.assunto_lembrete, values.corpo_lembrete, values.assunto);
+    const reminderHours = Number(values.lembrete_horas);
+    if (reminder.complete && (!Number.isFinite(reminderHours) || reminderHours < 24 || reminderHours > 168)) {
+      form.setError('lembrete_horas', { type: 'validate', message: 'O lembrete precisa ficar entre 24 e 168 horas.' });
+      return false;
+    }
     return true;
   };
 
   const makePayload = (values: CampaignFormValues) => {
     const corpo = values.corpo.map((block) => (
+      block.type === 'image' && !block.href?.trim()
+        ? { ...block, href: undefined }
+        : block
+    ));
+    const corpoLembrete = values.corpo_lembrete.map((block) => (
       block.type === 'image' && !block.href?.trim()
         ? { ...block, href: undefined }
         : block
@@ -804,9 +890,10 @@ function CampaignForm({
       teto_hora: nullableNumber(values.teto_hora) ?? 100,
       teto_dia: nullableNumber(values.teto_dia) ?? 1000,
       agendada_para: toServerDate(values.agendada_para),
-      lembrete_ativo: values.lembrete_ativo,
       lembrete_horas: Math.min(168, Math.max(24, Number(values.lembrete_horas) || 48)),
       corpo,
+      corpo_lembrete: corpoLembrete.length > 0 ? corpoLembrete : null,
+      incluir_desengajados: values.incluir_desengajados,
     };
     return payload;
   };
@@ -825,6 +912,7 @@ function CampaignForm({
       defaultsQuery.data?.teto_hora == null ? '100' : String(defaultsQuery.data.teto_hora),
       defaultsQuery.data?.teto_dia == null ? '1000' : String(defaultsQuery.data.teto_dia),
     ));
+    setReminderEditorOpen(Boolean(saved.assunto_lembrete || saved.corpo_lembrete?.length));
     onSaved(saved);
     return saved;
   };
@@ -871,7 +959,6 @@ function CampaignForm({
           <Field label="Nome interno"><input {...form.register('nome')} className="field-control" placeholder="Ex.: Ofertas de sexta — eletrônicos" data-testid="input-campaign-name" /></Field>
             <Field label="Assunto principal"><input {...form.register('assunto')} disabled={contentLocked} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Ex.: As melhores ofertas chegaram" data-testid="input-campaign-subject" /></Field>
             <div className="md:col-span-2"><Field label="Prévia na caixa de entrada" hint="Opcional. Resumo curto exibido ao lado do assunto em alguns clientes de e-mail."><input {...form.register('preheader')} disabled={contentLocked} maxLength={100} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Ex.: Aproveite as ofertas escolhidas para você" data-testid="input-campaign-preheader" /><p className="mt-1 text-right font-mono text-[10px] text-[#99959a]">{(preheader?.length ?? 0)}/100</p></Field></div>
-           <div className="md:col-span-2"><Field label="Assunto do lembrete" hint="Opcional. Usado para identificar uma eventual mensagem de lembrete."><input {...form.register('assunto_lembrete')} disabled={contentLocked} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Ex.: Você ainda pode aproveitar estas ofertas" data-testid="input-campaign-reminder-subject" /></Field></div>
         </div>
         {form.formState.errors.nome && <p className="mt-4 flex items-center gap-2 text-xs font-bold text-[#bd4f26]" data-testid="error-campaign-form"><CircleAlert size={14} /> {form.formState.errors.nome.message}</p>}
       </section>
@@ -899,9 +986,14 @@ function CampaignForm({
       <EmailEditor
         blocks={emailBlocks}
         buttonHrefErrors={buttonHrefErrors}
+         blockUrlErrors={blockUrlErrors}
         onChange={(blocks) => form.setValue('corpo', blocks, { shouldDirty: true })}
         campaignId={campaign?.id ?? draftId}
         subject={emailSubject}
+         buttonColor={buttonColor}
+         previewBlocks={reminderEditorOpen ? reminderBlocks : undefined}
+         previewSubject={reminderEditorOpen ? reminderSubject : undefined}
+         contentKind="main"
          valorCredito={nullableNumber(form.watch('valor_credito'))}
          validadeCredito={form.watch('validade_credito') || null}
          disabled={contentLocked}
@@ -912,6 +1004,52 @@ function CampaignForm({
         testSent={testSent}
          testDisabledReason={isDirty ? 'Salve as alterações antes de enviar o teste.' : null}
       />
+       <section className="panel p-5 sm:p-7" data-testid="panel-campaign-reminder">
+         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+           <div>
+             <p className="section-kicker">04B · Lembrete</p>
+             <h2 className="mt-2 text-lg font-extrabold tracking-[-.04em] text-[#263044]">Uma segunda chance, sem ambiguidade.</h2>
+             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#747783]">Adicione uma mensagem de lembrete apenas quando ela tiver assunto diferente e corpo próprio. Limpe os dois campos para remover o lembrete.</p>
+           </div>
+           {reminderEditorOpen ? (
+             <button type="button" disabled={contentLocked} onClick={() => { form.setValue('assunto_lembrete', '', { shouldDirty: true }); form.setValue('corpo_lembrete', [], { shouldDirty: true }); setReminderEditorOpen(false); }} className="action-button action-button-secondary shrink-0 !text-[#a64220] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-remove-reminder"><Trash2 size={14} /> Remover lembrete</button>
+           ) : (
+             <button type="button" disabled={contentLocked} onClick={() => setReminderEditorOpen(true)} className="action-button action-button-secondary shrink-0 disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-add-reminder"><Plus size={14} /> Adicionar lembrete</button>
+           )}
+         </div>
+         {reminderEditorOpen && (
+           <div className="mt-6 space-y-5 border-t border-[#eee7dc] pt-6">
+             <Field label="Assunto do lembrete" hint="Precisa ser diferente do assunto principal.">
+               <input {...form.register('assunto_lembrete')} disabled={contentLocked} className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" placeholder="Ex.: Você ainda pode aproveitar estas ofertas" data-testid="input-campaign-reminder-subject" />
+             </Field>
+             {currentReminderState.incomplete ? (
+               <div className="flex items-start gap-2 rounded-xl border border-[#e8c56f] bg-[#fff7dc] px-4 py-3 text-xs leading-5 text-[#74561c]" role="status" data-testid="status-reminder-incomplete">
+                 <CircleAlert size={15} className="mt-0.5 shrink-0" />
+                 <span>Incompleto: informe um assunto diferente e adicione pelo menos um bloco ao corpo do lembrete. Enquanto estiver assim, o agendamento fica bloqueado.</span>
+               </div>
+             ) : (
+               <div className="flex items-center gap-2 rounded-xl border border-[#b9d9bc] bg-[#eef7ee] px-4 py-3 text-xs font-semibold text-[#3f7b46]" role="status" data-testid="status-reminder-ready"><CheckCircle2 size={15} /> Lembrete pronto para revisão.</div>
+             )}
+             <EmailEditor
+               blocks={reminderBlocks}
+               buttonHrefErrors={reminderButtonHrefErrors}
+               blockUrlErrors={reminderBlockUrlErrors}
+               onChange={(blocks) => form.setValue('corpo_lembrete', blocks, { shouldDirty: true })}
+               campaignId={campaign?.id ?? draftId}
+               subject={reminderSubject}
+               previewBlocks={emailBlocks}
+               previewSubject={emailSubject}
+               contentKind="reminder"
+               buttonColor={buttonColor}
+               valorCredito={nullableNumber(form.watch('valor_credito'))}
+               validadeCredito={form.watch('validade_credito') || null}
+               disabled={contentLocked}
+               showTestButton={false}
+             />
+             {form.formState.errors.corpo_lembrete?.message && <p className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" data-testid="error-reminder-content">{form.formState.errors.corpo_lembrete.message}</p>}
+           </div>
+         )}
+       </section>
        {contentLocked && <p className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] px-4 py-3 text-xs leading-5 text-[#6d7180]" role="status" data-testid="campaign-content-locked">O corpo, assunto, remetente e links ficam bloqueados enquanto a campanha está agendada, enviando ou pausada.</p>}
       {form.formState.errors.corpo?.message && <p className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" data-testid="error-email-content">{form.formState.errors.corpo.message}</p>}
       {isUploadPending && <p className="flex items-center gap-2 rounded-xl border border-[#d4e5df] bg-[#f1f7f5] px-4 py-3 text-xs text-[#247b79]" role="status" data-testid="status-image-upload-blocking"><LoaderCircle size={14} className="animate-spin" /> Aguarde o upload das imagens terminar para salvar a campanha.</p>}
@@ -962,10 +1100,16 @@ function CampaignForm({
             </div>
             <Field label="Horas até o lembrete"><input {...form.register('lembrete_horas')} type="number" min="24" max="168" className="field-control" data-testid="input-reminder-hours" /></Field>
         </div>
-        <div className="mt-6 grid gap-3 border-t border-[#eee7dc] pt-5 sm:grid-cols-2">
-          <label className="flex items-start gap-3 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3 text-xs text-[#565c6a]"><input {...form.register('lembrete_ativo')} type="checkbox" className="mt-0.5 accent-[#e96527]" data-testid="checkbox-reminder-active" /><span><strong className="block text-[#263044]">Lembrete ativo</strong><span className="mt-1 block leading-5">Deixa o lembrete habilitado para a operação.</span></span></label>
+         <div className="mt-6 grid gap-3 border-t border-[#eee7dc] pt-5 sm:grid-cols-2">
+           <label className="flex items-start gap-3 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3 text-xs text-[#565c6a]"><input {...form.register('incluir_desengajados')} type="checkbox" className="mt-0.5 accent-[#e96527]" data-testid="checkbox-include-disengaged" /><span><strong className="block text-[#263044]">Incluir desengajados</strong><span className="mt-1 block leading-5">Permite incluir contatos fora da janela usual de engajamento nesta campanha.</span></span></label>
            <div className="flex items-start gap-3 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3 text-xs text-[#565c6a]" data-testid="status-test-sent"><CheckCircle2 size={15} className={`mt-0.5 ${campaign?.teste_enviado ? 'text-[#417846]' : 'text-[#aaa3a1]'}`} /><span><strong className="block text-[#263044]">Teste de conteúdo</strong><span className="mt-1 block leading-5">{campaign?.teste_enviado_em ? `Teste enviado em ${new Date(campaign.teste_enviado_em).toLocaleDateString('pt-BR')} às ${new Date(campaign.teste_enviado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Nenhum teste enviado ainda.'}</span></span></div>
-        </div>
+         </div>
+         {includeDisengaged && (
+           <div className="mt-4 flex items-start gap-2 rounded-xl border-2 border-[#e8c56f] bg-[#fff7dc] px-4 py-3 text-xs leading-5 text-[#74561c]" role="alert" data-testid="warning-include-disengaged">
+             <CircleAlert size={15} className="mt-0.5 shrink-0 text-[#b47b1c]" />
+             <span><strong>Operação sensível:</strong> os padrões globais indicam {defaultsQuery.data ? formatNumber(defaultsQuery.data.desengajados_total) : '…'} contatos desengajados. Confirme se essa inclusão é intencional antes de salvar e agendar.</span>
+           </div>
+         )}
          {(campaign?.status === 'enviando' || campaign?.status === 'pausada') && (
            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[#eee7dc] pt-5" data-testid="campaign-live-controls">
              <div><p className="text-xs font-extrabold text-[#263044]">Controles do envio</p><p className="mt-1 text-[11px] text-[#777984]">{campaign.status === 'enviando' ? 'Pause o disparo se precisar interromper a operação.' : 'Retome o disparo quando estiver pronto para continuar.'}</p></div>
@@ -1797,8 +1941,20 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       setOperationError('O agendamento precisa estar no futuro.');
       return;
     }
-    if (latestCampaign.lembrete_ativo && (latestCampaign.lembrete_horas < 24 || latestCampaign.lembrete_horas > 168 || !latestCampaign.assunto_lembrete?.trim() || latestCampaign.assunto_lembrete.trim().toLocaleLowerCase('pt-BR') === latestCampaign.assunto.trim().toLocaleLowerCase('pt-BR'))) {
-      setOperationError('Revise o assunto e o intervalo do lembrete (24 a 168 horas).');
+    const latestReminderBlocks = normalizeEmailBlocks(latestCampaign.corpo_lembrete ?? []);
+    const latestReminder = reminderState(latestCampaign.assunto_lembrete ?? '', latestReminderBlocks, latestCampaign.assunto);
+    if (latestReminder.incomplete) {
+      setOperationError('O lembrete está incompleto: informe um assunto diferente e um corpo com pelo menos um bloco, ou limpe os dois para removê-lo.');
+      return;
+    }
+    if (latestReminder.complete && (latestCampaign.lembrete_horas < 24 || latestCampaign.lembrete_horas > 168)) {
+      setOperationError('Revise o intervalo do lembrete: ele precisa ficar entre 24 e 168 horas.');
+      return;
+    }
+    const mainContentError = validateEmailBlocks(normalizeEmailBlocks(latestCampaign.corpo));
+    const reminderContentError = validateEmailBlocks(latestReminderBlocks);
+    if (mainContentError || reminderContentError) {
+      setOperationError(mainContentError ?? reminderContentError ?? 'Revise os links do conteúdo antes de agendar.');
       return;
     }
     const buttonDestinationErrors = validateEmailButtonDestinations(latestCampaign.corpo);

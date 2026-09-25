@@ -8,6 +8,11 @@
 
 export * from './authSession';
 export * from './authUser';
+export * from './biExportFilter';
+export * from './biExportJob';
+export * from './biExportJobsResponse';
+export * from './biExportJobStatus';
+export * from './biExportRequest';
 export * from './campaign';
 export * from './campaignDefaults';
 export * from './campaignDraftInput';
@@ -21,6 +26,8 @@ export * from './campaignStatus';
 export * from './createCampaignInput';
 export * from './detailedError';
 export * from './emailBlock';
+export * from './emailBranding';
+export * from './emailBrandingUpdate';
 export * from './emailButtonBlock';
 export * from './emailButtonBlockType';
 export * from './emailDividerBlock';
@@ -30,6 +37,7 @@ export * from './emailImageBlockType';
 export * from './emailImageUploadUrl';
 export * from './emailTextBlock';
 export * from './emailTextBlockType';
+export * from './engagementSummary';
 export * from './error';
 export * from './healthStatus';
 export * from './importUploadUrl';

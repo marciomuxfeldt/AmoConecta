@@ -5,6 +5,7 @@ import campaignsRouter from "./campaigns";
 import importsRouter from "./imports";
 import safetyRouter from "./safety";
 import unsubscribeRouter from "./unsubscribe";
+import engagementRouter from "./engagement";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(campaignsRouter);
 router.use(importsRouter);
 router.use(safetyRouter);
 router.use(unsubscribeRouter);
+router.use(engagementRouter);
 
 export default router;

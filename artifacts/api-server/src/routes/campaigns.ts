@@ -24,9 +24,14 @@ import {
 } from "../lib/technical-error";
 import {
   normalizeEmailBlocks,
+  validateEmailBlockUrls,
   validateEmailButtonDestinations,
 } from "@workspace/email-template";
 import { sendTestEmail } from "../lib/worker";
+import {
+  countChronicDisengagedContacts,
+  getEmailBrandingSettings,
+} from "../lib/email-branding";
 import { getTestSendErrorResponse } from "../lib/test-send-error";
 import { formatValidationError } from "../lib/validation";
 import {
@@ -50,7 +55,7 @@ import {
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
-  "id,nome,assunto,assunto_lembrete,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,status,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em";
+  "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,status,agendada_para,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em";
 // Public by design: this bucket contains only e-mail image assets.
 // Never reuse the private CSV bucket from routes/imports.ts here.
 const EMAIL_ASSET_BUCKET = "amoconecta-assets";
@@ -100,7 +105,67 @@ function dateOnlyValue(value: unknown): string | null {
   return result ? result.slice(0, 10) : null;
 }
 
-function campaignPayload(input: Record<string, unknown>, partial = false) {
+function emailBlocksHaveContent(value: unknown): boolean {
+  return normalizeEmailBlocks(value).some((block) => {
+    if (block.type === "image") return block.src !== "#";
+    if (block.type === "button") return Boolean(block.label.trim() && block.href.trim());
+    if (block.type === "text") {
+      return block.html
+        .replace(/<[^>]*>/gu, "")
+        .replace(/&nbsp;/giu, " ")
+        .trim().length > 0;
+    }
+    return false;
+  });
+}
+
+function emailBlockUrlError(value: unknown): string | null {
+  const issues = validateEmailBlockUrls(value);
+  if (issues.length === 0) return null;
+  return issues
+    .map((issue) =>
+      issue.suggestion
+        ? `${issue.message} Se quiser, confirme esta sugestão: ${issue.suggestion}.`
+        : issue.message,
+    )
+    .join(" ");
+}
+
+function reminderContentError(campaign: {
+  assunto?: unknown;
+  assunto_lembrete?: unknown;
+  corpo_lembrete?: unknown;
+  lembrete_horas?: unknown;
+}): string | null {
+  const subject =
+    typeof campaign.assunto_lembrete === "string"
+      ? campaign.assunto_lembrete.trim()
+      : "";
+  const hasBody = emailBlocksHaveContent(campaign.corpo_lembrete);
+  if (!subject && !hasBody) return null;
+  if (!subject || !hasBody) {
+    return "Um lembrete precisa ter assunto e corpo próprios. Sem os dois, ele não será enviado.";
+  }
+  const primarySubject =
+    typeof campaign.assunto === "string" ? campaign.assunto.trim() : "";
+  if (
+    subject.toLocaleLowerCase("pt-BR") ===
+    primarySubject.toLocaleLowerCase("pt-BR")
+  ) {
+    return "O assunto do lembrete precisa ser diferente do assunto principal.";
+  }
+  const hours = Number(campaign.lembrete_horas);
+  if (!Number.isInteger(hours) || hours < 24 || hours > 168) {
+    return "As horas até o lembrete devem estar entre 24 e 168.";
+  }
+  return null;
+}
+
+function campaignPayload(
+  input: Record<string, unknown>,
+  partial = false,
+  buttonColorSnapshot?: string,
+) {
   const payload: Record<string, unknown> = {};
   const stringFields = [
     "nome",
@@ -134,11 +199,20 @@ function campaignPayload(input: Record<string, unknown>, partial = false) {
   if (!partial || "agendada_para" in input) {
     payload.agendada_para = dateValue(input.agendada_para);
   }
-  if (!partial || "lembrete_ativo" in input) {
-    payload.lembrete_ativo = input.lembrete_ativo ?? false;
-  }
   if (!partial || "lembrete_horas" in input) {
     payload.lembrete_horas = input.lembrete_horas ?? 48;
+  }
+  if (!partial || "corpo_lembrete" in input) {
+    const reminderBlocks = normalizeEmailBlocks(input.corpo_lembrete);
+    payload.corpo_lembrete = emailBlocksHaveContent(reminderBlocks)
+      ? reminderBlocks
+      : null;
+  }
+  if (!partial || "incluir_desengajados" in input) {
+    payload.incluir_desengajados = input.incluir_desengajados === true;
+  }
+  if (!partial && buttonColorSnapshot) {
+    payload.cor_botao_snapshot = buttonColorSnapshot;
   }
   if (!partial) payload.teste_enviado = false;
   if (!partial || "corpo" in input) {
@@ -227,12 +301,13 @@ async function countMainRecipients(
     isNotNull?: string;
     statuses?: readonly string[];
   },
+  isReminder = false,
 ): Promise<number> {
   let request = supabaseAdminClient()
     .from("destinatario")
     .select("id", { count: "exact", head: true })
     .eq("campanha_id", campaignId)
-    .eq("is_lembrete", false);
+    .eq("is_lembrete", isReminder);
 
   if (query?.gte) request = request.gte("data_ultima_compra", query.gte);
   if (query?.lt) request = request.lt("data_ultima_compra", query.lt);
@@ -307,6 +382,7 @@ function classifyBounceType(value: unknown): BounceClassification {
 
 async function loadCampaignEmailRollups(
   campaignIds: string[],
+  isReminder = false,
 ): Promise<Map<string, CampaignEmailRollup>> {
   const output = new Map<string, CampaignEmailRollup>();
   for (const id of campaignIds) output.set(id, emptyEmailRollup());
@@ -347,7 +423,7 @@ async function loadCampaignEmailRollups(
         "campanha_id,email,status,enviado_em,entregue_em,aberto_em,clicado_em,descadastrado_em",
       )
       .in("campanha_id", campaignIds)
-      .eq("is_lembrete", false)
+      .eq("is_lembrete", isReminder)
       .order("id", { ascending: true })
       .range(offset, offset + pageSize - 1);
     if (error) throw error;
@@ -468,12 +544,17 @@ async function recipientSummary(campaignId: string) {
     ["pendente", ["pendente", "processando"]],
     ["enviado", ["enviado"]],
     ["entregue", ["entregue", "aberto", "clicado"]],
-    ["bloqueado", ["bloqueado_modo_teste"]],
+    ["bloqueado", ["bloqueado_modo_teste", "bloqueado_desengajado"]],
     ["suprimido", ["suprimido"]],
     ["erro", ["erro"]],
   ] as const;
   const statusCounts = await Promise.all(
     statusQueries.map(async ([, statuses]) => countMainRecipients(campaignId, { statuses })),
+  );
+  const reminderStatusCounts = await Promise.all(
+    statusQueries.map(async ([, statuses]) =>
+      countMainRecipients(campaignId, { statuses }, true),
+    ),
   );
   const recencyQueries = [
     { gte: dateOnlyDaysAgo(30), lte: today },
@@ -486,18 +567,35 @@ async function recipientSummary(campaignId: string) {
   const recencyCounts = await Promise.all(
     recencyQueries.map((query) => countMainRecipients(campaignId, query)),
   );
-  const [deliveryProjection, emailRollups] = await Promise.all([
+  const [
+    deliveryProjection,
+    emailRollups,
+    reminderRollups,
+    disengagedCount,
+  ] = await Promise.all([
     recipientDeliveryProjection(supabaseAdminClient(), campaignId),
     loadCampaignEmailRollups([campaignId]),
+    loadCampaignEmailRollups([campaignId], true),
+    countChronicDisengagedContacts(),
   ]);
   const email = emailRollups.get(campaignId) ?? emptyEmailRollup();
+  const reminderEmail = reminderRollups.get(campaignId) ?? emptyEmailRollup();
   const totalSent = email.enviados;
   const totalDelivered = email.entregues;
+  const reminderTotalSent = reminderEmail.enviados;
+  const reminderTotalDelivered = reminderEmail.entregues;
   const bounceRate =
     totalSent > 0 ? (email.bouncesPermanentes / totalSent) * 100 : 0;
   const complaintRate =
     totalDelivered > 0 ? (email.reclamacoes / totalDelivered) * 100 : 0;
   const metric = (quantity: number, denominator = totalDelivered) => ({
+    quantidade: quantity,
+    percentual: denominator > 0 ? (quantity / denominator) * 100 : 0,
+  });
+  const reminderMetric = (
+    quantity: number,
+    denominator = reminderTotalDelivered,
+  ) => ({
     quantidade: quantity,
     percentual: denominator > 0 ? (quantity / denominator) * 100 : 0,
   });
@@ -518,6 +616,38 @@ async function recipientSummary(campaignId: string) {
       suprimido: statusCounts[4],
       erro: statusCounts[5],
     },
+    status_lembrete: {
+      pendente: reminderStatusCounts[0],
+      enviado: reminderStatusCounts[1],
+      entregue: reminderStatusCounts[2],
+      bloqueado: reminderStatusCounts[3],
+      suprimido: reminderStatusCounts[4],
+      erro: reminderStatusCounts[5],
+    },
+    metricas_email_lembrete: {
+      enviados: reminderMetric(reminderEmail.enviados, reminderTotalSent),
+      entregues: reminderMetric(reminderEmail.entregues),
+      aberturas: reminderMetric(reminderEmail.aberturas),
+      cliques: reminderMetric(reminderEmail.cliques),
+      bounces: reminderMetric(reminderEmail.bounces, reminderTotalSent),
+      bounces_permanentes: reminderMetric(
+        reminderEmail.bouncesPermanentes,
+        reminderTotalSent,
+      ),
+      bounces_temporarios: reminderMetric(
+        reminderEmail.bouncesTemporarios,
+        reminderTotalSent,
+      ),
+      bounces_indeterminados: reminderMetric(
+        reminderEmail.bouncesIndeterminados,
+        reminderTotalSent,
+      ),
+      reclamacoes: reminderMetric(reminderEmail.reclamacoes),
+      descadastros: reminderMetric(reminderEmail.descadastros),
+    },
+    desengajados_total: disengagedCount,
+    desengajados_na_lista: deliveryProjection.desengajados_na_lista,
+    bloqueados_desengajados: deliveryProjection.bloqueados_desengajados,
     reputacao: {
       total_enviado: totalSent,
       total_entregue: totalDelivered,
@@ -595,7 +725,7 @@ async function findCampaign(campaignId: string) {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,status,assunto,preheader,assunto_lembrete,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,lembrete_ativo,lembrete_horas,teste_enviado,corpo,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao",
+      "id,status,assunto,preheader,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,lembrete_horas,teste_enviado,corpo,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -668,9 +798,11 @@ router.post("/campaigns/drafts", async (req, res): Promise<void> => {
       return;
     }
 
+    const buttonColorSnapshot =
+      (await getEmailBrandingSettings()).cor_botao_email;
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
-      .insert(campaignPayload(draftInput))
+      .insert(campaignPayload(draftInput, false, buttonColorSnapshot))
       .select(CAMPAIGN_COLUMNS)
       .single();
     if (error) {
@@ -705,15 +837,30 @@ router.post("/campaigns", async (req, res) => {
     res.status(422).json({ error: senderError });
     return;
   }
+  const contentUrlError =
+    emailBlockUrlError(parsed.data.corpo) ??
+    emailBlockUrlError(parsed.data.corpo_lembrete);
+  if (contentUrlError) {
+    res.status(422).json({ error: contentUrlError });
+    return;
+  }
   try {
     const session = await getSupabaseUser(req, res);
     if (!session) {
       res.status(401).json({ error: "Sessão expirada. Entre novamente." });
       return;
     }
+    const buttonColorSnapshot =
+      (await getEmailBrandingSettings()).cor_botao_email;
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
-      .insert(campaignPayload(parsed.data as Record<string, unknown>))
+      .insert(
+        campaignPayload(
+          parsed.data as Record<string, unknown>,
+          false,
+          buttonColorSnapshot,
+        ),
+      )
       .select(CAMPAIGN_COLUMNS)
       .single();
     if (error) {
@@ -799,20 +946,15 @@ async function validateSchedule(
   if (Date.parse(campaign.agendada_para) <= Date.now()) {
     return "O agendamento precisa estar no futuro.";
   }
-  if (campaign.lembrete_ativo) {
-    const reminderHours = Number(campaign.lembrete_horas);
-    if (!Number.isInteger(reminderHours) || reminderHours < 24 || reminderHours > 168) {
-      return "As horas até o lembrete devem estar entre 24 e 168.";
-    }
-    const reminderSubject = campaign.assunto_lembrete?.trim() ?? "";
-    if (!reminderSubject) {
-      return "Informe o assunto do lembrete quando o lembrete estiver ativo.";
-    }
-    if (reminderSubject.toLocaleLowerCase("pt-BR") === campaign.assunto.trim().toLocaleLowerCase("pt-BR")) {
-      return "O assunto do lembrete precisa ser diferente do assunto principal.";
-    }
-  }
-  const buttonDestinationErrors = validateEmailButtonDestinations(campaign.corpo);
+  const reminderError = reminderContentError(campaign);
+  if (reminderError) return reminderError;
+  const mainUrlError = emailBlockUrlError(campaign.corpo);
+  const reminderUrlError = emailBlockUrlError(campaign.corpo_lembrete);
+  if (mainUrlError || reminderUrlError) return mainUrlError ?? reminderUrlError;
+  const buttonDestinationErrors = [
+    ...validateEmailButtonDestinations(campaign.corpo),
+    ...validateEmailButtonDestinations(campaign.corpo_lembrete),
+  ];
   if (buttonDestinationErrors.length > 0) {
     return buttonDestinationErrors.map((issue) => issue.message).join(" ");
   }
@@ -820,6 +962,7 @@ async function validateSchedule(
   const delivery = await recipientDeliveryProjection(
     supabaseAdminClient(),
     campaign.id,
+    campaign.incluir_desengajados === true,
   );
   if (delivery.total_na_lista === 0) {
     return noEligibleRecipientsScheduleMessage(delivery);
@@ -1165,6 +1308,15 @@ router.patch("/campaigns/:campaignId", async (req, res) => {
           ? "Nenhum dado válido foi enviado."
           : formatValidationError(parsed.error),
     });
+    return;
+  }
+  const contentUrlError =
+    ("corpo" in parsed.data ? emailBlockUrlError(parsed.data.corpo) : null) ??
+    ("corpo_lembrete" in parsed.data
+      ? emailBlockUrlError(parsed.data.corpo_lembrete)
+      : null);
+  if (contentUrlError) {
+    res.status(422).json({ error: contentUrlError });
     return;
   }
   if (parsed.success && "remetente_email" in parsed.data) {

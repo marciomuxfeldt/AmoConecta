@@ -15,4 +15,8 @@ export interface CampaignDefaults {
   teto_hora: number;
   /** @minimum 0 */
   teto_dia: number;
+  /** @pattern ^#[0-9a-fA-F]{6}$ */
+  cor_botao_email: string;
+  /** @minimum 0 */
+  desengajados_total: number;
 }

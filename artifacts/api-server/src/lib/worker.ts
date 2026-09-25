@@ -4,6 +4,8 @@ import {
   renderEmailHtml,
   renderEmailText,
   interpolateEmailText,
+  validateEmailBlockUrls,
+  validateEmailButtonDestinations,
   type EmailBlock,
 } from "@workspace/email-template";
 import { supabaseAdminClient } from "./supabase";
@@ -15,6 +17,7 @@ import {
   type PreparedResendMessage,
   type ResendResult,
 } from "./resend-sender";
+import { processBiExportJobs } from "./worker-export";
 import {
   configuredSenderEmail,
   configuredReplyToEmail,
@@ -49,6 +52,10 @@ type Campaign = {
   validade_credito?: string | null;
   reply_to?: string | null;
   corpo: unknown;
+  cor_botao_snapshot?: string | null;
+  assunto_lembrete?: string | null;
+  corpo_lembrete?: unknown;
+  incluir_desengajados?: boolean | null;
   status: string;
   agendada_para?: string | null;
   teto_hora?: number | null;
@@ -66,6 +73,7 @@ export type WorkerRecipient = {
   status: string;
   tentativas: number;
   resend_email_id?: string | null;
+  desengajado_cronico?: boolean | null;
 };
 
 export class WorkerConfigurationError extends Error {}
@@ -134,11 +142,12 @@ export function unsubscribeUrl(email: string, campaignId: string): string {
 async function reserveRecipients(
   campaignId: string,
   limit = RESEND_BATCH_SIZE,
+  isReminder = false,
 ): Promise<WorkerRecipient[]> {
   const { data, error } = await supabaseAdminClient().rpc(WORKER_RPC, {
     p_campanha_id: campaignId,
     p_limite: limit,
-    p_is_lembrete: false,
+    p_is_lembrete: isReminder,
   });
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") {
@@ -211,7 +220,7 @@ async function loadCampaign(campaignId: string): Promise<Campaign | null> {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,nome,assunto,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,reply_to,corpo,status,agendada_para,teto_hora,teto_dia",
+      "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,reply_to,corpo,status,agendada_para,teto_hora,teto_dia",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -224,6 +233,22 @@ async function loadSuppressedEmails(emails: string[]): Promise<Set<string>> {
   const { data, error } = await supabaseAdminClient()
     .from("supressao")
     .select("email")
+    .in("email", emails);
+  if (error) throw error;
+  return new Set(
+    (data ?? [])
+      .map((row) => (typeof row.email === "string" ? normalize(row.email) : null))
+      .filter((email): email is string => Boolean(email)),
+  );
+}
+
+async function loadChronicEmails(emails: string[]): Promise<Set<string>> {
+  if (emails.length === 0) return new Set();
+  const { data, error } = await supabaseAdminClient()
+    .from("destinatario")
+    .select("email")
+    .eq("is_lembrete", false)
+    .eq("desengajado_cronico", true)
     .in("email", emails);
   if (error) throw error;
   return new Set(
@@ -287,21 +312,45 @@ function replyTo(campaign: Campaign): string | undefined {
   return undefined;
 }
 
+function validatedEmailBlocks(value: unknown): EmailBlock[] {
+  const blocks = normalizeEmailBlocks(value) as EmailBlock[];
+  const urlIssues = validateEmailBlockUrls(blocks);
+  const buttonIssues = validateEmailButtonDestinations(blocks).filter(
+    (issue) => issue.kind === "missing" || issue.kind === "test-domain",
+  );
+  const messages = [
+    ...urlIssues.map((issue) => issue.message),
+    ...buttonIssues.map((issue) => issue.message),
+  ];
+  if (messages.length > 0) {
+    throw new WorkerConfigurationError(
+      `Não é possível enviar o e-mail até corrigir os destinos: ${messages.join(" ")}`,
+    );
+  }
+  return blocks;
+}
+
 function emailPayload(
   campaign: Campaign,
   recipient: WorkerRecipient,
-  testAttemptId?: string,
+  options: { testAttemptId?: string; reminder?: boolean } = {},
 ): PreparedResendMessage {
-  const key = testAttemptId
-    ? testIdempotencyKey(campaign.id, recipient.email, testAttemptId)
-    : idempotencyKey(campaign.id, recipient.email, false);
+  const reminder = options.reminder === true;
+  const key = options.testAttemptId
+    ? testIdempotencyKey(campaign.id, recipient.email, options.testAttemptId)
+    : idempotencyKey(campaign.id, recipient.email, reminder);
   const unsubscribe = unsubscribeUrl(recipient.email, campaign.id);
-  const html = renderEmailHtml(normalizeEmailBlocks(campaign.corpo) as EmailBlock[], {
+  const blocks = validatedEmailBlocks(
+    reminder ? campaign.corpo_lembrete : campaign.corpo,
+  );
+  const subject = reminder ? campaign.assunto_lembrete : campaign.assunto;
+  const html = renderEmailHtml(blocks, {
     name: recipient.nome,
     valorCredito: campaign.valor_credito,
     validadeCredito: campaign.validade_credito,
     unsubscribeUrl: unsubscribe,
     preheader: campaign.preheader,
+    buttonColor: campaign.cor_botao_snapshot ?? undefined,
   });
   const templateOptions = {
     name: recipient.nome,
@@ -309,15 +358,16 @@ function emailPayload(
     validadeCredito: campaign.validade_credito,
     unsubscribeUrl: unsubscribe,
     preheader: campaign.preheader,
+    buttonColor: campaign.cor_botao_snapshot ?? undefined,
   };
   const campaignReplyTo = replyTo(campaign);
   return {
     from: sender(campaign),
     to: [recipient.email],
-    subject: interpolateEmailText(campaign.assunto, templateOptions),
+    subject: interpolateEmailText(subject ?? campaign.assunto, templateOptions),
     html,
     text: renderEmailText(
-      normalizeEmailBlocks(campaign.corpo) as EmailBlock[],
+      blocks,
       templateOptions,
     ),
     ...(campaignReplyTo ? { reply_to: campaignReplyTo } : {}),
@@ -332,11 +382,11 @@ function emailPayload(
 export async function sendBatch(
   campaign: Campaign,
   recipients: WorkerRecipient[],
-  options: { testAttemptId?: string } = {},
+  options: { testAttemptId?: string; reminder?: boolean } = {},
 ): Promise<ResendResult[]> {
   const apiKey = requiredEnv("RESEND_API_KEY");
   const messages = recipients.map((recipient) =>
-    emailPayload(campaign, recipient, options.testAttemptId),
+    emailPayload(campaign, recipient, options),
   );
   return sendResendMessages(apiKey, messages);
 }
@@ -356,8 +406,12 @@ function sleep(milliseconds: number): Promise<void> {
 
 async function markSuppressedOrBlocked(
   recipients: WorkerRecipient[],
+  campaign?: Campaign,
 ): Promise<WorkerRecipient[]> {
   const suppression = await loadSuppressedEmails(recipients.map((recipient) => recipient.email));
+  const chronic = campaign?.incluir_desengajados
+    ? new Set<string>()
+    : await loadChronicEmails(recipients.map((recipient) => recipient.email));
   const sendable: WorkerRecipient[] = [];
   for (const recipient of recipients) {
     if (suppression.has(normalize(recipient.email))) {
@@ -365,6 +419,14 @@ async function markSuppressedOrBlocked(
         status: "suprimido",
         processando_em: null,
         erro: "Destinatário presente na lista de supressão.",
+      });
+      continue;
+    }
+    if (chronic.has(normalize(recipient.email))) {
+      await updateRecipient(recipient.id, {
+        status: "suprimido",
+        processando_em: null,
+        erro: "Destinatário cronicamente desengajado; opt-in não confirmado.",
       });
       continue;
     }
@@ -384,11 +446,14 @@ async function markSuppressedOrBlocked(
 async function sendWithRetries(
   campaign: Campaign,
   recipients: WorkerRecipient[],
+  reminder = false,
 ): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
     try {
-      const results = await sendBatch(campaign, recipients);
+      const sendable = await markSuppressedOrBlocked(recipients, campaign);
+      if (sendable.length !== recipients.length) return;
+      const results = await sendBatch(campaign, recipients, { reminder });
       if (results.length !== recipients.length) {
         throw new Error(
           `Resend retornou ${results.length} resultado(s) para ${recipients.length} mensagem(ns).`,
@@ -616,6 +681,53 @@ async function quotaRemaining(campaign: Campaign): Promise<number> {
   return Math.min(RESEND_BATCH_SIZE, hourRemaining, dayRemaining);
 }
 
+async function enqueueReminders(campaignId: string, limit: number): Promise<number> {
+  const { data, error } = await supabaseAdminClient().rpc(
+    "enqueue_campaign_reminders",
+    { p_campaign_id: campaignId, p_limit: limit },
+  );
+  if (error) throw error;
+  return typeof data === "number" ? data : Number(data ?? 0);
+}
+
+async function processReminderQueue(campaign: Campaign): Promise<number> {
+  let processed = 0;
+  while (true) {
+    const remaining = await quotaRemaining(campaign);
+    if (remaining <= 0) break;
+    await enqueueReminders(campaign.id, remaining);
+    const reserved = await reserveRecipients(campaign.id, remaining, true);
+    if (reserved.length === 0) break;
+    const sendable = await markSuppressedOrBlocked(reserved, campaign);
+    if (sendable.length > 0) {
+      await sendWithRetries(campaign, sendable, true);
+      processed += sendable.length;
+    }
+  }
+  return processed;
+}
+
+async function refreshChronicDisengagementIfDue(): Promise<void> {
+  const client = supabaseAdminClient();
+  const { data, error } = await client
+    .from("estado_desengajamento")
+    .select("calculado_em")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) throw error;
+  const calculatedAt =
+    typeof data?.calculado_em === "string"
+      ? Date.parse(data.calculado_em)
+      : Number.NaN;
+  if (Number.isFinite(calculatedAt) && calculatedAt > Date.now() - 15 * 60_000) {
+    return;
+  }
+  const { error: refreshError } = await client.rpc(
+    "refresh_chronic_disengagement",
+  );
+  if (refreshError) throw refreshError;
+}
+
 export async function processCampaign(campaignId: string): Promise<number> {
   let campaign = await loadCampaign(campaignId);
   if (!campaign || !["agendada", "enviando"].includes(campaign.status)) return 0;
@@ -635,9 +747,10 @@ export async function processCampaign(campaignId: string): Promise<number> {
     const reserved = await reserveRecipients(campaignId, remaining);
     if (reserved.length === 0) {
       await updateCampaignStatus(campaignId, "concluida");
+      processed += await processReminderQueue(campaign);
       break;
     }
-    const sendable = await markSuppressedOrBlocked(reserved);
+    const sendable = await markSuppressedOrBlocked(reserved, campaign);
     if (sendable.length > 0) {
       await sendWithRetries(campaign, sendable);
       processed += sendable.length;
@@ -662,6 +775,8 @@ export async function processDueCampaigns(): Promise<number> {
 
   try {
     await processPendingEmailEvents();
+    await refreshChronicDisengagementIfDue();
+    await processBiExportJobs();
     await recoverStuckRecipients();
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
@@ -677,6 +792,19 @@ export async function processDueCampaigns(): Promise<number> {
       ) {
         processed += await processCampaign(campaign.id);
       }
+    }
+    const { data: completedWithReminders, error: reminderError } =
+      await supabaseAdminClient()
+        .from("campanha")
+        .select(
+          "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,reply_to,corpo,status,agendada_para,teto_hora,teto_dia",
+        )
+        .eq("status", "concluida")
+        .not("assunto_lembrete", "is", null)
+        .not("corpo_lembrete", "is", null);
+    if (reminderError) throw reminderError;
+    for (const campaign of completedWithReminders ?? []) {
+      processed += await processReminderQueue(campaign as Campaign);
     }
     return processed;
   } finally {

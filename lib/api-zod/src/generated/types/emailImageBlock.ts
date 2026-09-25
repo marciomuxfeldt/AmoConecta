@@ -11,9 +11,13 @@ export interface EmailImageBlock {
   /** @minLength 1 */
   id: string;
   type: EmailImageBlockType;
+  /** @pattern ^https:// */
   src: string;
   /** @maxLength 160 */
   alt: string;
-  /** @nullable */
+  /**
+     * @nullable
+     * @pattern ^https://
+     */
   href?: string | null;
 }

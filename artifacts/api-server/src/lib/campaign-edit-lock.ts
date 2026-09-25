@@ -10,6 +10,10 @@ export const CAMPAIGN_CONTENT_LOCKED_FIELDS = [
   "assunto",
   "preheader",
   "assunto_lembrete",
+  "corpo_lembrete",
+  "lembrete_horas",
+  "cor_botao_snapshot",
+  "incluir_desengajados",
   "remetente_nome",
   "remetente_email",
   "reply_to",
@@ -23,6 +27,10 @@ const fieldLabels: Record<CampaignContentLockedField, string> = {
   assunto: "o assunto",
   preheader: "a prévia",
   assunto_lembrete: "o assunto do lembrete",
+  corpo_lembrete: "o corpo do lembrete",
+  lembrete_horas: "o prazo do lembrete",
+  cor_botao_snapshot: "a cor do botão",
+  incluir_desengajados: "o público de desengajados",
   remetente_nome: "o nome do remetente",
   remetente_email: "o e-mail do remetente",
   reply_to: "o Reply-To",
@@ -30,7 +38,7 @@ const fieldLabels: Record<CampaignContentLockedField, string> = {
 };
 
 function comparableValue(field: CampaignContentLockedField, value: unknown): string {
-  if (field === "corpo") {
+  if (field === "corpo" || field === "corpo_lembrete") {
     return JSON.stringify(normalizeEmailBlocks(value));
   }
   return JSON.stringify(value ?? null);

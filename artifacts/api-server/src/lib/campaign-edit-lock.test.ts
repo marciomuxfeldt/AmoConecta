@@ -37,6 +37,32 @@ test("compares normalized email blocks and allows unchanged locked values", () =
   );
 });
 
+test("locks reminder content, button-color snapshot, and disengaged-recipient opt-in", () => {
+  const lockedCampaign = {
+    ...existingCampaign,
+    assunto_lembrete: "Ainda dá tempo",
+    corpo_lembrete: [{ id: "reminder", type: "text", html: "<p>Última chance</p>" }],
+    lembrete_horas: 48,
+    cor_botao_snapshot: "#e96527",
+    incluir_desengajados: false,
+  };
+  const changed = changedLockedCampaignFields(lockedCampaign, {
+    assunto_lembrete: "Lembrete atualizado",
+    corpo_lembrete: [{ id: "reminder", type: "text", html: "<p>Oferta alterada</p>" }],
+    lembrete_horas: 72,
+    cor_botao_snapshot: "#112233",
+    incluir_desengajados: true,
+  });
+
+  assert.deepEqual(changed.sort(), [
+    "assunto_lembrete",
+    "cor_botao_snapshot",
+    "corpo_lembrete",
+    "incluir_desengajados",
+    "lembrete_horas",
+  ]);
+});
+
 test("does not lock content before the campaign is scheduled or sending", () => {
   assert.deepEqual(
     changedLockedCampaignFields(
