@@ -821,7 +821,10 @@ export async function processDueCampaigns(): Promise<number> {
       await releaseWorkerLock();
     } catch (error) {
       logger.error(
-        { error, lockKey: WORKER_LOCK_KEY },
+        {
+          technicalError: getTechnicalError(error),
+          lockKey: WORKER_LOCK_KEY,
+        },
         "AmoConecta worker failed to release the global lock",
       );
     }

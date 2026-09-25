@@ -43,5 +43,7 @@ test("keeps worker diagnostics independent from API-only variables", () => {
   assert.equal(workerNames.includes("SESSION_SECRET"), false);
   assert.equal(workerNames.includes("DATABASE_URL"), false);
   assert.equal(workerNames.includes("PORT"), false);
+  assert.equal(workerNames.includes("DEFAULT_OBJECT_STORAGE_BUCKET_ID"), true);
+  assert.equal(workerNames.includes("PRIVATE_OBJECT_DIR"), true);
   assert.equal(apiNames.includes("PORT"), true);
 });

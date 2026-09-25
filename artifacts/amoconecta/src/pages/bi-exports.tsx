@@ -110,7 +110,7 @@ function DownloadButton({ job }: { job: BiExportJob }) {
     setError('');
     const result = await downloadQuery.refetch();
     if (result.error || !result.data) {
-      setError('Não foi possível preparar o CSV.');
+      setError(errorMessage(result.error, 'Não foi possível preparar o CSV.'));
       return;
     }
     const url = URL.createObjectURL(result.data);
@@ -287,17 +287,17 @@ export function BiExportsPage({ user }: { user: SessionUser }) {
                         <div className="h-2 overflow-hidden rounded-full bg-[#eee7dc]"><div className="h-full rounded-full bg-[#247b79] transition-[width] duration-500" style={{ width: `${jobProgress(detail)}%` }} /></div>
                         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#747783]"><span className="flex items-center gap-1.5"><Rows3 size={13} className="text-[#d35f2a]" /> {formatNumber(detail.linhas_processadas)}{detail.total_linhas != null ? ` de ${formatNumber(detail.total_linhas)}` : ''} linhas</span>{detail.expira_em && <span className="flex items-center gap-1.5"><Clock3 size={13} className="text-[#d35f2a]" /> expira em {formatDate(detail.expira_em)}</span>}</div>
                       </div>
-                      {detail.erro && <p className="mt-4 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs font-semibold leading-5 text-[#a64220]" data-testid={`status-export-job-error-${detail.id}`}>{detail.erro}</p>}
+                      {detail.erro && <p role={detail.status === BiExportJobStatus.erro ? 'alert' : undefined} className="mt-4 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs font-semibold leading-5 text-[#a64220]" data-testid={`status-export-job-error-${detail.id}`}>{detail.erro}</p>}
                     </div>
                   )}
                   <div className="panel overflow-hidden" data-testid="bi-export-list">
                     <div className="hidden grid-cols-[1.3fr_1fr_.8fr_.9fr] gap-4 border-b border-[#eee7dc] bg-[#f7f2eb] px-6 py-3 font-mono text-[9px] uppercase tracking-[.14em] text-[#8b8d96] md:grid"><span>Recorte</span><span>Status</span><span>Linhas</span><span className="text-right">Ação</span></div>
                     {jobs.map((job) => (
                       <button type="button" key={job.id} onClick={() => setSelectedId(job.id)} className={`grid w-full grid-cols-2 gap-x-4 gap-y-3 border-b border-[#eee7dc] px-5 py-5 text-left last:border-0 hover:bg-[#f8f3ec] md:grid-cols-[1.3fr_1fr_.8fr_.9fr] md:items-center md:px-6 ${job.id === activeId ? 'bg-[#f8f3ec]' : ''}`} data-testid={`row-bi-export-${job.id}`}>
-                        <span><strong className="block truncate text-sm font-extrabold text-[#263044]">{filterLabels[job.filtro] ?? job.filtro}</strong><span className="mt-1 block font-mono text-[9px] uppercase tracking-[.08em] text-[#99959a]">{formatDate(job.criado_em)}</span></span>
+                        <span><strong className="block truncate text-sm font-extrabold text-[#263044]">{filterLabels[job.filtro] ?? job.filtro}</strong><span className="mt-1 block font-mono text-[9px] uppercase tracking-[.08em] text-[#99959a]">{formatDate(job.criado_em)}</span>{job.status === BiExportJobStatus.erro && job.erro && <span className="mt-2 block text-[10px] font-semibold leading-4 text-[#a64220]" data-testid={`status-export-list-error-${job.id}`}>{job.erro}</span>}</span>
                         <span className={`w-fit rounded-full border px-2.5 py-1 font-mono text-[9px] uppercase tracking-[.1em] ${statusTone(job.status)}`}>{statusLabels[job.status] ?? job.status}</span>
                         <span className="text-sm font-bold tabular-nums text-[#42495b]">{formatNumber(job.linhas_processadas)}{job.total_linhas != null ? ` / ${formatNumber(job.total_linhas)}` : ''}<span className="mt-1 block font-mono text-[9px] uppercase text-[#aaa3a1] md:hidden">linhas</span></span>
-                        <span className="col-span-2 flex justify-end md:col-span-1">{job.status === BiExportJobStatus.concluida && job.disponivel_para_download ? <span className="flex items-center gap-1.5 text-xs font-bold text-[#247b79]"><Download size={13} /> Baixar</span> : <span className="flex items-center gap-1.5 text-xs font-semibold text-[#8b8d96]"><Clock3 size={13} /> Ver andamento</span>}</span>
+                        <span className="col-span-2 flex justify-end md:col-span-1">{job.status === BiExportJobStatus.concluida && job.disponivel_para_download ? <span className="flex items-center gap-1.5 text-xs font-bold text-[#247b79]"><Download size={13} /> Baixar</span> : job.status === BiExportJobStatus.erro ? <span className="flex items-center gap-1.5 text-xs font-semibold text-[#a64220]"><CircleAlert size={13} /> Ver falha</span> : <span className="flex items-center gap-1.5 text-xs font-semibold text-[#8b8d96]"><Clock3 size={13} /> Ver andamento</span>}</span>
                       </button>
                     ))}
                   </div>
