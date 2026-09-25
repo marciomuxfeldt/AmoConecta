@@ -33,6 +33,11 @@ import {
   campaignContentLockMessage,
   changedLockedCampaignFields,
 } from "../lib/campaign-edit-lock";
+import {
+  campaignTestRequiredScheduleMessage,
+  isCampaignTestRequired,
+  noEligibleRecipientsScheduleMessage,
+} from "../lib/campaign-schedule-policy";
 import { recipientDeliveryProjection } from "../lib/recipient-delivery-projection";
 import {
   configuredSenderEmail,
@@ -788,9 +793,6 @@ async function validateSchedule(
   if (campaign.status !== "rascunho") {
     return "Somente campanhas em rascunho podem ser agendadas.";
   }
-  if (campaign.teste_enviado !== true) {
-    return "Envie e confirme o teste antes de agendar a campanha.";
-  }
   if (!campaign.agendada_para || Number.isNaN(Date.parse(campaign.agendada_para))) {
     return "Informe uma data e hora válidas para o agendamento.";
   }
@@ -820,11 +822,20 @@ async function validateSchedule(
     campaign.id,
   );
   if (delivery.total_na_lista === 0) {
-    return "A lista está vazia. Importe ao menos um destinatário antes de agendar.";
+    return noEligibleRecipientsScheduleMessage(delivery);
   }
-  if (delivery.receberao_de_fato === 0) {
-    return "Há destinatários na lista, mas nenhum está apto a receber. Confira o modo de segurança e a lista de supressão.";
+  const testRequired =
+    isCampaignTestRequired(delivery.total_na_lista) &&
+    campaign.teste_enviado !== true;
+  const noEligibleRecipients =
+    delivery.receberao_de_fato === 0
+      ? noEligibleRecipientsScheduleMessage(delivery)
+      : null;
+  if (noEligibleRecipients && testRequired) {
+    return `${noEligibleRecipients} ${campaignTestRequiredScheduleMessage(delivery.total_na_lista)}`;
   }
+  if (noEligibleRecipients) return noEligibleRecipients;
+  if (testRequired) return campaignTestRequiredScheduleMessage(delivery.total_na_lista);
   if (
     delivery.receberao_de_fato > 5000 &&
     (confirmation ?? "").trim() !== String(delivery.receberao_de_fato)

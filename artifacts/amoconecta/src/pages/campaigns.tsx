@@ -86,6 +86,8 @@ const statusDescriptions: Record<string, string> = {
   cancelada: 'Operação cancelada',
 };
 
+const CAMPAIGN_TEST_REQUIRED_ABOVE_RECIPIENTS = 50;
+
 function getErrorMessage(error: unknown, fallback: string) {
   if (error && typeof error === 'object') {
     const record = error as { error?: unknown; data?: unknown };
@@ -152,6 +154,25 @@ function getDetailedFailureMessage(
 
 function formatNumber(value: number | null | undefined) {
   return new Intl.NumberFormat('pt-BR').format(value ?? 0);
+}
+
+function campaignTestRequirementMessage(importedRecipientCount: number) {
+  return `Envie e confirme um teste bem-sucedido antes de agendar. O teste é obrigatório para ${formatNumber(importedRecipientCount)} destinatários importados.`;
+}
+
+function noEligibleRecipientsScheduleMessage(summary?: CampaignRecipientSummary) {
+  const importedRecipientCount = summary?.total_na_lista ?? summary?.total ?? 0;
+  if (importedRecipientCount === 0) {
+    return 'A lista está vazia: 0 destinatários importados. Importe ao menos um destinatário antes de agendar.';
+  }
+
+  const importedLabel =
+    importedRecipientCount === 1
+      ? 'destinatário importado'
+      : 'destinatários importados';
+  const formatCount = (value: number | null | undefined, singular: string, plural: string) =>
+    `${formatNumber(value)} ${value === 1 ? singular : plural}`;
+  return `Há ${formatNumber(importedRecipientCount)} ${importedLabel}, mas nenhum está apto a receber: ${formatCount(summary?.permitidos_modo_teste, 'liberado', 'liberados')}, ${formatCount(summary?.bloqueados_modo_teste, 'bloqueado pelo modo de segurança', 'bloqueados pelo modo de segurança')} e ${formatCount(summary?.suprimidos_no_envio, 'suprimido', 'suprimidos')}.`;
 }
 
 function formatPercentage(value: number) {
@@ -1422,6 +1443,8 @@ function CampaignJourney({
   recipientsLoading: boolean;
 }) {
   const recipientCount = recipientSummary?.total_na_lista ?? recipientSummary?.total ?? 0;
+  const recipientCountKnown = !recipientsLoading && recipientSummary != null;
+  const testRequired = recipientCountKnown && recipientCount > CAMPAIGN_TEST_REQUIRED_ABOVE_RECIPIENTS;
   const blocks = normalizeEmailBlocks(campaign.corpo);
   const scheduledAt = campaign.agendada_para && !Number.isNaN(Date.parse(campaign.agendada_para))
     ? formatDate(campaign.agendada_para)
@@ -1439,9 +1462,19 @@ function CampaignJourney({
       detail: blocks.length > 0 ? 'O conteúdo da mensagem está montado.' : 'Adicione pelo menos um bloco ao e-mail.',
     },
     {
-      title: 'Teste enviado',
-      done: campaign.teste_enviado,
-      detail: campaign.teste_enviado_em ? `Enviado em ${formatDate(campaign.teste_enviado_em)}.` : 'Envie um teste e confirme que chegou.',
+      title: !recipientCountKnown
+        ? 'Teste de conteúdo'
+        : testRequired
+          ? 'Teste obrigatório'
+          : 'Teste opcional',
+      done: campaign.teste_enviado || (recipientCountKnown && !testRequired),
+      detail: campaign.teste_enviado_em
+        ? `Enviado em ${formatDate(campaign.teste_enviado_em)}.`
+        : !recipientCountKnown
+          ? 'Aguardando a contagem importada para definir se o teste é obrigatório.'
+          : testRequired
+            ? `Envie e confirme um teste para os ${formatNumber(recipientCount)} destinatários importados.`
+            : 'Opcional para campanhas com até 50 destinatários importados.',
     },
     {
       title: 'Agendamento definido',
@@ -1699,10 +1732,6 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       setOperationError('Somente campanhas em rascunho podem ser agendadas.');
       return;
     }
-    if (!latestCampaign.teste_enviado) {
-      setOperationError('Envie um teste bem-sucedido antes de agendar a campanha.');
-      return;
-    }
     if (!latestCampaign.agendada_para || Number.isNaN(Date.parse(latestCampaign.agendada_para)) || Date.parse(latestCampaign.agendada_para) <= Date.now()) {
       setOperationError('O agendamento precisa estar no futuro.');
       return;
@@ -1723,7 +1752,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       return;
     }
     if (listedTotal === 0) {
-      setOperationError('A lista está vazia. Importe ao menos um destinatário antes de agendar.');
+      setOperationError(noEligibleRecipientsScheduleMessage(recipientSummaryQuery.data));
       return;
     }
     setScheduleConfirmation(total > 5000 ? '' : String(total));
@@ -1735,17 +1764,21 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
 
   const confirmSchedule = () => {
     const total = recipientSummaryQuery.data?.receberao_de_fato ?? 0;
-    if (total === 0) {
-      const listedTotal = recipientSummaryQuery.data?.total_na_lista ?? 0;
-      const allowlisted = recipientSummaryQuery.data?.permitidos_modo_teste ?? 0;
-      const blocked = recipientSummaryQuery.data?.bloqueados_modo_teste ?? 0;
+    const importedRecipientCount =
+      recipientSummaryQuery.data?.total_na_lista ??
+      recipientSummaryQuery.data?.total ??
+      0;
+    if (importedRecipientCount === 0 || total === 0) {
       setOperationError(
-        listedTotal === 0
-          ? 'A lista está vazia. Importe ao menos um destinatário antes de agendar.'
-          : safetyModeQuery.data?.envio_liberado === false
-            ? `Há ${formatNumber(listedTotal)} destinatários na lista, mas nenhum está liberado. Allowlist: ${formatNumber(allowlisted)} liberados e ${formatNumber(blocked)} bloqueados.`
-            : `Há ${formatNumber(listedTotal)} destinatários na lista, mas nenhum está apto a receber; verifique as supressões.`,
+        noEligibleRecipientsScheduleMessage(recipientSummaryQuery.data),
       );
+      return;
+    }
+    if (
+      importedRecipientCount > CAMPAIGN_TEST_REQUIRED_ABOVE_RECIPIENTS &&
+      campaign?.teste_enviado !== true
+    ) {
+      setOperationError(campaignTestRequirementMessage(importedRecipientCount));
       return;
     }
     if (total > 5000 && scheduleConfirmation.trim() !== String(total)) return;
@@ -1773,17 +1806,20 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       <h3 id="schedule-confirmation-title" className="mt-2 text-lg font-extrabold text-[#263044]">Revise o tamanho do disparo antes de continuar.</h3>
       <p className="mt-2 text-sm leading-6 text-[#6d7180]">Há <strong className="font-extrabold tabular-nums text-[#263044]">{formatNumber(recipientSummaryQuery.data?.total_na_lista)}</strong> destinatários na lista; <strong className="text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.receberao_de_fato)}</strong> receberão de fato.</p>
       {safetyModeQuery.data && !safetyModeQuery.data.envio_liberado && (
-        <>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2" data-testid="schedule-safety-counts">
-            <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#417846]">{formatNumber(recipientSummaryQuery.data?.permitidos_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Liberados pela allowlist</span></div>
-            <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.bloqueados_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Bloqueados pela allowlist</span></div>
-          </div>
-          {(recipientSummaryQuery.data?.total_na_lista ?? 0) > 0 && (recipientSummaryQuery.data?.receberao_de_fato ?? 0) === 0 && (
-            <p className="mt-4 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" role="alert" data-testid="schedule-no-allowlisted-recipients">
-              A lista contém destinatários, mas nenhum está apto a receber. Revise os bloqueios da allowlist e as supressões antes de agendar.
-            </p>
-          )}
-        </>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2" data-testid="schedule-safety-counts">
+          <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#417846]">{formatNumber(recipientSummaryQuery.data?.permitidos_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Liberados pela allowlist</span></div>
+          <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(recipientSummaryQuery.data?.bloqueados_modo_teste)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Bloqueados pela allowlist</span></div>
+        </div>
+      )}
+      {(recipientSummaryQuery.data?.total_na_lista ?? 0) > 0 && (recipientSummaryQuery.data?.receberao_de_fato ?? 0) === 0 && (
+        <p className="mt-4 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" role="alert" data-testid="schedule-no-allowlisted-recipients">
+          {noEligibleRecipientsScheduleMessage(recipientSummaryQuery.data)}
+        </p>
+      )}
+      {(recipientSummaryQuery.data?.total_na_lista ?? 0) > CAMPAIGN_TEST_REQUIRED_ABOVE_RECIPIENTS && campaign?.teste_enviado !== true && (
+        <p className="mt-4 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" role="alert" data-testid="schedule-test-required">
+          {campaignTestRequirementMessage(recipientSummaryQuery.data?.total_na_lista ?? 0)}
+        </p>
       )}
       {(recipientSummaryQuery.data?.receberao_de_fato ?? 0) > 5000 ? (
         <label className="mt-5 block text-xs font-bold text-[#565c6a]">Digite {formatNumber(recipientSummaryQuery.data?.receberao_de_fato)} para confirmar<input value={scheduleConfirmation} onChange={(event) => setScheduleConfirmation(event.target.value.replace(/\D/g, ''))} inputMode="numeric" className="field-control mt-2" placeholder={String(recipientSummaryQuery.data?.receberao_de_fato)} data-testid="input-schedule-confirmation" /></label>
@@ -1792,7 +1828,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       )}
       <div className="mt-5 flex flex-col-reverse justify-end gap-3 sm:flex-row">
         <button type="button" onClick={() => setScheduleDialogOpen(false)} className="action-button action-button-secondary" data-testid="button-cancel-schedule-confirmation">Voltar</button>
-        <button type="button" onClick={confirmSchedule} disabled={scheduleCampaign.isPending || (recipientSummaryQuery.data?.receberao_de_fato ?? 0) === 0 || ((recipientSummaryQuery.data?.receberao_de_fato ?? 0) > 5000 && scheduleConfirmation.trim() !== String(recipientSummaryQuery.data?.receberao_de_fato))} className="action-button action-button-primary" data-testid="button-confirm-schedule">{scheduleCampaign.isPending ? <><LoaderCircle size={16} className="animate-spin" /> Agendando...</> : <><CheckCircle2 size={16} /> Confirmar agendamento</>}</button>
+        <button type="button" onClick={confirmSchedule} disabled={scheduleCampaign.isPending || (recipientSummaryQuery.data?.receberao_de_fato ?? 0) === 0 || ((recipientSummaryQuery.data?.total_na_lista ?? 0) > CAMPAIGN_TEST_REQUIRED_ABOVE_RECIPIENTS && campaign?.teste_enviado !== true) || ((recipientSummaryQuery.data?.receberao_de_fato ?? 0) > 5000 && scheduleConfirmation.trim() !== String(recipientSummaryQuery.data?.receberao_de_fato))} className="action-button action-button-primary" data-testid="button-confirm-schedule">{scheduleCampaign.isPending ? <><LoaderCircle size={16} className="animate-spin" /> Agendando...</> : <><CheckCircle2 size={16} /> Confirmar agendamento</>}</button>
       </div>
     </div>
   );
