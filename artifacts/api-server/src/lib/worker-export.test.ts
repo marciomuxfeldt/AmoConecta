@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { openBiExportCsv } from "./worker-export";
+import { openBiExportCsv, resolveBiExportPageSize } from "./worker-export";
 import { csvHeaderLine } from "./csv-export";
 
 const originalFetch = globalThis.fetch;
@@ -9,6 +9,14 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
   delete process.env.PRIVATE_OBJECT_DIR;
   delete process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID;
+});
+
+test("defaults BI export pages to 500 and accepts smaller positive settings", () => {
+  assert.equal(resolveBiExportPageSize(undefined), 500);
+  assert.equal(resolveBiExportPageSize(""), 500);
+  assert.equal(resolveBiExportPageSize("5"), 5);
+  assert.throws(() => resolveBiExportPageSize("0"), /inteiro entre 1 e 500/u);
+  assert.throws(() => resolveBiExportPageSize("501"), /inteiro entre 1 e 500/u);
 });
 
 test("streams checkpointed export parts as one CSV with one header", async () => {

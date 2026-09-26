@@ -10,7 +10,21 @@ import { supabaseAdminClient } from "./supabase";
 import { logger } from "./logger";
 import { getTechnicalError, getTechnicalErrorText } from "./technical-error";
 
-const PAGE_SIZE = 500;
+const DEFAULT_EXPORT_PAGE_SIZE = 500;
+const EVENT_QUERY_PAGE_SIZE = 500;
+
+export function resolveBiExportPageSize(value = process.env.BI_EXPORT_PAGE_SIZE): number {
+  if (value == null || value.trim() === "") return DEFAULT_EXPORT_PAGE_SIZE;
+  const pageSize = Number(value);
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > DEFAULT_EXPORT_PAGE_SIZE) {
+    throw new Error(
+      `BI_EXPORT_PAGE_SIZE deve ser um inteiro entre 1 e ${DEFAULT_EXPORT_PAGE_SIZE}.`,
+    );
+  }
+  return pageSize;
+}
+
+const EXPORT_PAGE_SIZE = resolveBiExportPageSize();
 // Stay well below the scheduled worker's two-minute ceiling and checkpoint
 // each page before starting another one.
 const BATCH_BUDGET_MS = 45_000;
@@ -352,7 +366,7 @@ async function processExport(job: ExportJob): Promise<boolean> {
           "id,email,nome,id_usuario,regiao,data_ultima_compra,campanha_id,is_lembrete,status,enviado_em,entregue_em,aberto_em,clicado_em,erro",
         )
         .order("id", { ascending: true })
-        .limit(PAGE_SIZE);
+        .limit(EXPORT_PAGE_SIZE);
       if (cursorId) query = query.gt("id", cursorId);
       if (job.campanha_id) query = query.eq("campanha_id", job.campanha_id);
       if (job.periodo_inicio) {
@@ -425,7 +439,11 @@ async function processExport(job: ExportJob): Promise<boolean> {
         { bounce: boolean; complaint: boolean }
       >();
       if (emails.length > 0 && campaignIds.length > 0) {
-        for (let eventOffset = 0; ; eventOffset += PAGE_SIZE) {
+        for (
+          let eventOffset = 0;
+          ;
+          eventOffset += EVENT_QUERY_PAGE_SIZE
+        ) {
           assertBeforeDeadline(deadline);
           const { data: events, error: eventsError } = await client
             .from("evento_email")
@@ -434,7 +452,10 @@ async function processExport(job: ExportJob): Promise<boolean> {
             .in("campanha_id", campaignIds)
             .in("tipo", ["email.bounced", "email.complained"])
             .order("id", { ascending: true })
-            .range(eventOffset, eventOffset + PAGE_SIZE - 1)
+            .range(
+              eventOffset,
+              eventOffset + EVENT_QUERY_PAGE_SIZE - 1,
+            )
             .abortSignal(signalBeforeDeadline(deadline));
           if (eventsError) throw eventsError;
           assertBeforeDeadline(deadline);
@@ -455,7 +476,7 @@ async function processExport(job: ExportJob): Promise<boolean> {
             current.complaint ||= event.tipo === "email.complained";
             eventByRecipient.set(key, current);
           }
-          if ((events?.length ?? 0) < PAGE_SIZE) break;
+          if ((events?.length ?? 0) < EVENT_QUERY_PAGE_SIZE) break;
         }
       }
 
@@ -514,7 +535,7 @@ async function processExport(job: ExportJob): Promise<boolean> {
           deadline,
         );
       }
-      const sourceComplete = data.length < PAGE_SIZE;
+      const sourceComplete = data.length < EXPORT_PAGE_SIZE;
       const checkpoint: Record<string, unknown> = {
         cursor_destinatario_id: lastRow.id,
         partes_processadas: nextPartCount,
