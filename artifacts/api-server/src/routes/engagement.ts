@@ -70,7 +70,31 @@ function toBiExportResponse(row: Record<string, unknown>) {
 }
 
 async function requireSession(req: Request, res: Response): Promise<boolean> {
-  return Boolean(await getSupabaseUser(req, res));
+  const user = await getSupabaseUser(req, res);
+  if (user) return true;
+  if (!res.headersSent) {
+    res.status(401).json({ error: "Sessão inválida ou expirada. Entre novamente." });
+  }
+  return false;
+}
+
+function filenamePart(value: string, fallback: string): string {
+  const slug = value
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 60)
+    .replace(/-+$/gu, "");
+  return slug || fallback;
+}
+
+function exportDatePart(value: unknown): string {
+  const date = typeof value === "string" ? new Date(value) : new Date(NaN);
+  return Number.isNaN(date.getTime())
+    ? new Date().toISOString().slice(0, 10)
+    : date.toISOString().slice(0, 10);
 }
 
 router.get("/email-branding", async (req, res): Promise<void> => {
@@ -253,7 +277,7 @@ router.get(
       const { data, error } = await supabaseAdminClient()
         .from("exportacao_csv")
         .select(
-          "status,caminho_objeto,expira_em,partes_processadas,provedor_armazenamento",
+          "status,caminho_objeto,expira_em,partes_processadas,provedor_armazenamento,campanha_id,criado_em",
         )
         .eq("id", params.data.exportId)
         .maybeSingle();
@@ -279,17 +303,53 @@ router.get(
         return;
       }
 
-      const file = await openBiExportCsv(
-        data.caminho_objeto,
-        Number(data.partes_processadas ?? 0),
-        data.provedor_armazenamento === "app_storage"
-          ? "app_storage"
-          : "supabase",
-      );
+      let campaignPart = "todas-campanhas";
+      if (typeof data.campanha_id === "string" && data.campanha_id.length > 0) {
+        const fallback = `campanha-${data.campanha_id.slice(0, 8)}`;
+        campaignPart = fallback;
+        try {
+          const campaignResult = await supabaseAdminClient()
+            .from("campanha")
+            .select("nome")
+            .eq("id", data.campanha_id)
+            .maybeSingle();
+          if (campaignResult.error) throw campaignResult.error;
+          if (typeof campaignResult.data?.nome === "string") {
+            campaignPart = filenamePart(campaignResult.data.nome, fallback);
+          }
+        } catch (error) {
+          req.log.warn(
+            {
+              requestId: req.id,
+              technicalError: getTechnicalError(error),
+            },
+            "BI export campaign name unavailable for download filename",
+          );
+        }
+      }
+
+      const filename = `amoconecta-export-${campaignPart}-${exportDatePart(data.criado_em)}.csv`;
+      let file;
+      try {
+        file = await openBiExportCsv(
+          data.caminho_objeto,
+          Number(data.partes_processadas ?? 0),
+          data.provedor_armazenamento === "app_storage"
+            ? "app_storage"
+            : "supabase",
+        );
+      } catch (error) {
+        reportError(req, "BI export file could not be opened", error);
+        res.status(502).json({
+          error:
+            "A exportação foi concluída, mas o arquivo não pôde ser lido do armazenamento. Tente novamente; se persistir, solicite uma nova exportação.",
+        });
+        return;
+      }
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename="amoconecta-${params.data.exportId}.csv"`,
+        `attachment; filename="${filename}"`,
       );
       res.setHeader("Cache-Control", "private, no-store");
       file.once("error", (error: unknown) => {
@@ -302,9 +362,12 @@ router.get(
       });
       file.pipe(res);
     } catch (error) {
-      reportError(req, "BI export file could not be opened", error);
+      reportError(req, "BI export record could not be loaded", error);
       if (!res.headersSent) {
-        res.status(404).json({ error: "O arquivo CSV não está disponível." });
+        res.status(503).json({
+          error:
+            "Não foi possível consultar o estado da exportação. Tente novamente em instantes.",
+        });
       } else {
         res.destroy(error instanceof Error ? error : undefined);
       }

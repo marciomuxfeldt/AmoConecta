@@ -16,16 +16,15 @@ import {
   BiExportFilter,
   BiExportJobStatus,
   getGetBiExportQueryKey,
-  getDownloadBiExportQueryKey,
   getListBiExportsQueryKey,
   getListCampaignsQueryKey,
   useCreateBiExport,
-  useDownloadBiExport,
   useGetBiExport,
   useListBiExports,
   useListCampaigns,
   type BiExportJob,
 } from '@workspace/api-client-react';
+import { downloadBiExportFile } from '@/lib/bi-export-download';
 import { Shell, type SessionUser } from './campaigns';
 
 const filterLabels: Record<string, string> = {
@@ -98,38 +97,68 @@ function ExportSkeleton() {
 
 function DownloadButton({ job }: { job: BiExportJob }) {
   const [error, setError] = useState('');
-  const downloadQuery = useDownloadBiExport(job.id, {
-    query: {
-      queryKey: getDownloadBiExportQueryKey(job.id),
-      enabled: false,
-      staleTime: Infinity,
-    },
-  });
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const download = async () => {
     setError('');
-    const result = await downloadQuery.refetch();
-    if (result.error || !result.data) {
-      setError(errorMessage(result.error, 'Não foi possível preparar o CSV.'));
-      return;
+    setIsDownloading(true);
+    let objectUrl: string | null = null;
+    try {
+      const { blob, filename } = await downloadBiExportFile(job.id);
+      objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (downloadError) {
+      if (
+        downloadError instanceof TypeError &&
+        downloadError.message.includes('createObjectURL')
+      ) {
+        setError(
+          'O navegador não conseguiu preparar o arquivo CSV recebido. Tente novamente; se persistir, atualize a página e solicite uma nova exportação.',
+        );
+      } else {
+        setError(
+          downloadError instanceof Error
+            ? downloadError.message
+            : 'Não foi possível baixar o CSV. Tente novamente.',
+        );
+      }
+    } finally {
+      if (objectUrl) {
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl as string), 1000);
+      }
+      setIsDownloading(false);
     }
-    const url = URL.createObjectURL(result.data);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `amoconecta-exportacao-${job.id}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <button type="button" onClick={() => void download()} disabled={downloadQuery.isFetching} className="action-button action-button-secondary !px-3 !py-2" data-testid={`button-download-export-${job.id}`}>
-        {downloadQuery.isFetching ? <LoaderCircle className="animate-spin" size={14} /> : <Download size={14} />}
-        {downloadQuery.isFetching ? 'Preparando' : 'Baixar CSV'}
+    <div className="flex flex-col items-end gap-2">
+      <button type="button" onClick={() => void download()} disabled={isDownloading} className="action-button action-button-secondary !px-3 !py-2" data-testid={`button-download-export-${job.id}`}>
+        {isDownloading ? <LoaderCircle className="animate-spin" size={14} /> : <Download size={14} />}
+        {isDownloading ? 'Preparando' : 'Baixar CSV'}
       </button>
-      {error && <span className="text-right text-[10px] text-[#a64220]" data-testid={`status-download-error-${job.id}`}>{error}</span>}
+      {error && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="max-w-xs rounded-lg border border-[#efc9ba] bg-[#fff0e9] p-3 text-right text-xs leading-5 text-[#8e3a20]"
+          data-testid={`status-download-error-${job.id}`}
+        >
+          <p>{error}</p>
+          <button
+            type="button"
+            onClick={() => void download()}
+            disabled={isDownloading}
+            className="mt-2 font-bold underline underline-offset-2"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      )}
     </div>
   );
 }
