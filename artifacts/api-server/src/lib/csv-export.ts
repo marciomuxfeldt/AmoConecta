@@ -42,6 +42,34 @@ export type BiExportRow = {
   motivo_nao_envio: string | null;
 };
 
+export function deriveBiExportReason(
+  status: unknown,
+  error: unknown,
+): string | null {
+  switch (status) {
+    case "suprimido":
+      return "suprimido";
+    case "bounce":
+      return "bounce permanente";
+    case "erro":
+      return typeof error === "string" ? error : null;
+    case "bloqueado_modo_teste":
+      return "bloqueado pelo modo de teste";
+    case "bloqueado_desengajado":
+      return "bloqueado por desengajamento";
+    case "pendente":
+    case "processando":
+      return "ainda não enviado";
+    case "enviado":
+    case "entregue":
+    case "aberto":
+    case "clicado":
+      return "";
+    default:
+      return null;
+  }
+}
+
 /** UTF-8 BOM, required for Excel to detect accents reliably. */
 export const CSV_UTF8_BOM = "\uFEFF";
 

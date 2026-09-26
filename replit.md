@@ -40,6 +40,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 _Populate as you build — sharp edges, "always run X before Y" rules._
 
+- AmoConecta BI export changes are not ready after compilation or unit tests alone: verify a completed export against the configured Supabase and confirm its private-storage CSV can be read back. When testing pagination or resume behavior, use an isolated dataset with more than 500 recipients; never seed synthetic recipients in production.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

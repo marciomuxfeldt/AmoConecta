@@ -1,7 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner requires the explicit TypeScript extension.
-import { BI_EXPORT_COLUMNS, CSV_UTF8_BOM, csvHeaderLine, csvPreamble, csvRowLine } from "./csv-export.ts";
+import { BI_EXPORT_COLUMNS, CSV_UTF8_BOM, csvHeaderLine, csvPreamble, csvRowLine, deriveBiExportReason } from "./csv-export.ts";
+
+test("derives the BI export reason from recipient status and error text", () => {
+  const cases: Array<[string, string | null, string | null]> = [
+    ["suprimido", null, "suprimido"],
+    ["bounce", null, "bounce permanente"],
+    ["erro", "falha do provedor", "falha do provedor"],
+    ["bloqueado_modo_teste", null, "bloqueado pelo modo de teste"],
+    ["bloqueado_desengajado", null, "bloqueado por desengajamento"],
+    ["pendente", null, "ainda não enviado"],
+    ["processando", null, "ainda não enviado"],
+    ["enviado", null, ""],
+    ["entregue", null, ""],
+    ["aberto", null, ""],
+    ["clicado", null, ""],
+  ];
+
+  for (const [status, error, expected] of cases) {
+    assert.equal(deriveBiExportReason(status, error), expected, status);
+  }
+  assert.equal(deriveBiExportReason("erro", null), null);
+  assert.equal(deriveBiExportReason("estado_desconhecido", null), null);
+});
 
 test("emits a UTF-8 BOM and the exact BI header order", () => {
   assert.equal(csvPreamble(), CSV_UTF8_BOM);

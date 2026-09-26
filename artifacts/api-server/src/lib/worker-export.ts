@@ -3,6 +3,7 @@ import {
   csvHeaderLine,
   csvPreamble,
   csvRowLine,
+  deriveBiExportReason,
   type BiExportRow,
 } from "./csv-export";
 import { supabaseAdminClient } from "./supabase";
@@ -177,9 +178,7 @@ function matchesFilter(row: Record<string, unknown>, filter: ExportFilter): bool
   return status === "bounce" ||
     status === "reclamacao" ||
     typeof row.bounce_tipo_bruto === "string" ||
-    row.reclamado_em != null ||
-    row.motivo_nao_envio === "bounce" ||
-    row.motivo_nao_envio === "reclamacao";
+    row.reclamado_em != null;
 }
 
 async function expireExports(): Promise<void> {
@@ -350,7 +349,7 @@ async function processExport(job: ExportJob): Promise<boolean> {
       let query = client
         .from("destinatario")
         .select(
-          "id,email,nome,id_usuario,regiao,data_ultima_compra,campanha_id,is_lembrete,status,enviado_em,entregue_em,aberto_em,clicado_em,motivo_nao_envio",
+          "id,email,nome,id_usuario,regiao,data_ultima_compra,campanha_id,is_lembrete,status,enviado_em,entregue_em,aberto_em,clicado_em,erro",
         )
         .order("id", { ascending: true })
         .limit(PAGE_SIZE);
@@ -496,10 +495,7 @@ async function processExport(job: ExportJob): Promise<boolean> {
             entregue_em: (row.entregue_em as string | null) ?? null,
             aberto_em: (row.aberto_em as string | null) ?? null,
             clicado_em: (row.clicado_em as string | null) ?? null,
-            motivo_nao_envio:
-              typeof row.motivo_nao_envio === "string"
-                ? row.motivo_nao_envio
-                : null,
+            motivo_nao_envio: deriveBiExportReason(row.status, row.erro),
           } satisfies BiExportRow),
         );
       }
