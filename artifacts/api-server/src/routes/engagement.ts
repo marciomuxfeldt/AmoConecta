@@ -252,7 +252,9 @@ router.get(
     try {
       const { data, error } = await supabaseAdminClient()
         .from("exportacao_csv")
-        .select("status,caminho_objeto,expira_em,partes_processadas")
+        .select(
+          "status,caminho_objeto,expira_em,partes_processadas,provedor_armazenamento",
+        )
         .eq("id", params.data.exportId)
         .maybeSingle();
       if (error) throw error;
@@ -280,6 +282,9 @@ router.get(
       const file = await openBiExportCsv(
         data.caminho_objeto,
         Number(data.partes_processadas ?? 0),
+        data.provedor_armazenamento === "app_storage"
+          ? "app_storage"
+          : "supabase",
       );
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader(

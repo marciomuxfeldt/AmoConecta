@@ -24,8 +24,6 @@ export const WORKER_REQUIRED_SECRET_NAMES = [
   "ENVIO_ALLOWLIST",
   "SUPABASE_URL",
   "SUPABASE_SERVICE_ROLE_KEY",
-  "DEFAULT_OBJECT_STORAGE_BUCKET_ID",
-  "PRIVATE_OBJECT_DIR",
 ] as const;
 
 export type RequiredSecretStatus = {

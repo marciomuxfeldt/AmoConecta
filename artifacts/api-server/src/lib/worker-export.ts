@@ -12,6 +12,10 @@ import { getTechnicalError, getTechnicalErrorText } from "./technical-error";
 
 const DEFAULT_EXPORT_PAGE_SIZE = 500;
 const EVENT_QUERY_PAGE_SIZE = 500;
+const BI_EXPORTS_BUCKET = "amoconecta-bi-exports";
+const SUPABASE_SIGNED_URL_TTL_SECONDS = 60;
+const LEGACY_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+const PARTS_MARKER = "manifest.csv";
 
 export function resolveBiExportPageSize(value = process.env.BI_EXPORT_PAGE_SIZE): number {
   if (value == null || value.trim() === "") return DEFAULT_EXPORT_PAGE_SIZE;
@@ -31,8 +35,8 @@ const BATCH_BUDGET_MS = 45_000;
 const MIN_NEXT_PAGE_BUDGET_MS = 10_000;
 const EXPIRED_CLEANUP_BUDGET_MS = 8_000;
 const EXPIRED_PARTS_PER_RUN = 10;
-const SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
-const PARTS_MARKER = "manifest.csv";
+
+type ExportStorageProvider = "supabase" | "app_storage";
 
 class ExportBatchDeferredError extends Error {
   constructor() {
@@ -51,21 +55,36 @@ function signalBeforeDeadline(deadline: number): AbortSignal {
   return AbortSignal.timeout(remaining);
 }
 
-function partObjectPath(jobId: string, partIndex: number): string {
+function partObjectName(jobId: string, partIndex: number): string {
+  return `bi-exports/${jobId}/parts/${partIndex}.csv`;
+}
+
+function legacyPartObjectPath(jobId: string, partIndex: number): string {
   return `/objects/bi-exports/${jobId}/parts/${partIndex}.csv`;
 }
 
 function manifestObjectPath(jobId: string): string {
-  return `/objects/bi-exports/${jobId}/${PARTS_MARKER}`;
+  return `supabase://${BI_EXPORTS_BUCKET}/bi-exports/${jobId}/${PARTS_MARKER}`;
 }
 
-function manifestJobId(objectPath: string): string | null {
+function supabaseManifestJobId(objectPath: string): string | null {
+  const escapedBucket = BI_EXPORTS_BUCKET.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const match = new RegExp(
+    `^supabase://${escapedBucket}/bi-exports/([0-9a-f-]{36})/${PARTS_MARKER}$`,
+    "iu",
+  ).exec(objectPath);
+  return match?.[1] ?? null;
+}
+
+function legacyManifestJobId(objectPath: string): string | null {
   const match =
     /^\/objects\/bi-exports\/([0-9a-f-]{36})\/manifest\.csv$/iu.exec(objectPath);
   return match?.[1] ?? null;
 }
 
-function objectLocation(objectPath: string): { bucket: string; name: string } {
+function legacyObjectLocation(
+  objectPath: string,
+): { bucket: string; name: string } {
   const privateDir = process.env.PRIVATE_OBJECT_DIR?.trim();
   if (!privateDir) throw new Error("PRIVATE_OBJECT_DIR não está configurado.");
   const normalized = objectPath.replace(/^\/objects\//u, "").replace(/^\/+/u, "");
@@ -79,22 +98,24 @@ function objectLocation(objectPath: string): { bucket: string; name: string } {
   return { bucket, name: prefix ? `${prefix}/${normalized}` : normalized };
 }
 
-async function signedObjectUrl(
+async function legacySignedObjectUrl(
   location: { bucket: string; name: string },
-  method: "GET" | "PUT" | "DELETE",
   signal?: AbortSignal,
 ): Promise<string> {
-  const response = await fetch(`${SIDECAR_ENDPOINT}/object-storage/signed-object-url`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      bucket_name: location.bucket,
-      object_name: location.name,
-      method,
-      expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
-    }),
-    signal,
-  });
+  const response = await fetch(
+    `${LEGACY_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bucket_name: location.bucket,
+        object_name: location.name,
+        method: "GET",
+        expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+      }),
+      signal,
+    },
+  );
   if (!response.ok) throw new Error(`App Storage URL falhou (${response.status}).`);
   const payload = (await response.json()) as { signed_url?: string };
   if (!payload.signed_url) throw new Error("App Storage não retornou uma URL assinada.");
@@ -107,27 +128,56 @@ async function uploadBiExportPart(
   content: string,
   deadline: number,
 ): Promise<void> {
-  const objectPath = partObjectPath(jobId, partIndex);
-  const signal = signalBeforeDeadline(deadline);
-  const url = await signedObjectUrl(objectLocation(objectPath), "PUT", signal);
   assertBeforeDeadline(deadline);
-  const response = await fetch(url, {
-    method: "PUT",
-    headers: { "Content-Type": "text/csv; charset=utf-8" },
-    body: content,
-    signal,
-  });
-  if (!response.ok) throw new Error(`Upload App Storage falhou (${response.status}).`);
+  const { error } = await supabaseAdminClient()
+    .storage
+    .from(BI_EXPORTS_BUCKET)
+    .upload(partObjectName(jobId, partIndex), content, {
+      contentType: "text/csv; charset=utf-8",
+      upsert: true,
+    });
+  if (error) {
+    throw new Error(
+      `Upload Supabase Storage falhou (${error.statusCode ?? "erro"}).`,
+      { cause: error },
+    );
+  }
   assertBeforeDeadline(deadline);
 }
 
-async function openStoredObject(objectPath: string): Promise<NodeJS.ReadableStream> {
+async function openSupabaseStoredObject(
+  objectName: string,
+): Promise<NodeJS.ReadableStream> {
+  const normalized = objectName.replace(/^\/+/u, "");
+  if (!normalized || normalized.includes("..") || normalized.includes("//")) {
+    throw new Error("Caminho Supabase Storage inválido.");
+  }
+  const { data, error } = await supabaseAdminClient()
+    .storage
+    .from(BI_EXPORTS_BUCKET)
+    .createSignedUrl(normalized, SUPABASE_SIGNED_URL_TTL_SECONDS);
+  if (error || !data?.signedUrl) {
+    throw new Error(
+      `URL assinada do Supabase Storage falhou (${error?.statusCode ?? "erro"}).`,
+      error ? { cause: error } : undefined,
+    );
+  }
+  const response = await fetch(data.signedUrl);
+  if (!response.ok || !response.body) {
+    throw new Error(`Download Supabase Storage falhou (${response.status}).`);
+  }
+  return Readable.fromWeb(response.body as import("node:stream/web").ReadableStream);
+}
+
+async function openLegacyStoredObject(
+  objectPath: string,
+): Promise<NodeJS.ReadableStream> {
   const normalized = objectPath.replace(/^\/+/, "");
   if (!normalized.startsWith("objects/")) {
     throw new Error("Caminho de objeto privado inválido.");
   }
   const response = await fetch(
-    await signedObjectUrl(objectLocation(`/${normalized}`), "GET"),
+    await legacySignedObjectUrl(legacyObjectLocation(`/${normalized}`)),
   );
   if (!response.ok || !response.body) {
     throw new Error(`Download App Storage falhou (${response.status}).`);
@@ -138,9 +188,20 @@ async function openStoredObject(objectPath: string): Promise<NodeJS.ReadableStre
 export async function openBiExportCsv(
   objectPath: string,
   partCount?: number,
+  storageProvider?: ExportStorageProvider,
 ): Promise<NodeJS.ReadableStream> {
-  const jobId = manifestJobId(objectPath);
-  if (!jobId) return openStoredObject(objectPath);
+  const provider =
+    storageProvider ??
+    (objectPath.startsWith("/objects/") ? "app_storage" : "supabase");
+  const jobId =
+    provider === "supabase"
+      ? supabaseManifestJobId(objectPath)
+      : legacyManifestJobId(objectPath);
+  if (!jobId) {
+    return provider === "supabase"
+      ? openSupabaseStoredObject(objectPath)
+      : openLegacyStoredObject(objectPath);
+  }
   if (!Number.isInteger(partCount) || (partCount ?? -1) < 0) {
     throw new Error("Manifesto da exportação BI inválido.");
   }
@@ -149,7 +210,12 @@ export async function openBiExportCsv(
     yield csvPreamble();
     yield csvHeaderLine();
     for (let partIndex = 0; partIndex < (partCount ?? 0); partIndex += 1) {
-      const part = await openStoredObject(partObjectPath(jobId, partIndex));
+      const part =
+        provider === "supabase"
+          ? await openSupabaseStoredObject(partObjectName(jobId, partIndex))
+          : await openLegacyStoredObject(
+              legacyPartObjectPath(jobId, partIndex),
+            );
       for await (const chunk of part) {
         yield chunk as string | Buffer;
       }
@@ -173,6 +239,7 @@ type ExportJob = {
   periodo_fim?: string | null;
   status: string;
   expira_em: string;
+  provedor_armazenamento: ExportStorageProvider;
   cursor_destinatario_id: string | null;
   partes_processadas: number;
   fonte_concluida: boolean;
@@ -205,6 +272,7 @@ async function expireExports(): Promise<void> {
     )
     .lt("expira_em", new Date().toISOString())
     .eq("limpeza_concluida", false)
+    .eq("provedor_armazenamento", "supabase")
     .order("expira_em", { ascending: true })
     .limit(1);
   if (loadError) throw loadError;
@@ -213,60 +281,48 @@ async function expireExports(): Promise<void> {
     try {
       const objectPath =
         typeof row.caminho_objeto === "string" ? row.caminho_objeto : null;
-      if (objectPath && !manifestJobId(objectPath)) {
-        const signal = signalBeforeDeadline(deadline);
-        const response = await fetch(
-          await signedObjectUrl(
-            objectLocation(objectPath),
-            "DELETE",
-            signal,
-          ),
-          { method: "DELETE", signal },
-        );
-        if (!response.ok && response.status !== 404) {
-          throw new Error(`App Storage cleanup failed (${response.status}).`);
-        }
-      }
       const knownParts =
         typeof row.partes_processadas === "number" ? row.partes_processadas : 0;
       let removedParts =
         typeof row.partes_removidas === "number" ? row.partes_removidas : 0;
-      if (!objectPath || manifestJobId(objectPath) || knownParts > 0) {
-        // Include the next index: it may have been uploaded just before a
-        // worker stopped, before its checkpoint reached Supabase.
-        const totalPartObjects = Math.max(1, knownParts + 1);
-        const stopAt = Math.min(
-          totalPartObjects,
-          removedParts + EXPIRED_PARTS_PER_RUN,
-        );
-        for (let partIndex = removedParts; partIndex < stopAt; partIndex += 1) {
-          const signal = signalBeforeDeadline(deadline);
-          const response = await fetch(
-            await signedObjectUrl(
-              objectLocation(partObjectPath(row.id, partIndex)),
-              "DELETE",
-              signal,
-            ),
-            { method: "DELETE", signal },
+      const pathsToRemove: string[] = [];
+      if (objectPath && !supabaseManifestJobId(objectPath)) {
+        pathsToRemove.push(objectPath);
+      }
+      // Include the next index: it may have been uploaded just before a
+      // worker stopped, before its checkpoint reached Supabase.
+      const totalPartObjects = Math.max(1, knownParts + 1);
+      const stopAt = Math.min(
+        totalPartObjects,
+        removedParts + EXPIRED_PARTS_PER_RUN,
+      );
+      for (let partIndex = removedParts; partIndex < stopAt; partIndex += 1) {
+        pathsToRemove.push(partObjectName(row.id, partIndex));
+      }
+      if (pathsToRemove.length > 0) {
+        assertBeforeDeadline(deadline);
+        const { error: storageError } = await client.storage
+          .from(BI_EXPORTS_BUCKET)
+          .remove(pathsToRemove);
+        if (storageError) {
+          throw new Error(
+            `Supabase Storage cleanup failed (${storageError.statusCode ?? "error"}).`,
+            { cause: storageError },
           );
-          if (!response.ok && response.status !== 404) {
-            throw new Error(
-              `App Storage part cleanup failed (${response.status}).`,
-            );
-          }
-          removedParts = partIndex + 1;
         }
-        if (removedParts !== Number(row.partes_removidas ?? 0)) {
-          const { error: progressError } = await client
-            .from("exportacao_csv")
-            .update({ partes_removidas: removedParts })
-            .eq("id", row.id)
-            .abortSignal(signalBeforeDeadline(deadline));
-          if (progressError) throw progressError;
-        }
-        if (removedParts < totalPartObjects) {
-          throw new ExportBatchDeferredError();
-        }
+        assertBeforeDeadline(deadline);
+      }
+      removedParts = stopAt;
+      if (removedParts !== Number(row.partes_removidas ?? 0)) {
+        const { error: progressError } = await client
+          .from("exportacao_csv")
+          .update({ partes_removidas: removedParts })
+          .eq("id", row.id)
+          .abortSignal(signalBeforeDeadline(deadline));
+        if (progressError) throw progressError;
+      }
+      if (removedParts < totalPartObjects) {
+        throw new ExportBatchDeferredError();
       }
       const { error: cleanupError } = await client
         .from("exportacao_csv")
@@ -327,11 +383,13 @@ async function processExport(job: ExportJob): Promise<boolean> {
         status: "processando",
         iniciado_em: new Date().toISOString(),
         erro: null,
+        caminho_objeto: manifestObjectPath(job.id),
         ...(resetLegacyProgress
           ? { linhas_processadas: 0, total_linhas: null }
           : {}),
       })
       .eq("id", job.id)
+      .eq("provedor_armazenamento", "supabase")
       .in("status", ["pendente", "processando"])
       .abortSignal(signalBeforeDeadline(deadline))
       .select("id")
@@ -572,8 +630,9 @@ export async function processBiExportJobs(): Promise<number> {
   await expireExports();
   const { data, error } = await client.from("exportacao_csv")
     .select(
-      "id,campanha_id,filtro,periodo_inicio,periodo_fim,status,expira_em,cursor_destinatario_id,partes_processadas,fonte_concluida,linhas_processadas",
+      "id,campanha_id,filtro,periodo_inicio,periodo_fim,status,expira_em,provedor_armazenamento,cursor_destinatario_id,partes_processadas,fonte_concluida,linhas_processadas",
     )
+    .eq("provedor_armazenamento", "supabase")
     .in("status", ["pendente", "processando"])
     .order("criado_em", { ascending: true })
     .limit(1);

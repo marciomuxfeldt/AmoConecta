@@ -1,4 +1,5 @@
 - [Supabase connector limits](supabase-integration-constraints.md) — the connected Supabase integration exposes authenticated REST/PostgREST access, not direct SQL/DDL execution.
+- [Worker storage boundary](worker-storage-boundary.md) — the separate worker cannot use the main Repl's App Storage; use server-side Supabase Storage for worker objects.
 - [Supabase signed uploads](supabase-signed-upload.md) — signed browser uploads use PUT with the Storage SDK's multipart FormData shape.
 - [CSV import validation rules](csv-import-validation-rules.md) — localized timestamps and optional contact fields must not reject otherwise valid e-mail rows.
 - [Asynchronous CSV import jobs](async-import-jobs.md) — large validations must persist progress and outlive the HTTP request.
