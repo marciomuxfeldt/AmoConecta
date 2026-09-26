@@ -2,7 +2,7 @@
 -- Apply manually in the Supabase SQL Editor before deploying the updated worker.
 
 -- Preserve the provider for existing App Storage exports. New rows use Supabase.
-alter table public.exportacao_csv
+alter table public.exportacao_csva
   add column if not exists provedor_armazenamento text;
 
 update public.exportacao_csv
