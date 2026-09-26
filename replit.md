@@ -40,7 +40,7 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 _Populate as you build — sharp edges, "always run X before Y" rules._
 
-- AmoConecta BI export changes are not ready after compilation or unit tests alone: verify a completed export against the configured Supabase and confirm its private-storage CSV can be read back. When testing pagination or resume behavior, use an isolated dataset with more than 500 recipients; never seed synthetic recipients in production.
+- BI export recipient pages default to 500 and can be reduced with `BI_EXPORT_PAGE_SIZE` (1–500); event lookups remain at 500. For real-data pagination/resume checks, hold the global worker lock during direct worker runs and compare the downloaded private-storage CSV with the source rows. Do not seed synthetic production recipients.
 
 ## Pointers
 

@@ -5,7 +5,7 @@
 - [Technical error persistence](technical-error-persistence.md) — persist structured technical failures while masking them at the HTTP boundary.
 - [Import count semantics](import-count-semantics.md) — “Salvos” counts only new records; existing and in-file duplicates are separate outcomes.
 - [E-mail HTML sanitization](email-template-sanitization.md) — allowlisted rich-text sanitizers must preserve both opening and closing tags.
-- [PostgREST worker lease](postgrest-advisory-lock.md) — separate RPC requests need an atomic tokenized lease with a short expiry.
+- [PostgREST worker lease](postgrest-advisory-lock.md) — separate requests need an atomic tokenized lease; direct BI tests must hold the same global lock as scheduled workers.
 - [Orval response naming](orval-response-naming.md) — response components must avoid names Orval derives from operation IDs to prevent generated barrel collisions.
 - [Resend idempotency header](resend-idempotency-header.md) — keep internal deduplication keys on the HTTP request, never in delivered email headers.
 - [Resend event handling](resend-event-arrival-race.md) — unmatched IDs need bounded retries; only explicit permanent bounces suppress, and the first suppression reason is retained.

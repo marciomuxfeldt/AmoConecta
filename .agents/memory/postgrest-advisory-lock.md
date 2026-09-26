@@ -7,4 +7,4 @@ PostgREST calls use pooled HTTP sessions, so cross-request coordination must use
 
 **Why:** A session-only acquire/release pair can silently lose mutual exclusion when the connection pool returns the acquisition session before the worker finishes.
 
-**How to apply:** For background jobs that span multiple Supabase calls, seed one lock row, acquire it with an atomic conditional `UPDATE`, use a short lease, and use a per-process owner token to prevent stale workers from releasing a newer lease.
+**How to apply:** For background jobs that span multiple Supabase calls, seed one lock row, acquire it with an atomic conditional `UPDATE`, use a short lease, and use a per-process owner token to prevent stale workers from releasing a newer lease. Direct BI-export runs against shared data must hold that same global lease for the full run; otherwise a scheduled worker can process the same checkpoint concurrently and persist a stale-build error.
