@@ -1,0 +1,67 @@
+Hoje a plataforma tem um usuário só. Precisa abrir para a equipe da Amo, sem hierarquia de permissões: todos os usuários são administradores e podem fazer tudo, inclusive disparar campanhas.
+
+Não implemente papéis, níveis ou permissões diferenciadas. As travas que protegem um disparo — modo de segurança, teste obrigatório acima de 50 destinatários, confirmação digitada acima de 5.000, pausa — continuam valendo para todos igualmente, e são elas que protegem, não a permissão.
+
+Antes de implementar
+
+Me diga como a autenticação funciona hoje: onde os usuários ficam, como a sessão é criada, e o que existe de gerenciamento. Quero entender o ponto de partida antes de você mudar qualquer coisa.
+
+1. Entrada por convite, nunca cadastro aberto
+
+A plataforma dispara e-mail para centenas de milhares de pessoas. Não pode existir tela de cadastro pública.
+
+Um usuário existente convida outro informando o e-mail.
+Apenas endereços @amo.delivery podem ser convidados. Recuse qualquer outro domínio, com mensagem clara.
+O convidado recebe um e-mail com link de ativação, define a própria senha e entra.
+O link de convite expira em 7 dias e é de uso único.
+Não existe autocadastro por nenhum caminho. Verifique se alguma rota permite criar usuário sem convite e feche.
+2. Tela de usuários
+
+Acessível a qualquer usuário logado, mostrando:
+
+Lista de quem tem acesso: nome, e-mail, data de entrada, último acesso
+Convites pendentes, com a possibilidade de reenviar ou cancelar
+Botão de convidar
+Botão de desativar um usuário
+
+Desativar, nunca apagar. Um usuário desativado perde o acesso imediatamente, as sessões dele terminam, mas o histórico de ações que ele executou continua íntegro. Apagar destruiria o registro de quem disparou o quê.
+
+Um usuário não pode desativar a si mesmo, e não é possível desativar o último usuário ativo.
+
+3. Registro de quem fez cada ação
+
+Hoje só a pausa guarda o operador. Com uma pessoa só isso bastava; com equipe, não.
+
+Registre autor e horário para: criar campanha, importar lista, enviar teste, agendar, pausar, retomar, cancelar, gerar exportação, alterar configuração global.
+
+Na tela da campanha, mostre de forma visível: quem criou, quem agendou, e — se estiver pausada — quem pausou e quando. Na lista de campanhas, mostre quem criou.
+
+Me entregue o SQL de qualquer tabela ou coluna nova.
+
+4. Sessão persistida
+
+Ficou pendente desde a Fase 4 e agora é urgente: com uma pessoa só, perder a sessão era irritante; com equipe, todo reinício do servidor derruba todo mundo no meio do trabalho.
+
+A sessão não pode viver em memória do processo.
+Reinício do servidor não desloga ninguém.
+Sessão expirada mostra na tela que expirou e leva ao login, em vez de falhar em silêncio mostrando dados de cache. Isso aconteceu em teste e o operador levou minutos para entender que estava deslogado.
+5. Recuperação de senha
+
+Fluxo de "esqueci minha senha" por e-mail, com link de uso único e validade curta.
+
+Os e-mails de convite e de recuperação são transacionais e não passam pela fila de campanhas nem pelo modo de segurança — senão ninguém consegue entrar enquanto ENVIO_LIBERADO estiver false. Me diga por onde eles saem.
+
+Fora do escopo
+
+Não crie papéis nem níveis de permissão. Não mexa no modo de segurança, em ENVIO_LIBERADO, nas travas de disparo, nos webhooks ou na exportação.
+
+Critérios de aceite
+Um convite para endereço fora de @amo.delivery é recusado.
+Não existe nenhuma rota que crie usuário sem convite válido.
+Usuário desativado perde acesso na hora, e o histórico das ações dele permanece.
+Reiniciar o servidor não desloga ninguém.
+A tela da campanha mostra quem criou, quem agendou e quem pausou.
+O e-mail de convite chega mesmo com ENVIO_LIBERADO=false.
+Ao final
+
+SQL de toda migração em bloco de código, o que preciso configurar à mão, e quais arquivos alterados o worker também executa.
