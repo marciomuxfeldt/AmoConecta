@@ -12,6 +12,7 @@ import {
   UpdateEmailBrandingResponse,
 } from "@workspace/api-zod";
 import { getSupabaseUser } from "./auth";
+import { recordAuditEvent, teamAuditActor } from "../lib/audit-events";
 import { supabaseAdminClient } from "../lib/supabase";
 import {
   countChronicDisengagedContacts,
@@ -111,7 +112,11 @@ router.get("/email-branding", async (req, res): Promise<void> => {
 });
 
 router.patch("/email-branding", async (req, res): Promise<void> => {
-  if (!(await requireSession(req, res))) return;
+  const session = await getSupabaseUser(req, res);
+  if (!session) {
+    res.status(401).json({ error: "Sessão inválida ou expirada. Entre novamente." });
+    return;
+  }
   const parsed = UpdateEmailBrandingBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Informe uma cor hexadecimal válida." });
@@ -121,6 +126,20 @@ router.patch("/email-branding", async (req, res): Promise<void> => {
     const settings = await updateEmailBrandingSettings(
       parsed.data.cor_botao_email,
     );
+    try {
+      await recordAuditEvent({
+        actor: teamAuditActor(session.user),
+        action: "email_branding_updated",
+        entityType: "email_branding",
+        metadata: { cor_botao_email: settings.cor_botao_email },
+      });
+    } catch (auditError) {
+      reportError(
+        req,
+        "Email branding audit event could not be persisted",
+        auditError,
+      );
+    }
     res.json(UpdateEmailBrandingResponse.parse(settings));
   } catch (error) {
     reportError(req, "Email branding settings could not be updated", error);
@@ -181,7 +200,11 @@ router.get("/bi-exports", async (req, res): Promise<void> => {
 });
 
 router.post("/bi-exports", async (req, res): Promise<void> => {
-  if (!(await requireSession(req, res))) return;
+  const session = await getSupabaseUser(req, res);
+  if (!session) {
+    res.status(401).json({ error: "Sessão inválida ou expirada. Entre novamente." });
+    return;
+  }
   const parsed = CreateBiExportBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Os filtros da exportação são inválidos." });
@@ -228,6 +251,22 @@ router.post("/bi-exports", async (req, res): Promise<void> => {
       .select(BI_EXPORT_COLUMNS)
       .single();
     if (error) throw error;
+    try {
+      await recordAuditEvent({
+        actor: teamAuditActor(session.user),
+        action: "bi_export_requested",
+        entityType: "bi_export",
+        entityId: data.id,
+        metadata: {
+          campanha_id,
+          filtro,
+          periodo_inicio,
+          periodo_fim,
+        },
+      });
+    } catch (auditError) {
+      reportError(req, "BI export audit event could not be persisted", auditError);
+    }
     res
       .status(202)
       .json(toBiExportResponse(data as Record<string, unknown>));

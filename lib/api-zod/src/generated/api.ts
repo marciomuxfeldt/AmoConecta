@@ -261,6 +261,158 @@ export const LogoutResponse = zod.void()
 
 
 /**
+ * @summary Ativa uma conta a partir de um convite válido
+ */
+export const acceptTeamInvitationBodyTokenMin = 32;
+
+export const acceptTeamInvitationBodyNomeMax = 120;
+
+export const acceptTeamInvitationBodyPasswordMin = 12;
+
+
+
+export const AcceptTeamInvitationBody = zod.object({
+  "invite_id": zod.string().uuid(),
+  "token": zod.string().min(acceptTeamInvitationBodyTokenMin),
+  "nome": zod.string().min(1).max(acceptTeamInvitationBodyNomeMax),
+  "password": zod.string().min(acceptTeamInvitationBodyPasswordMin)
+})
+
+export const AcceptTeamInvitationResponse = zod.object({
+  "authenticated": zod.boolean(),
+  "user": zod.union([zod.object({
+  "id": zod.string(),
+  "email": zod.string().email()
+}),zod.null()])
+})
+
+
+/**
+ * @summary Solicita link de recuperação de senha
+ */
+export const RequestPasswordRecoveryBody = zod.object({
+  "email": zod.string().email()
+})
+
+export const RequestPasswordRecoveryResponse = zod.object({
+  "message": zod.string()
+})
+
+
+/**
+ * @summary Define uma nova senha com um token de uso único
+ */
+export const completePasswordRecoveryBodyTokenMin = 32;
+
+export const completePasswordRecoveryBodyPasswordMin = 12;
+
+
+
+export const CompletePasswordRecoveryBody = zod.object({
+  "token": zod.string().min(completePasswordRecoveryBodyTokenMin),
+  "password": zod.string().min(completePasswordRecoveryBodyPasswordMin)
+})
+
+export const CompletePasswordRecoveryResponse = zod.object({
+  "message": zod.string()
+})
+
+
+/**
+ * @summary Lista membros e convites pendentes
+ */
+export const GetTeamAccessResponse = zod.object({
+  "membros": zod.array(zod.object({
+  "user_id": zod.string().uuid(),
+  "email": zod.string().email(),
+  "nome": zod.string(),
+  "ativo": zod.boolean(),
+  "criado_em": zod.coerce.date(),
+  "ultimo_acesso_em": zod.coerce.date().nullable(),
+  "desativado_em": zod.coerce.date().nullable()
+})),
+  "convites": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "email": zod.string().email(),
+  "criado_em": zod.coerce.date(),
+  "expira_em": zod.coerce.date(),
+  "convidado_por_nome": zod.string(),
+  "convidado_por_email": zod.string().email()
+}))
+})
+
+
+/**
+ * @summary Envia um convite de acesso
+ */
+export const CreateTeamInvitationBody = zod.object({
+  "email": zod.string().email()
+})
+
+export const CreateTeamInvitationResponse = zod.object({
+  "id": zod.string().uuid(),
+  "email": zod.string().email(),
+  "criado_em": zod.coerce.date(),
+  "expira_em": zod.coerce.date(),
+  "convidado_por_nome": zod.string(),
+  "convidado_por_email": zod.string().email()
+})
+
+
+/**
+ * @summary Reenvia o convite e renova seu prazo
+ */
+export const ResendTeamInvitationParams = zod.object({
+  "inviteId": zod.coerce.string().uuid()
+})
+
+export const ResendTeamInvitationResponse = zod.object({
+  "message": zod.string()
+})
+
+
+/**
+ * @summary Cancela um convite pendente
+ */
+export const CancelTeamInvitationParams = zod.object({
+  "inviteId": zod.coerce.string().uuid()
+})
+
+export const CancelTeamInvitationResponse = zod.void()
+
+
+/**
+ * @summary Desativa um membro sem apagar o histórico
+ */
+export const DeactivateTeamMemberParams = zod.object({
+  "userId": zod.coerce.string().uuid()
+})
+
+export const DeactivateTeamMemberResponse = zod.object({
+  "message": zod.string()
+})
+
+
+/**
+ * @summary Lista o histórico de ações da campanha
+ */
+export const GetCampaignAuditParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const GetCampaignAuditResponse = zod.object({
+  "events": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "action": zod.string(),
+  "actor_name": zod.string(),
+  "actor_email": zod.string().email().nullable(),
+  "created_at": zod.coerce.date(),
+  "metadata": zod.record(zod.string(), zod.unknown())
+}))
+})
+
+
+/**
  * @summary Lista campanhas da conta autenticada
  */
 export const listCampaignsResponseDestinatariosTotalMin = 0;
@@ -277,7 +429,9 @@ export const ListCampaignsResponseItem = zod.object({
   "clicados": zod.number().int(),
   "destinatarios_total": zod.number().int().min(listCampaignsResponseDestinatariosTotalMin),
   "agendada_para": zod.coerce.date().nullable(),
-  "criado_em": zod.coerce.date()
+  "criado_em": zod.coerce.date(),
+  "criado_por_nome": zod.string().nullable(),
+  "criado_por_email": zod.string().nullable()
 })
 export const ListCampaignsResponse = zod.array(ListCampaignsResponseItem)
 
@@ -478,7 +632,14 @@ export const CreateCampaignResponse = zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
 })])),
-  "criado_em": zod.coerce.date()
+  "criado_em": zod.coerce.date(),
+  "criado_por_nome": zod.string().nullable(),
+  "criado_por_email": zod.string().nullable(),
+  "agendado_por_nome": zod.string().nullable(),
+  "agendado_por_email": zod.string().nullable(),
+  "agendado_em": zod.coerce.date().nullable(),
+  "pausado_por_nome": zod.string().nullable(),
+  "pausado_por_email": zod.string().nullable()
 })
 
 
@@ -591,7 +752,14 @@ export const CreateCampaignDraftResponse = zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
 })])),
-  "criado_em": zod.coerce.date()
+  "criado_em": zod.coerce.date(),
+  "criado_por_nome": zod.string().nullable(),
+  "criado_por_email": zod.string().nullable(),
+  "agendado_por_nome": zod.string().nullable(),
+  "agendado_por_email": zod.string().nullable(),
+  "agendado_em": zod.coerce.date().nullable(),
+  "pausado_por_nome": zod.string().nullable(),
+  "pausado_por_email": zod.string().nullable()
 })
 
 
@@ -704,7 +872,14 @@ export const GetCampaignResponse = zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
 })])),
-  "criado_em": zod.coerce.date()
+  "criado_em": zod.coerce.date(),
+  "criado_por_nome": zod.string().nullable(),
+  "criado_por_email": zod.string().nullable(),
+  "agendado_por_nome": zod.string().nullable(),
+  "agendado_por_email": zod.string().nullable(),
+  "agendado_em": zod.coerce.date().nullable(),
+  "pausado_por_nome": zod.string().nullable(),
+  "pausado_por_email": zod.string().nullable()
 })
 
 
@@ -908,7 +1083,14 @@ export const UpdateCampaignResponse = zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
 })])),
-  "criado_em": zod.coerce.date()
+  "criado_em": zod.coerce.date(),
+  "criado_por_nome": zod.string().nullable(),
+  "criado_por_email": zod.string().nullable(),
+  "agendado_por_nome": zod.string().nullable(),
+  "agendado_por_email": zod.string().nullable(),
+  "agendado_em": zod.coerce.date().nullable(),
+  "pausado_por_nome": zod.string().nullable(),
+  "pausado_por_email": zod.string().nullable()
 })
 
 
@@ -1041,7 +1223,14 @@ export const ScheduleCampaignResponse = zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
 })])),
-  "criado_em": zod.coerce.date()
+  "criado_em": zod.coerce.date(),
+  "criado_por_nome": zod.string().nullable(),
+  "criado_por_email": zod.string().nullable(),
+  "agendado_por_nome": zod.string().nullable(),
+  "agendado_por_email": zod.string().nullable(),
+  "agendado_em": zod.coerce.date().nullable(),
+  "pausado_por_nome": zod.string().nullable(),
+  "pausado_por_email": zod.string().nullable()
 })
 
 
@@ -1154,7 +1343,14 @@ export const PauseCampaignResponse = zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
 })])),
-  "criado_em": zod.coerce.date()
+  "criado_em": zod.coerce.date(),
+  "criado_por_nome": zod.string().nullable(),
+  "criado_por_email": zod.string().nullable(),
+  "agendado_por_nome": zod.string().nullable(),
+  "agendado_por_email": zod.string().nullable(),
+  "agendado_em": zod.coerce.date().nullable(),
+  "pausado_por_nome": zod.string().nullable(),
+  "pausado_por_email": zod.string().nullable()
 })
 
 
@@ -1271,7 +1467,14 @@ export const ResumeCampaignResponse = zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
 })])),
-  "criado_em": zod.coerce.date()
+  "criado_em": zod.coerce.date(),
+  "criado_por_nome": zod.string().nullable(),
+  "criado_por_email": zod.string().nullable(),
+  "agendado_por_nome": zod.string().nullable(),
+  "agendado_por_email": zod.string().nullable(),
+  "agendado_em": zod.coerce.date().nullable(),
+  "pausado_por_nome": zod.string().nullable(),
+  "pausado_por_email": zod.string().nullable()
 })
 
 
@@ -1384,7 +1587,14 @@ export const CancelCampaignResponse = zod.object({
   "id": zod.string().min(1),
   "type": zod.enum(['divider'])
 })])),
-  "criado_em": zod.coerce.date()
+  "criado_em": zod.coerce.date(),
+  "criado_por_nome": zod.string().nullable(),
+  "criado_por_email": zod.string().nullable(),
+  "agendado_por_nome": zod.string().nullable(),
+  "agendado_por_email": zod.string().nullable(),
+  "agendado_em": zod.coerce.date().nullable(),
+  "pausado_por_nome": zod.string().nullable(),
+  "pausado_por_email": zod.string().nullable()
 })
 
 

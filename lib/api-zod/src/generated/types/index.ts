@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './acceptTeamInvitationInput';
 export * from './authSession';
 export * from './authUser';
 export * from './biExportFilter';
@@ -14,6 +15,9 @@ export * from './biExportJobsResponse';
 export * from './biExportJobStatus';
 export * from './biExportRequest';
 export * from './campaign';
+export * from './campaignAuditEvent';
+export * from './campaignAuditEventMetadata';
+export * from './campaignAuditResponse';
 export * from './campaignDefaults';
 export * from './campaignDraftInput';
 export * from './campaignEmailMetrics';
@@ -23,6 +27,7 @@ export * from './campaignRecipientsCleared';
 export * from './campaignRecipientSummary';
 export * from './campaignResumeInput';
 export * from './campaignStatus';
+export * from './completePasswordRecoveryInput';
 export * from './createCampaignInput';
 export * from './detailedError';
 export * from './emailBlock';
@@ -46,6 +51,8 @@ export * from './importValidationJob';
 export * from './importValidationStatus';
 export * from './importValidationSummary';
 export * from './loginInput';
+export * from './messageResponse';
+export * from './passwordRecoveryInput';
 export * from './recencyBucket';
 export * from './recipientEmailMetric';
 export * from './recipientRecencyBucket';
@@ -60,6 +67,10 @@ export * from './resendWebhookEventData';
 export * from './safetyMode';
 export * from './scheduleCampaignInput';
 export * from './sendTestResponse';
+export * from './teamAccessResponse';
+export * from './teamInvitation';
+export * from './teamInvitationInput';
+export * from './teamMember';
 export * from './technicalError';
 export * from './updateCampaignInput';
 export * from './validateImportInput';

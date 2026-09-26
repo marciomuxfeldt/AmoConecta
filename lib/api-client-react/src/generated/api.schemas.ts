@@ -178,6 +178,10 @@ export interface CampaignListItem {
   /** @nullable */
   agendada_para: string | null;
   criado_em: string;
+  /** @nullable */
+  criado_por_nome: string | null;
+  /** @nullable */
+  criado_por_email: string | null;
 }
 
 export interface RecipientStatusSummary {
@@ -469,6 +473,20 @@ export interface Campaign {
   teste_enviado_em: string | null;
   corpo: EmailBlock[];
   criado_em: string;
+  /** @nullable */
+  criado_por_nome: string | null;
+  /** @nullable */
+  criado_por_email: string | null;
+  /** @nullable */
+  agendado_por_nome: string | null;
+  /** @nullable */
+  agendado_por_email: string | null;
+  /** @nullable */
+  agendado_em: string | null;
+  /** @nullable */
+  pausado_por_nome: string | null;
+  /** @nullable */
+  pausado_por_email: string | null;
 }
 
 export interface CreateCampaignInput {
@@ -669,5 +687,79 @@ export interface ImportValidationJob {
   criado_em: string;
   /** @nullable */
   concluido_em: string | null;
+}
+
+export interface TeamInvitationInput {
+  email: string;
+}
+
+export interface AcceptTeamInvitationInput {
+  invite_id: string;
+  /** @minLength 32 */
+  token: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  nome: string;
+  /** @minLength 12 */
+  password: string;
+}
+
+export interface PasswordRecoveryInput {
+  email: string;
+}
+
+export interface CompletePasswordRecoveryInput {
+  /** @minLength 32 */
+  token: string;
+  /** @minLength 12 */
+  password: string;
+}
+
+export interface MessageResponse {
+  message: string;
+}
+
+export interface TeamMember {
+  user_id: string;
+  email: string;
+  nome: string;
+  ativo: boolean;
+  criado_em: string;
+  /** @nullable */
+  ultimo_acesso_em: string | null;
+  /** @nullable */
+  desativado_em: string | null;
+}
+
+export interface TeamInvitation {
+  id: string;
+  email: string;
+  criado_em: string;
+  expira_em: string;
+  convidado_por_nome: string;
+  convidado_por_email: string;
+}
+
+export interface TeamAccessResponse {
+  membros: TeamMember[];
+  convites: TeamInvitation[];
+}
+
+export type CampaignAuditEventMetadata = { [key: string]: unknown };
+
+export interface CampaignAuditEvent {
+  id: string;
+  action: string;
+  actor_name: string;
+  /** @nullable */
+  actor_email: string | null;
+  created_at: string;
+  metadata: CampaignAuditEventMetadata;
+}
+
+export interface CampaignAuditResponse {
+  events: CampaignAuditEvent[];
 }
 

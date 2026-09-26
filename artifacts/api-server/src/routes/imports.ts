@@ -10,6 +10,7 @@ import {
 import { getSupabaseUser } from "./auth";
 import { findCampaign } from "./campaigns";
 import { supabaseAdminClient } from "../lib/supabase";
+import { recordAuditEvent, teamAuditActor } from "../lib/audit-events";
 import {
   ImportValidationError,
   validateAndImportCsv,
@@ -275,6 +276,23 @@ router.post("/campaigns/:campaignId/imports/validate", async (req, res) => {
       return;
     }
     const response = ValidateCampaignImportResponse.parse(job);
+    try {
+      await recordAuditEvent({
+        actor: teamAuditActor(session.user),
+        action: "campaign_import_started",
+        entityType: "campaign",
+        entityId: req.params.campaignId,
+        metadata: {
+          import_id: response.id,
+          deduplicate_phone: body.data.deduplicar_por_telefone,
+        },
+      });
+    } catch (auditError) {
+      req.log.error(
+        { technicalError: getTechnicalError(auditError) },
+        "Campaign import audit event could not be persisted",
+      );
+    }
     res.status(202).json(response);
     setImmediate(() => {
       void processImportJob({

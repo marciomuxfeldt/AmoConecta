@@ -67,4 +67,18 @@ export interface Campaign {
   teste_enviado_em: Date | null;
   corpo: EmailBlock[];
   criado_em: Date;
+  /** @nullable */
+  criado_por_nome: string | null;
+  /** @nullable */
+  criado_por_email: string | null;
+  /** @nullable */
+  agendado_por_nome: string | null;
+  /** @nullable */
+  agendado_por_email: string | null;
+  /** @nullable */
+  agendado_em: Date | null;
+  /** @nullable */
+  pausado_por_nome: string | null;
+  /** @nullable */
+  pausado_por_email: string | null;
 }

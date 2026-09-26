@@ -27,6 +27,7 @@ import { Link, useLocation } from 'wouter';
 import {
   CampaignStatus,
   type Campaign,
+  type CampaignAuditEvent,
   type CampaignRecipientSummary,
   type CampaignListItem,
   type CreateCampaignInput,
@@ -39,6 +40,7 @@ import {
   getGetAuthSessionQueryKey,
   getListCampaignsQueryKey,
   getGetSafetyModeQueryKey,
+  getGetCampaignAuditQueryKey,
   useGetCampaignDefaults,
   useCreateCampaign,
   useCreateCampaignDraft,
@@ -49,6 +51,7 @@ import {
   useGetCampaignImport,
   useListCampaigns,
   useGetSafetyMode,
+  useGetCampaignAudit,
   useLogout,
   useRequestCampaignImportUploadUrl,
   useSendCampaignTest,
@@ -331,7 +334,8 @@ export function Shell({
 
   const doLogout = () => {
     logout.mutate(undefined, {
-      onSuccess: () => {
+      onSettled: () => {
+        queryClient.clear();
         queryClient.setQueryData(getGetAuthSessionQueryKey(), { authenticated: false, user: null });
         setLocation('/login');
       },
@@ -369,6 +373,15 @@ export function Shell({
       data-testid="link-email-settings"
     >
       Identidade do e-mail
+    </Link>
+    <Link
+      href="/team"
+      onClick={() => setMobileNavOpen(false)}
+      className="focus-ring mt-2 flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[#d0d7e2] hover:bg-[#354157]"
+      data-testid="link-team"
+    >
+      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#354157] text-[#d7ef56]"><UserRound size={15} /></span>
+      Equipe
     </Link>
           </nav>
         </div>
@@ -469,6 +482,7 @@ function CampaignTable({ campaigns }: { campaigns: CampaignListItem[] }) {
           <div className="min-w-0">
             <p className="truncate text-sm font-extrabold text-[#263044]" data-testid={`text-campaign-name-${campaign.id}`}>{campaign.nome}</p>
             <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.08em] text-[#99959a]">Criada em {formatDate(campaign.criado_em)}</p>
+            {campaign.criado_por_nome || campaign.criado_por_email ? <p className="mt-1 truncate text-[11px] font-semibold text-[#777984]" data-testid={`text-campaign-creator-${campaign.id}`}>Criada por {campaign.criado_por_nome ?? campaign.criado_por_email}{campaign.criado_por_nome && campaign.criado_por_email ? ` · ${campaign.criado_por_email}` : ''}</p> : null}
           </div>
           <div><StatusPill status={campaign.status} /></div>
           <div><span className="text-sm font-bold tabular-nums text-[#263044]">{formatNumber(campaign.destinatarios_total)}</span><span className="mt-1 block font-mono text-[9px] uppercase text-[#aaa3a1] md:hidden">destinatários</span></div>
@@ -1314,6 +1328,8 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
        transferStage = 'import-validation';
        const job = await validateImport.mutateAsync({ campaignId, data: { storage_path: upload.path, deduplicar_por_telefone: deduplicatePhone } });
        setImportJobId(job.id);
+       queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
+       queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
     } catch (uploadError) {
       setPhase('idle');
       console.error('Campaign CSV operation failed', {
@@ -1719,6 +1735,152 @@ function CampaignJourney({
   );
 }
 
+const campaignAuditActionLabels: Record<string, string> = {
+  campaign_created: 'Campanha criada',
+  campaign_scheduled: 'Campanha agendada',
+  campaign_paused: 'Campanha pausada',
+  campaign_resumed: 'Campanha retomada',
+  campaign_cancelled: 'Campanha cancelada',
+  campaign_auto_paused: 'Pausa automática',
+  campaign_test_sent: 'Teste enviado',
+  campaign_updated: 'Campanha atualizada',
+  campaign_deleted: 'Campanha excluída',
+  campaign_import_started: 'Importação iniciada',
+};
+
+const campaignAuditStatusLabels: Record<string, string> = {
+  rascunho: 'Rascunho',
+  agendada: 'Agendada',
+  enviando: 'Enviando',
+  pausada: 'Pausada',
+  concluida: 'Concluída',
+  cancelada: 'Cancelada',
+};
+
+const campaignFieldLabels: Record<string, string> = {
+  nome: 'Nome',
+  assunto: 'Assunto',
+  remetente_nome: 'Nome do remetente',
+  remetente_email: 'E-mail do remetente',
+  reply_to: 'Responder para',
+  preheader: 'Preheader',
+  corpo: 'Conteúdo',
+  corpo_lembrete: 'Conteúdo do lembrete',
+};
+
+function campaignAuditDescription(event: CampaignAuditEvent): string | null {
+  const metadata = event.metadata ?? {};
+  const from = typeof metadata.from_status === 'string'
+    ? campaignAuditStatusLabels[metadata.from_status] ?? metadata.from_status
+    : null;
+  const to = typeof metadata.to_status === 'string'
+    ? campaignAuditStatusLabels[metadata.to_status] ?? metadata.to_status
+    : null;
+
+  switch (event.action) {
+    case 'campaign_created':
+      return 'Campanha criada pela equipe.';
+    case 'campaign_scheduled':
+      return typeof metadata.scheduled_for === 'string'
+        ? `Disparo programado para ${formatDate(metadata.scheduled_for)}.`
+        : typeof metadata.scheduled_at === 'string'
+          ? `Agendamento definido em ${formatDate(metadata.scheduled_at)}.`
+        : 'O agendamento foi registrado.';
+    case 'campaign_paused':
+      return from && to ? `${from} → ${to}.` : 'Pausa manual registrada.';
+    case 'campaign_resumed':
+      return from && to ? `${from} → ${to}.` : 'Retomada do envio registrada.';
+    case 'campaign_cancelled':
+      return from && to ? `${from} → ${to}.` : 'Cancelamento registrado.';
+    case 'campaign_auto_paused': {
+      const reason = typeof metadata.reason === 'string' ? metadata.reason : '';
+      const bounce = typeof metadata.bounce_rate === 'number'
+        ? `Bounce ${(metadata.bounce_rate * 100).toFixed(2)}%`
+        : '';
+      const complaint = typeof metadata.complaint_rate === 'number'
+        ? `reclamações ${(metadata.complaint_rate * 100).toFixed(2)}%`
+        : '';
+      const metrics = [bounce, complaint].filter(Boolean).join(' · ');
+      return [reason, metrics].filter(Boolean).join(' · ') || 'Regra automática de reputação.';
+    }
+    case 'campaign_test_sent':
+      return 'E-mail de teste enviado para o endereço da sessão.';
+    case 'campaign_updated': {
+      const fields = Array.isArray(metadata.updated_fields)
+        ? metadata.updated_fields.filter((value): value is string => typeof value === 'string')
+        : [];
+      return fields.length > 0
+        ? `Campos alterados: ${fields.map((field) => campaignFieldLabels[field] ?? field.replaceAll('_', ' ')).join(', ')}.`
+        : 'Alterações salvas.';
+    }
+    case 'campaign_import_started':
+      return metadata.deduplicate_phone === true
+        ? 'Importação CSV iniciada com deduplicação por telefone.'
+        : 'Importação CSV iniciada.';
+    case 'campaign_deleted':
+      return 'Campanha removida.';
+    default:
+      return null;
+  }
+}
+
+function AuditTimeline({ events, loading, error, onRetry }: { events?: CampaignAuditEvent[]; loading: boolean; error: boolean; onRetry: () => void }) {
+  if (loading) {
+    return <section className="panel p-6 sm:p-8" data-testid="status-campaign-audit-loading"><div className="skeleton h-3 w-24 rounded-full" /><div className="skeleton mt-4 h-7 w-48 rounded-lg" /><div className="mt-7 space-y-5">{[1, 2, 3].map((item) => <div key={item} className="skeleton h-14 rounded-xl" />)}</div></section>;
+  }
+  if (error) {
+    return <section className="rounded-2xl border border-[#efc9ba] bg-[#fff0e9] p-6" data-testid="status-campaign-audit-error"><div className="flex items-center gap-2 text-[#a64220]"><CircleAlert size={17} /><strong className="text-sm">O histórico não carregou.</strong></div><button type="button" onClick={onRetry} className="action-button action-button-secondary mt-4" data-testid="button-campaign-audit-retry"><RefreshCw size={14} /> Tentar novamente</button></section>;
+  }
+  return (
+    <section className="panel p-6 sm:p-8" data-testid="panel-campaign-audit">
+      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+        <div>
+          <p className="section-kicker">Rastro operacional</p>
+          <h2 className="mt-2 text-2xl font-extrabold tracking-[-.06em] text-[#263044]">Histórico da campanha</h2>
+        </div>
+        <span className="font-mono text-[9px] uppercase tracking-[.12em] text-[#979198]" data-testid="text-campaign-audit-count">
+          {events?.length ?? 0} eventos
+        </span>
+      </div>
+      {events && events.length > 0 ? (
+        <ol className="mt-7 ml-2 border-l border-[#ded5c8]">
+          {events.map((event) => {
+            const description = campaignAuditDescription(event);
+            return (
+              <li key={event.id} className="relative pb-7 pl-7 last:pb-0" data-testid={`row-campaign-audit-${event.id}`}>
+                <span className="absolute -left-[7px] top-1 h-3 w-3 rounded-full border-2 border-[#fbf9f5] bg-[#e96527] shadow-[0_0_0_1px_#e96527]" />
+                <div className="flex flex-col justify-between gap-1 sm:flex-row sm:items-start">
+                  <div>
+                    <p className="text-sm font-extrabold text-[#263044]" data-testid={`text-campaign-audit-action-${event.id}`}>
+                      {campaignAuditActionLabels[event.action] ?? 'Atividade registrada'}
+                    </p>
+                    <p className="mt-1 text-xs text-[#6d7180]">
+                      por <strong className="font-bold text-[#42495b]">{event.actor_name || event.actor_email || 'Equipe Amo'}</strong>
+                      {event.actor_email && event.actor_name ? ` · ${event.actor_email}` : ''}
+                    </p>
+                  </div>
+                  <time className="font-mono text-[9px] uppercase tracking-[.08em] text-[#9a9492]" dateTime={event.created_at}>
+                    {formatDate(event.created_at)}
+                  </time>
+                </div>
+                {description && (
+                  <p className="mt-3 rounded-lg bg-[#f8f3ec] px-3 py-2 text-xs leading-5 text-[#7b7780]" data-testid={`text-campaign-audit-metadata-${event.id}`}>
+                    {description}
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <div className="mt-6 rounded-xl border border-dashed border-[#cdbfae] bg-[#f8f3ec] px-5 py-8 text-center text-sm text-[#7d7e87]" data-testid="empty-campaign-audit">
+          Ainda não há eventos registrados.
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function NewCampaignPage({ user }: { user: SessionUser }) {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
@@ -1803,6 +1965,12 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
         query.state.data?.status === CampaignStatus.enviando ? 15000 : false,
     },
   });
+  const auditQuery = useGetCampaignAudit(campaignId, {
+    query: {
+      enabled: Boolean(campaignId),
+      queryKey: getGetCampaignAuditQueryKey(campaignId),
+    },
+  });
   const recipientSummaryQuery = useGetCampaignRecipientSummary(campaignId, {
     query: {
       enabled: Boolean(campaignId),
@@ -1868,6 +2036,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
           setOperationError(null);
           setOperationSuccess('Teste enviado com sucesso para o e-mail da sua sessão.');
           queryClient.invalidateQueries({ queryKey: getGetCampaignQueryKey(campaignId) });
+          queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
         },
         onError: () => setOperationSuccess(null),
       },
@@ -1883,6 +2052,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
     const onSuccess = (updated: Campaign) => {
       queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
       queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
       setOperationError(null);
       setOperationSuccess(status === 'pausada' ? 'Envio pausado. A data, o motivo e o usuário responsável foram registrados.' : 'Envio retomado com sucesso.');
       if (status === 'enviando') setConfirmReputationResume(false);
@@ -1921,6 +2091,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
           queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
           setOperationError(null);
           setOperationSuccess('Envio cancelado com sucesso.');
+          queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
         },
         onError: (error) => {
           setOperationSuccess(null);
@@ -2008,6 +2179,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
           queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
           setOperationError(null);
           setOperationSuccess('Campanha agendada com sucesso.');
+          queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
         },
         onError: (error) => {
           setOperationSuccess(null);
@@ -2126,6 +2298,12 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             recipientSummary={recipientSummaryQuery.data}
             recipientsLoading={recipientSummaryQuery.isLoading}
           />
+           <AuditTimeline
+             events={auditQuery.data?.events}
+             loading={auditQuery.isLoading}
+             error={auditQuery.isError}
+             onRetry={() => { void auditQuery.refetch(); }}
+           />
           {reputationResumePanel}
           <RecipientSummaryPanel
             summary={recipientSummaryQuery.data}
@@ -2143,6 +2321,8 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             onSaved={(updated) => {
               queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
               queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+              queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
+              queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
                setOperationError(null);
                setOperationSuccess('Alterações salvas.');
             }}

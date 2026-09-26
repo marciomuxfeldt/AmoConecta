@@ -28,6 +28,7 @@ import {
 } from "./sender-config";
 import { logger } from "./logger";
 import { getTechnicalError } from "./technical-error";
+import { recordAuditEvent, systemAuditActor } from "./audit-events";
 
 const RESEND_BATCH_SIZE = 100;
 const MAX_RETRIES = 3;
@@ -528,7 +529,31 @@ async function maybePauseCampaign(campaignId: string): Promise<boolean> {
     pausa_taxa_bounce: bounceRate,
     pausa_taxa_reclamacao: complaintRate,
     pausada_em: new Date().toISOString(),
+    pausado_por_id: null,
+    pausado_por_nome: "Sistema",
+    pausado_por_email: null,
   });
+  try {
+    await recordAuditEvent({
+      actor: systemAuditActor,
+      action: "campaign_auto_paused",
+      entityType: "campaign",
+      entityId: campaignId,
+      metadata: {
+        bounce_rate: bounceRate,
+        complaint_rate: complaintRate,
+        reason: reasons.join(" e "),
+      },
+    });
+  } catch (error) {
+    logger.error(
+      {
+        campaignId,
+        technicalError: getTechnicalError(error),
+      },
+      "Campaign automatic-pause audit event could not be persisted",
+    );
+  }
   return true;
 }
 

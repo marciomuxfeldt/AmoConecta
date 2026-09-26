@@ -20,4 +20,8 @@ export interface CampaignListItem {
   /** @nullable */
   agendada_para: Date | null;
   criado_em: Date;
+  /** @nullable */
+  criado_por_nome: string | null;
+  /** @nullable */
+  criado_por_email: string | null;
 }

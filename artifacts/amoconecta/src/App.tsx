@@ -20,12 +20,14 @@ import {
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { Route, Router as WouterRouter, Switch, useLocation } from 'wouter';
+import { Link, Route, Router as WouterRouter, Switch, useLocation } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import NotFound from '@/pages/not-found';
 import { CampaignDetailPage, CampaignsPage, NewCampaignPage } from '@/pages/campaigns';
 import EmailSettingsPage from '@/pages/email-settings';
 import BiExportsPage from '@/pages/bi-exports';
+import TeamPage from '@/pages/team';
+import { AcceptInvitePage, ForgotPasswordPage, ResetPasswordPage } from '@/pages/access';
 
 const queryClient = new QueryClient();
 
@@ -122,8 +124,9 @@ function LoginPage() {
             <div><label htmlFor="email" className="field-label">E-mail de trabalho</label><div className="relative"><Mail size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#89909e]" /><input id="email" type="email" autoComplete="email" placeholder="voce@amoofertas.com.br" {...form.register('email')} className="field-control pl-11" data-testid="input-email" /></div>{form.formState.errors.email && <p className="mt-1.5 text-xs font-medium text-[#bd4f26]" data-testid="error-email">{form.formState.errors.email.message}</p>}</div>
             <div><div className="mb-2 flex items-center justify-between"><label htmlFor="password" className="field-label mb-0">Senha</label><span className="font-mono text-[9px] uppercase tracking-[0.08em] text-[#92939a]">Uso interno</span></div><div className="relative"><KeyRound size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#89909e]" /><input id="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="Digite sua senha" {...form.register('password')} className="field-control px-11" data-testid="input-password" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} className="focus-ring absolute right-3 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 font-mono text-[9px] uppercase tracking-[0.08em] text-[#737986] hover:text-[#263044]" data-testid="button-toggle-password">{showPassword ? 'ocultar' : 'mostrar'}</button></div>{form.formState.errors.password && <p className="mt-1.5 text-xs font-medium text-[#bd4f26]" data-testid="error-password">{form.formState.errors.password.message}</p>}</div>
             {login.isError && <div className="flex items-start gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-login-error"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{getErrorMessage(login.error, 'Não foi possível entrar. Confira seus dados e tente novamente.')}</span><button type="button" onClick={() => login.reset()} className="focus-ring ml-auto rounded p-0.5" aria-label="Fechar aviso" data-testid="button-dismiss-login-error"><X size={14} /></button></div>}
-            <button type="submit" disabled={login.isPending} className="action-button action-button-primary h-13 w-full" data-testid="button-login">{login.isPending ? <><LoaderCircle size={17} className="animate-spin" /> Entrando...</> : <>Acessar o painel <ArrowRight size={17} /></>}</button>
+             <button type="submit" disabled={login.isPending} className="action-button action-button-primary h-13 w-full" data-testid="button-login">{login.isPending ? <><LoaderCircle size={17} className="animate-spin" /> Entrando...</> : <>Acessar o painel <ArrowRight size={17} /></>}</button>
           </form>
+           <Link href="/forgot-password" className="mt-5 inline-flex items-center gap-2 text-xs font-bold text-[#687080] hover:text-[#263044]" data-testid="link-forgot-password">Esqueci minha senha <ArrowRight size={13} /></Link>
           <div className="mt-14 flex items-center gap-3 border-t border-[#e1d8cb] pt-5 text-[10px] leading-4 text-[#8a8790]"><ShieldCheck size={15} className="shrink-0 text-[#d35f2a]" /><span>Este ambiente é exclusivo para a operação de marketing da Amo Ofertas.</span></div>
         </div>
       </section>
@@ -144,11 +147,15 @@ function Router() {
   const user = sessionQuery.data?.user ? { email: sessionQuery.data.user.email } : null;
   return (
     <Switch>
+      <Route path="/accept-invite"><AcceptInvitePage /></Route>
+      <Route path="/forgot-password"><ForgotPasswordPage /></Route>
+      <Route path="/reset-password"><ResetPasswordPage /></Route>
       <Route path="/login">{authenticated ? <CampaignsPage user={user} /> : <LoginPage />}</Route>
       <Route path="/campaigns/new">{authenticated ? <NewCampaignPage user={user} /> : <LoginPage />}</Route>
-  <Route path="/campaigns/:campaignId">{(params) => authenticated ? <CampaignDetailPage user={user} campaignId={params.campaignId ?? ''} /> : <LoginPage />}</Route>
-  <Route path="/settings">{authenticated ? <EmailSettingsPage user={user} /> : <LoginPage />}</Route>
-  <Route path="/bi-exports">{authenticated ? <BiExportsPage user={user} /> : <LoginPage />}</Route>
+      <Route path="/campaigns/:campaignId">{(params) => authenticated ? <CampaignDetailPage user={user} campaignId={params.campaignId ?? ''} /> : <LoginPage />}</Route>
+      <Route path="/settings">{authenticated ? <EmailSettingsPage user={user} /> : <LoginPage />}</Route>
+      <Route path="/bi-exports">{authenticated ? <BiExportsPage user={user} /> : <LoginPage />}</Route>
+      <Route path="/team">{authenticated ? <TeamPage user={user} /> : <LoginPage />}</Route>
       <Route path="/">{authenticated ? <CampaignsPage user={user} /> : <LoginPage />}</Route>
       <Route component={NotFound} />
     </Switch>

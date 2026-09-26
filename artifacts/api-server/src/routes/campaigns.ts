@@ -7,6 +7,8 @@ import {
   ClearCampaignRecipientsResponse,
   GetCampaignRecipientSummaryResponse,
   GetCampaignParams,
+  GetCampaignAuditParams,
+  GetCampaignAuditResponse,
   GetCampaignResponse,
   ListCampaignsResponse,
   RequestCampaignAssetUploadUrlBody,
@@ -18,6 +20,10 @@ import {
 } from "@workspace/api-zod";
 import { getSupabaseUser } from "./auth";
 import { supabaseAdminClient } from "../lib/supabase";
+import {
+  recordAuditEvent,
+  teamAuditActor,
+} from "../lib/audit-events";
 import {
   getPublicTechnicalError,
   getTechnicalError,
@@ -55,7 +61,7 @@ import {
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
-  "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,status,agendada_para,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em";
+  "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,status,agendada_para,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em,criado_por_id,criado_por_nome,criado_por_email,agendado_por_id,agendado_por_nome,agendado_por_email,agendado_em,pausado_por_id,pausado_por_nome,pausado_por_email";
 // Public by design: this bucket contains only e-mail image assets.
 // Never reuse the private CSV bucket from routes/imports.ts here.
 const EMAIL_ASSET_BUCKET = "amoconecta-assets";
@@ -77,6 +83,39 @@ function logSupabaseError(
   context: Record<string, unknown> = {},
 ): void {
   req.log.error({ ...context, technicalError: getTechnicalError(error) }, operation);
+}
+
+async function recordCampaignAudit(
+  req: Request,
+  session: { user: { id: string; email: string | null; name: string } },
+  action: string,
+  campaignId: string,
+  metadata: Record<string, unknown> = {},
+): Promise<void> {
+  try {
+    await recordAuditEvent({
+      actor: teamAuditActor(session.user),
+      action,
+      entityType: "campaign",
+      entityId: campaignId,
+      metadata,
+    });
+  } catch (error) {
+    logSupabaseError(req, "Campaign audit event could not be persisted", error, {
+      campaignId,
+      action,
+    });
+  }
+}
+
+function campaignCreatorFields(session: {
+  user: { id: string; email: string | null; name: string };
+}) {
+  return {
+    criado_por_id: session.user.id,
+    criado_por_nome: session.user.name,
+    criado_por_email: session.user.email,
+  };
 }
 
 function logCampaignTestError(
@@ -743,7 +782,9 @@ router.get("/campaigns", async (req, res) => {
 
     const { data: campaigns, error } = await supabaseAdminClient()
       .from("campanha")
-      .select("id,nome,status,agendada_para,criado_em")
+      .select(
+        "id,nome,status,agendada_para,criado_em,criado_por_nome,criado_por_email",
+      )
       .order("criado_em", { ascending: false });
 
     if (error) {
@@ -802,7 +843,10 @@ router.post("/campaigns/drafts", async (req, res): Promise<void> => {
       (await getEmailBrandingSettings()).cor_botao_email;
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
-      .insert(campaignPayload(draftInput, false, buttonColorSnapshot))
+      .insert({
+        ...campaignPayload(draftInput, false, buttonColorSnapshot),
+        ...campaignCreatorFields(session),
+      })
       .select(CAMPAIGN_COLUMNS)
       .single();
     if (error) {
@@ -814,6 +858,10 @@ router.post("/campaigns/drafts", async (req, res): Promise<void> => {
       });
       return;
     }
+    await recordCampaignAudit(req, session, "campaign_created", data.id, {
+      status: data.status,
+      draft: true,
+    });
     res.status(201).json(CreateCampaignDraftResponse.parse(data));
   } catch (error) {
     logSupabaseError(req, "Campaign draft initialization failed", error);
@@ -855,11 +903,14 @@ router.post("/campaigns", async (req, res) => {
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
       .insert(
-        campaignPayload(
-          parsed.data as Record<string, unknown>,
-          false,
-          buttonColorSnapshot,
-        ),
+        {
+          ...campaignPayload(
+            parsed.data as Record<string, unknown>,
+            false,
+            buttonColorSnapshot,
+          ),
+          ...campaignCreatorFields(session),
+        },
       )
       .select(CAMPAIGN_COLUMNS)
       .single();
@@ -868,6 +919,10 @@ router.post("/campaigns", async (req, res) => {
       res.status(502).json({ error: "Não foi possível criar a campanha." });
       return;
     }
+    await recordCampaignAudit(req, session, "campaign_created", data.id, {
+      status: data.status,
+      draft: false,
+    });
     res.status(201).json(CreateCampaignResponse.parse(data));
   } catch (error) {
     logSupabaseError(req, "Campaign creation failed", error);
@@ -905,6 +960,40 @@ router.get("/campaigns/:campaignId", async (req, res) => {
   } catch (error) {
     logSupabaseError(req, "Campaign lookup failed", error);
     res.status(502).json({ error: "Não foi possível consultar a campanha." });
+  }
+});
+
+router.get("/campaigns/:campaignId/audit", async (req, res) => {
+  const params = GetCampaignAuditParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(422).json({ error: "Identificador de campanha inválido." });
+    return;
+  }
+  try {
+    const session = await getSupabaseUser(req, res);
+    if (!session) {
+      res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+    const campaign = await findCampaign(params.data.campaignId);
+    if (!campaign) {
+      res.status(404).json({ error: "Campanha não encontrada." });
+      return;
+    }
+    const { data, error } = await supabaseAdminClient()
+      .from("evento_auditoria")
+      .select("id,action,actor_name,actor_email,created_at,metadata")
+      .eq("entity_type", "campaign")
+      .eq("entity_id", params.data.campaignId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    res.json(GetCampaignAuditResponse.parse({ events: data ?? [] }));
+  } catch (error) {
+    logSupabaseError(req, "Campaign audit history could not be loaded", error, {
+      campaignId: params.data.campaignId,
+    });
+    res.status(503).json({ error: "Não foi possível carregar o histórico da campanha." });
   }
 });
 
@@ -1038,14 +1127,18 @@ async function runSimpleCampaignTransition(
       });
       return;
     }
+    const transitionAt = new Date().toISOString();
     const update =
       config.targetStatus === "pausada"
         ? {
             status: config.targetStatus,
             pausa_motivo: `Pausa manual por ${session.user.email ?? session.user.id}.`,
-            pausada_em: new Date().toISOString(),
+            pausada_em: transitionAt,
             pausa_taxa_bounce: null,
             pausa_taxa_reclamacao: null,
+            pausado_por_id: session.user.id,
+            pausado_por_nome: session.user.name,
+            pausado_por_email: session.user.email,
           }
         : config.targetStatus === "enviando"
           ? {
@@ -1063,6 +1156,16 @@ async function runSimpleCampaignTransition(
       .select(CAMPAIGN_COLUMNS)
       .single();
     if (error) throw error;
+    const action =
+      config.targetStatus === "pausada"
+        ? "campaign_paused"
+        : config.targetStatus === "enviando"
+          ? "campaign_resumed"
+          : "campaign_cancelled";
+    await recordCampaignAudit(req, session, action, params.data.campaignId, {
+      from_status: existing.status,
+      to_status: config.targetStatus,
+    });
     res.json(GetCampaignResponse.parse(await withSendMetrics(data)));
   } catch (error) {
     logSupabaseError(req, "Campaign transition failed", error);
@@ -1100,13 +1203,30 @@ router.post("/campaigns/:campaignId/agendar", async (req, res) => {
       res.status(validationError.includes("estado atual") ? 409 : 422).json({ error: validationError });
       return;
     }
+    const scheduledAt = new Date().toISOString();
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
-      .update({ status: "agendada" })
+      .update({
+        status: "agendada",
+        agendado_por_id: session.user.id,
+        agendado_por_nome: session.user.name,
+        agendado_por_email: session.user.email,
+        agendado_em: scheduledAt,
+      })
       .eq("id", params.data.campaignId)
       .select(CAMPAIGN_COLUMNS)
       .single();
     if (error) throw error;
+    await recordCampaignAudit(
+      req,
+      session,
+      "campaign_scheduled",
+      params.data.campaignId,
+      {
+        scheduled_at: scheduledAt,
+        scheduled_for: data.agendada_para,
+      },
+    );
     res.json(GetCampaignResponse.parse(await withSendMetrics(data)));
   } catch (error) {
     logSupabaseError(req, "Campaign scheduling failed", error);
@@ -1202,6 +1322,13 @@ router.post("/campaigns/:campaignId/test", async (req, res) => {
     const resendEmailId = await sendTestEmail(
       params.data.campaignId,
       session.user.email,
+    );
+    await recordCampaignAudit(
+      req,
+      session,
+      "campaign_test_sent",
+      params.data.campaignId,
+      { resend_email_id: resendEmailId },
     );
     res.json({ sent: true, resend_email_id: resendEmailId });
   } catch (error) {
@@ -1361,6 +1488,13 @@ router.patch("/campaigns/:campaignId", async (req, res) => {
       res.status(502).json({ error: "Não foi possível atualizar a campanha." });
       return;
     }
+    await recordCampaignAudit(
+      req,
+      session,
+      "campaign_updated",
+      params.data.campaignId,
+      { updated_fields: Object.keys(updatePayload) },
+    );
     res.json(UpdateCampaignResponse.parse(data));
   } catch (error) {
     logSupabaseError(req, "Campaign update failed", error);
@@ -1395,6 +1529,12 @@ router.delete("/campaigns/:campaignId", async (req, res) => {
       res.status(404).json({ error: "Campanha não encontrada." });
       return;
     }
+    await recordCampaignAudit(
+      req,
+      session,
+      "campaign_deleted",
+      params.data.campaignId,
+    );
     res.status(204).send();
   } catch (error) {
     logSupabaseError(req, "Campaign deletion failed", error);

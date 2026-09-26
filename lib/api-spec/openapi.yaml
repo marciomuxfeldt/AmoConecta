@@ -14,6 +14,8 @@ tags:
     description: Eventos autenticados de provedores externos
   - name: auth
     description: Sessão da equipe de marketing
+  - name: team
+    description: Convites e acessos da equipe
   - name: campaigns
     description: Campanhas de e-mail
   - name: safety
@@ -381,6 +383,228 @@ paths:
       responses:
         "204":
           description: Sessão encerrada
+  /auth/invitations/accept:
+    post:
+      operationId: acceptTeamInvitation
+      tags: [auth]
+      summary: Ativa uma conta a partir de um convite válido
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptTeamInvitationInput"
+      responses:
+        "200":
+          description: Conta ativada e sessão iniciada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "400":
+          description: Convite inválido, expirado ou já utilizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: E-mail já associado a outra conta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/password-recovery:
+    post:
+      operationId: requestPasswordRecovery
+      tags: [auth]
+      summary: Solicita link de recuperação de senha
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordRecoveryInput"
+      responses:
+        "202":
+          description: Resposta neutra para evitar enumeração de contas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+  /auth/password-recovery/complete:
+    post:
+      operationId: completePasswordRecovery
+      tags: [auth]
+      summary: Define uma nova senha com um token de uso único
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompletePasswordRecoveryInput"
+      responses:
+        "200":
+          description: Senha alterada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Token inválido, expirado ou já utilizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /team:
+    get:
+      operationId: getTeamAccess
+      tags: [team]
+      summary: Lista membros e convites pendentes
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Acessos da equipe
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamAccessResponse"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /team/invites:
+    post:
+      operationId: createTeamInvitation
+      tags: [team]
+      summary: Envia um convite de acesso
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamInvitationInput"
+      responses:
+        "201":
+          description: Convite enviado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamInvitation"
+        "400":
+          description: E-mail fora do domínio permitido ou já cadastrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /team/invites/{inviteId}/resend:
+    parameters:
+      - name: inviteId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: resendTeamInvitation
+      tags: [team]
+      summary: Reenvia o convite e renova seu prazo
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Convite reenviado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "404":
+          description: Convite pendente não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /team/invites/{inviteId}/cancel:
+    parameters:
+      - name: inviteId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: cancelTeamInvitation
+      tags: [team]
+      summary: Cancela um convite pendente
+      security:
+        - sessionCookie: []
+      responses:
+        "204":
+          description: Convite cancelado
+        "404":
+          description: Convite pendente não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /team/users/{userId}/deactivate:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: deactivateTeamMember
+      tags: [team]
+      summary: Desativa um membro sem apagar o histórico
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Membro desativado e sessões revogadas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "409":
+          description: Não é permitido desativar a própria conta ou o último membro ativo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/audit:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getCampaignAudit
+      tags: [campaigns]
+      summary: Lista o histórico de ações da campanha
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Histórico da campanha
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampaignAuditResponse"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /campaigns:
     get:
       operationId: listCampaigns
@@ -1373,6 +1597,10 @@ components:
         criado_em:
           type: string
           format: date-time
+        criado_por_nome:
+          type: ["string", "null"]
+        criado_por_email:
+          type: ["string", "null"]
       required:
         - id
         - nome
@@ -1384,6 +1612,8 @@ components:
         - destinatarios_total
         - agendada_para
         - criado_em
+        - criado_por_nome
+        - criado_por_email
     RecipientStatusSummary:
       type: object
       properties:
@@ -1666,6 +1896,21 @@ components:
         criado_em:
           type: string
           format: date-time
+        criado_por_nome:
+          type: ["string", "null"]
+        criado_por_email:
+          type: ["string", "null"]
+        agendado_por_nome:
+          type: ["string", "null"]
+        agendado_por_email:
+          type: ["string", "null"]
+        agendado_em:
+          type: ["string", "null"]
+          format: date-time
+        pausado_por_nome:
+          type: ["string", "null"]
+        pausado_por_email:
+          type: ["string", "null"]
       required:
         - id
         - nome
@@ -1689,6 +1934,13 @@ components:
         - teste_enviado_em
         - corpo
         - criado_em
+        - criado_por_nome
+        - criado_por_email
+        - agendado_por_nome
+        - agendado_por_email
+        - agendado_em
+        - pausado_por_nome
+        - pausado_por_email
     CreateCampaignInput:
       type: object
       properties:
@@ -2072,4 +2324,148 @@ components:
         - destinatarios_salvos
         - recencia
         - amostras_erros
+    TeamInvitationInput:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required: [email]
+    AcceptTeamInvitationInput:
+      type: object
+      properties:
+        invite_id:
+          type: string
+          format: uuid
+        token:
+          type: string
+          minLength: 32
+        nome:
+          type: string
+          minLength: 1
+          maxLength: 120
+        password:
+          type: string
+          minLength: 12
+      required: [invite_id, token, nome, password]
+    PasswordRecoveryInput:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required: [email]
+    CompletePasswordRecoveryInput:
+      type: object
+      properties:
+        token:
+          type: string
+          minLength: 32
+        password:
+          type: string
+          minLength: 12
+      required: [token, password]
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+    TeamMember:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        nome:
+          type: string
+        ativo:
+          type: boolean
+        criado_em:
+          type: string
+          format: date-time
+        ultimo_acesso_em:
+          type: ["string", "null"]
+          format: date-time
+        desativado_em:
+          type: ["string", "null"]
+          format: date-time
+      required:
+        - user_id
+        - email
+        - nome
+        - ativo
+        - criado_em
+        - ultimo_acesso_em
+        - desativado_em
+    TeamInvitation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        criado_em:
+          type: string
+          format: date-time
+        expira_em:
+          type: string
+          format: date-time
+        convidado_por_nome:
+          type: string
+        convidado_por_email:
+          type: string
+          format: email
+      required:
+        - id
+        - email
+        - criado_em
+        - expira_em
+        - convidado_por_nome
+        - convidado_por_email
+    TeamAccessResponse:
+      type: object
+      properties:
+        membros:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamMember"
+        convites:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamInvitation"
+      required: [membros, convites]
+    CampaignAuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        action:
+          type: string
+        actor_name:
+          type: string
+        actor_email:
+          type: ["string", "null"]
+          format: email
+        created_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+      required: [id, action, actor_name, actor_email, created_at, metadata]
+    CampaignAuditResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/CampaignAuditEvent"
+      required: [events]
 
