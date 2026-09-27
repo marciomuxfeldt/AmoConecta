@@ -51,12 +51,13 @@ import {
 } from "../lib/campaign-schedule-policy";
 import { recipientDeliveryProjection } from "../lib/recipient-delivery-projection";
 import {
+  applyConfiguredReplyTo,
   configuredSenderEmail,
-  configuredReplyToEmail,
   configuredSenderName,
   isVerifiedSenderEmail,
   isValidReplyToEmail,
   senderDomainValidationMessage,
+  warnIfReplyToDefaultMissing,
 } from "../lib/sender-config";
 
 const router: IRouter = Router();
@@ -281,13 +282,9 @@ function withDefaultSender(input: Record<string, unknown>): Record<string, unkno
   if (!String(result.remetente_nome ?? "").trim()) {
     result.remetente_nome = configuredSenderName();
   }
-  const replyToEmail = configuredReplyToEmail();
-  if (!String(result.reply_to ?? "").trim() && replyToEmail) {
-    result.reply_to = replyToEmail;
-  }
   if (!Object.prototype.hasOwnProperty.call(result, "teto_hora")) result.teto_hora = 100;
   if (!Object.prototype.hasOwnProperty.call(result, "teto_dia")) result.teto_dia = 1000;
-  return result;
+  return applyConfiguredReplyTo(result);
 }
 
 function senderValidationError(email: unknown): string | null {
@@ -858,6 +855,9 @@ router.post("/campaigns/drafts", async (req, res): Promise<void> => {
       });
       return;
     }
+    warnIfReplyToDefaultMissing(data.reply_to, "draft", (bindings, message) => {
+      req.log.warn(bindings, message);
+    });
     await recordCampaignAudit(req, session, "campaign_created", data.id, {
       status: data.status,
       draft: true,
@@ -919,6 +919,13 @@ router.post("/campaigns", async (req, res) => {
       res.status(502).json({ error: "Não foi possível criar a campanha." });
       return;
     }
+    warnIfReplyToDefaultMissing(
+      data.reply_to,
+      "campaign",
+      (bindings, message) => {
+        req.log.warn(bindings, message);
+      },
+    );
     await recordCampaignAudit(req, session, "campaign_created", data.id, {
       status: data.status,
       draft: false,

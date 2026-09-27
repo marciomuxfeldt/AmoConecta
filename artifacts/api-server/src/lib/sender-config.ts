@@ -25,6 +25,34 @@ export function configuredReplyToEmail(): string | null {
   return value ? normalizeSenderEmail(value) : null;
 }
 
+export function applyConfiguredReplyTo(
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...input };
+  const configuredReplyTo = configuredReplyToEmail();
+  if (!String(result.reply_to ?? "").trim() && configuredReplyTo) {
+    result.reply_to = configuredReplyTo;
+  }
+  return result;
+}
+
+export function warnIfReplyToDefaultMissing(
+  replyTo: unknown,
+  creationPath: "draft" | "campaign",
+  warn: (bindings: Record<string, unknown>, message: string) => void,
+): void {
+  const hasReplyTo = typeof replyTo === "string" && replyTo.trim().length > 0;
+  if (configuredReplyToEmail() || hasReplyTo) return;
+
+  warn(
+    {
+      setting: "REPLY_TO_EMAIL",
+      campaignCreationPath: creationPath,
+    },
+    "Campaign created without a Reply-To default because REPLY_TO_EMAIL is not configured",
+  );
+}
+
 export function isValidReplyToEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalizeSenderEmail(email));
 }
