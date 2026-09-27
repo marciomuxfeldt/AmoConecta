@@ -13,3 +13,4 @@
 - [Campaign content lock](campaign-content-lock.md) — scheduled, sending, and paused campaigns keep message content immutable until completion.
 - [Campaign click destinations](campaign-click-destinations.md) — button-block URLs are active; legacy campaign URL columns stay stored but are not exposed or used.
 - [Chronic disengagement state](chronic-disengagement-state.md) — keep one normalized row per e-mail and refresh it in cursor-based batches, never flags per delivery.
+- [TypeScript API tests](typescript-api-tests.md) — Node's built-in TypeScript stripping does not resolve the API test suites' extensionless ESM imports.

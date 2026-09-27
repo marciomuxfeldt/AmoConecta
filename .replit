@@ -25,8 +25,7 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-APP_BASE_URL = "https://amoconecta.replit.app"
+APP_BASE_URL = "https://amoconecta.com.br"
 SENDER_NAME = "Amo Ofertas"
 SENDER_EMAIL = "noreply@marketing.amo.delivery"
-REPLY_TO_EMAIL = "marcio@amo.delivery"
 
