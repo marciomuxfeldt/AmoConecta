@@ -1210,7 +1210,7 @@ function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
   );
 }
 
-function ImportPanel({ campaignId }: { campaignId: string }) {
+export function ImportPanel({ campaignId }: { campaignId: string }) {
   const queryClient = useQueryClient();
   const requestUpload = useRequestCampaignImportUploadUrl();
   const validateImport = useValidateCampaignImport();
