@@ -7,4 +7,4 @@ CSV validation is represented by a persisted import job with status and progress
 
 **Why:** Proxy request timeouts make synchronous validation unsuitable for large dashboard exports, even when the parser itself is streaming.
 
-**How to apply:** Keep progress and terminal results in the import job row, return a stable job id from the POST, and never put full-file processing back inside the request handler.
+**How to apply:** Keep progress and terminal results in the import job row, return a stable job id from the POST, and never put full-file processing back inside the request handler. The validation job also writes recipients, so any warning requiring operator approval must be shown before creating that job, or through a separate non-mutating preview.

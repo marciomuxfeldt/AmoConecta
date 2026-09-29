@@ -79,6 +79,15 @@ export type ImportSummary = {
 type CsvRecord = {
   values: string[];
   line: number;
+  separator: CsvSeparator;
+  separatorDetected: boolean;
+};
+
+type CsvSeparator = "," | ";" | "\t";
+
+type CsvSeparatorDetection = {
+  separator: CsvSeparator;
+  detected: boolean;
 };
 
 function normalizeText(value: string): string {
@@ -231,7 +240,53 @@ function addError(summary: ImportSummary, line: number, reason: string): void {
   }
 }
 
-function parseCsvRecord(record: string): string[] {
+function detectCsvSeparator(record: string): CsvSeparatorDetection {
+  const counts: Record<CsvSeparator, number> = {
+    ",": 0,
+    ";": 0,
+    "\t": 0,
+  };
+  let quoted = false;
+  for (let index = 0; index < record.length; index += 1) {
+    const character = record[index];
+    if (character === '"') {
+      if (quoted && record[index + 1] === '"') {
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (!quoted && (character === "," || character === ";" || character === "\t")) {
+      counts[character] += 1;
+    }
+  }
+
+  let separator: CsvSeparator = ",";
+  for (const candidate of [",", ";", "\t"] as const) {
+    if (counts[candidate] > counts[separator]) separator = candidate;
+  }
+  return { separator, detected: counts[separator] > 0 };
+}
+
+function describeCsvSeparator({
+  separator,
+  separatorDetected,
+}: Pick<CsvRecord, "separator" | "separatorDetected">): string {
+  if (!separatorDetected) return "não identificado (padrão: vírgula)";
+  if (separator === ",") return "vírgula (,)";
+  if (separator === ";") return "ponto e vírgula (;)";
+  return "tabulação (TAB)";
+}
+
+function formatFoundHeaders(headers: string[]): string {
+  if (headers.length === 0) return "(nenhuma)";
+  const visible = headers.slice(0, 40).map((header) =>
+    header.replace(/\s+/gu, " ").slice(0, 120),
+  );
+  const remaining = headers.length - visible.length;
+  return `${visible.join(" | ")}${remaining > 0 ? ` | … (+${remaining})` : ""}`;
+}
+
+function parseCsvRecord(record: string, separator: CsvSeparator): string[] {
   const values: string[] = [];
   let value = "";
   let quoted = false;
@@ -244,7 +299,7 @@ function parseCsvRecord(record: string): string[] {
       } else {
         quoted = !quoted;
       }
-    } else if (character === "," && !quoted) {
+    } else if (character === separator && !quoted) {
       values.push(value);
       value = "";
     } else {
@@ -264,6 +319,22 @@ async function* recordsFromStream(
   let inQuotes = false;
   let line = 1;
   let recordLine = 1;
+  let separator: CsvSeparator | null = null;
+  let separatorDetected = false;
+  const parseRecord = (raw: string, recordNumber: number): CsvRecord => {
+    if (separator === null) {
+      const detection = detectCsvSeparator(raw);
+      separator = detection.separator;
+      separatorDetected = detection.detected;
+    }
+    const resolvedSeparator = separator ?? ",";
+    return {
+      values: parseCsvRecord(raw, resolvedSeparator),
+      line: recordNumber,
+      separator: resolvedSeparator,
+      separatorDetected,
+    };
+  };
 
   try {
     while (true) {
@@ -282,7 +353,7 @@ async function* recordsFromStream(
         }
         if (character === "\n" && !inQuotes) {
           const raw = pending.slice(recordStart, index).replace(/\r$/u, "");
-          if (raw.trim()) yield { values: parseCsvRecord(raw), line: recordLine };
+          if (raw.trim()) yield parseRecord(raw, recordLine);
           line += 1;
           recordLine = line;
           recordStart = index + 1;
@@ -291,7 +362,7 @@ async function* recordsFromStream(
       pending = pending.slice(recordStart);
     }
     pending += decoder.decode();
-    if (pending.trim()) yield { values: parseCsvRecord(pending), line: recordLine };
+    if (pending.trim()) yield parseRecord(pending, recordLine);
   } finally {
     reader.releaseLock();
   }
@@ -395,7 +466,11 @@ export async function validateAndImportCsv({
   };
   const first = await iterator.next();
   if (first.done || first.value.values.length === 0) {
-    throw new ImportValidationError("O CSV está vazio.");
+    throw new ImportValidationError(
+      "O CSV está vazio ou sem cabeçalho. " +
+        "Separador detectado: não identificado (arquivo sem cabeçalho). " +
+        "Colunas encontradas: (nenhuma).",
+    );
   }
 
   const headers = first.value.values.map(headerKey);
@@ -434,7 +509,8 @@ export async function validateAndImportCsv({
     ].filter((value): value is string => Boolean(value));
     throw new ImportValidationError(
       `Colunas obrigatórias ausentes: ${missing.join(", ")}. ` +
-        `Colunas encontradas: ${displayHeaders.length > 0 ? displayHeaders.join(", ") : "(nenhuma)"}.`,
+        `Separador detectado: ${describeCsvSeparator(first.value)}. ` +
+        `Colunas encontradas: ${formatFoundHeaders(displayHeaders)}.`,
     );
   }
 
@@ -576,4 +652,24 @@ export async function validateAndImportCsv({
     await onProgress(summary.total_linhas);
   }
   return summary;
+}
+
+export function getPublicImportValidationErrorMessage(
+  persistedError: unknown,
+): string | null {
+  if (typeof persistedError !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(persistedError);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const record = parsed as Record<string, unknown>;
+    if (
+      record.name !== "ImportValidationError" ||
+      typeof record.message !== "string"
+    ) {
+      return null;
+    }
+    return record.message;
+  } catch {
+    return null;
+  }
 }

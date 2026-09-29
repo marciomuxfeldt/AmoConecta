@@ -70,6 +70,7 @@ import {
   validateEmailButtonDestinations,
 } from '@workspace/email-template';
 import { EmailEditor } from '../components/EmailEditor';
+import { inspectCampaignCsvHeader } from '../lib/campaign-csv-header';
 
 export type SessionUser = { email: string } | null;
 
@@ -1228,6 +1229,11 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
   const [phase, setPhase] = useState<'idle' | 'requesting' | 'uploading' | 'processing'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [importConfirmed, setImportConfirmed] = useState(false);
+  const [headerInspection, setHeaderInspection] = useState<Awaited<ReturnType<typeof inspectCampaignCsvHeader>> | null>(null);
+  const [headerInspectionError, setHeaderInspectionError] = useState<string | null>(null);
+  const [headerInspecting, setHeaderInspecting] = useState(false);
+  const [missingDateConfirmed, setMissingDateConfirmed] = useState(false);
+  const headerInspectionRequest = useRef(0);
   const importJobQuery = useGetCampaignImport(campaignId, importJobId ?? '', {
     query: {
       enabled: Boolean(importJobId),
@@ -1263,16 +1269,61 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
 
   const chooseFile = (nextFile?: File) => {
     if (!nextFile) return;
+    const requestId = ++headerInspectionRequest.current;
     if (!nextFile.name.toLowerCase().endsWith('.csv') && nextFile.type !== 'text/csv') {
       setError('Escolha um arquivo CSV para continuar.');
       setFile(null);
+      setSummary(null);
+      setImportJobId(null);
+      setHeaderInspection(null);
+      setHeaderInspectionError(null);
+      setHeaderInspecting(false);
+      setMissingDateConfirmed(false);
+      setImportConfirmed(false);
+      if (inputRef.current) inputRef.current.value = '';
       return;
     }
     setError(null);
     setSummary(null);
     setImportJobId(null);
     setImportConfirmed(false);
+    setMissingDateConfirmed(false);
+    setHeaderInspection(null);
+    setHeaderInspectionError(null);
+    setHeaderInspecting(true);
     setFile(nextFile);
+    void inspectCampaignCsvHeader(nextFile)
+      .then((inspection) => {
+        if (requestId === headerInspectionRequest.current) {
+          setHeaderInspection(inspection);
+        }
+      })
+      .catch((inspectionError: unknown) => {
+        if (requestId === headerInspectionRequest.current) {
+          setHeaderInspectionError(
+            inspectionError instanceof Error
+              ? inspectionError.message
+              : 'Não foi possível ler o cabeçalho do CSV.',
+          );
+        }
+      })
+      .finally(() => {
+        if (requestId === headerInspectionRequest.current) {
+          setHeaderInspecting(false);
+        }
+      });
+  };
+  const clearSelectedFile = () => {
+    headerInspectionRequest.current += 1;
+    setFile(null);
+    setHeaderInspection(null);
+    setHeaderInspectionError(null);
+    setHeaderInspecting(false);
+    setMissingDateConfirmed(false);
+    setImportConfirmed(false);
+    setSummary(null);
+    setError(null);
+    if (inputRef.current) inputRef.current.value = '';
   };
   const onDrop = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
@@ -1282,6 +1333,18 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
   const validate = async () => {
     if (!file) {
       setError('Selecione um CSV antes de validar.');
+      return;
+    }
+    if (headerInspecting) {
+      setError('Aguarde a leitura do cabeçalho do CSV antes de continuar.');
+      return;
+    }
+    if (headerInspectionError || !headerInspection) {
+      setError(headerInspectionError ?? 'Não foi possível confirmar o cabeçalho do CSV.');
+      return;
+    }
+    if (!headerInspection.hasLastOrderDate && !missingDateConfirmed) {
+      setError('Confirme se deseja continuar sem a coluna de data da última compra.');
       return;
     }
     if (recipientSummaryQuery.isLoading || recipientSummaryQuery.isError) {
@@ -1354,6 +1417,14 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
     }
   };
   const isBusy = phase !== 'idle';
+  const missingOrderDate = Boolean(
+    headerInspection && !headerInspection.hasLastOrderDate,
+  );
+  const visibleFoundHeaders = headerInspection?.columns.slice(0, 40) ?? [];
+  const remainingFoundHeaderCount = Math.max(
+    0,
+    (headerInspection?.columns.length ?? 0) - visibleFoundHeaders.length,
+  );
   const existingRecipients =
     recipientSummaryQuery.data?.total_na_lista ??
     recipientSummaryQuery.data?.total ??
@@ -1380,10 +1451,34 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
         <label htmlFor="campaign-csv" onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop} className="block cursor-pointer">
           <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#d7ef56] text-[#263044] shadow-[4px_4px_0_#e96527]"><UploadCloud size={25} /></span>
           <span className="mt-5 block text-sm font-extrabold text-[#263044]">{file ? file.name : 'Solte o CSV aqui ou escolha um arquivo'}</span>
-          <span className="mt-2 block text-xs text-[#7d7e87]">{file ? `${(file.size / 1024).toFixed(1)} KB · pronto para validação` : 'Somente .csv · os bytes não passam pelo servidor da API'}</span>
-          <input ref={inputRef} id="campaign-csv" type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => chooseFile(event.target.files?.[0])} data-testid="input-import-csv" />
+          <span className="mt-2 block text-xs text-[#7d7e87]">{file ? `${(file.size / 1024).toFixed(1)} KB · ${headerInspecting ? 'lendo cabeçalho...' : headerInspection ? `separador: ${headerInspection.separatorLabel}` : 'pronto para validação'}` : 'Somente .csv · os bytes não passam pelo servidor da API'}</span>
+          <input ref={inputRef} id="campaign-csv" type="file" accept=".csv,text/csv" className="sr-only" disabled={isBusy} onChange={(event) => chooseFile(event.target.files?.[0])} data-testid="input-import-csv" />
         </label>
       </div>
+      {headerInspectionError && (
+        <div className="mt-5 flex items-start gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" role="alert" data-testid="status-import-header-error">
+          <CircleAlert size={17} className="mt-0.5 shrink-0" />
+          <span>{headerInspectionError} Selecione outro CSV ou tente novamente.</span>
+        </div>
+      )}
+      {file && missingOrderDate && phase === 'idle' && (
+        <div className="mt-5 rounded-xl border-2 border-[#d85c25] bg-[#fff0e8] px-4 py-4 text-sm leading-6 text-[#8f351c]" role="alert" data-testid="status-missing-order-date-warning">
+          <div className="flex items-start gap-3">
+            <CircleAlert size={19} className="mt-1 shrink-0" />
+            <div>
+              <p className="font-extrabold">{headerInspection?.headerComplete ? 'Atenção: o CSV não tem uma coluna de data da última compra (`last_order_date`).' : 'Atenção: não foi possível confirmar se o CSV contém a coluna de data da última compra (`last_order_date`).'}</p>
+              <p className="mt-1">Sem essa coluna, a ordenação por recência não funciona e o aquecimento de reputação perde o efeito. O arquivo não será recusado; confirme se deseja continuar sem essa informação.</p>
+              <p className="mt-1 text-xs">Separador detectado: {headerInspection?.separatorLabel}. Colunas encontradas: {visibleFoundHeaders.length ? `${visibleFoundHeaders.join(' · ')}${remainingFoundHeaderCount ? ` · … (+${remainingFoundHeaderCount})` : ''}` : '(nenhuma)'}.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setMissingDateConfirmed(true)} disabled={missingDateConfirmed || headerInspecting} className="action-button action-button-secondary !border-[#d98b67] !bg-[#fffaf6] !text-[#8f351c] disabled:opacity-60" data-testid="button-confirm-missing-order-date">
+                  {missingDateConfirmed ? <><CheckCircle2 size={14} /> Continuar confirmado</> : 'Continuar sem a coluna'}
+                </button>
+                <button type="button" onClick={clearSelectedFile} disabled={isBusy} className="action-button action-button-secondary !border-[#d8c2b7] !bg-white !text-[#626876]" data-testid="button-cancel-missing-order-date">Cancelar importação</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {file && existingRecipients > 0 && (
         <div className="mt-5 flex flex-col gap-3 rounded-xl border-2 border-[#e8c56f] bg-[#fff7dc] px-4 py-4 text-sm leading-6 text-[#74561c] sm:flex-row sm:items-center sm:justify-between" role="alert" data-testid="status-existing-recipients-warning">
           <p><strong>Esta campanha já contém {formatNumber(existingRecipients)} destinatários. A importação vai somar a eles.</strong></p>
@@ -1398,7 +1493,7 @@ function ImportPanel({ campaignId }: { campaignId: string }) {
       )}
       <div className="mt-5 flex flex-col justify-between gap-4 border-t border-[#eee7dc] pt-5 sm:flex-row sm:items-center">
         <label className="flex items-start gap-3 text-xs text-[#626876]"><input type="checkbox" checked={deduplicatePhone} onChange={(event) => setDeduplicatePhone(event.target.checked)} className="mt-0.5 accent-[#e96527]" data-testid="checkbox-deduplicate-phone" /><span><strong className="block text-[#263044]">Deduplicar por telefone</strong><span className="mt-1 block leading-5">Além do e-mail, considera o telefone na validação.</span></span></label>
-         <button onClick={validate} disabled={!file || isBusy || recipientSummaryQuery.isLoading || recipientSummaryQuery.isError || (existingRecipients > 0 && !importConfirmed)} className="action-button action-button-primary" data-testid="button-validate-import">{isBusy ? <><LoaderCircle size={16} className="animate-spin" /> {phaseLabel}</> : <><FileCheck2 size={16} /> {phaseLabel}</>}</button>
+          <button onClick={validate} disabled={!file || isBusy || headerInspecting || Boolean(headerInspectionError) || !headerInspection || (missingOrderDate && !missingDateConfirmed) || recipientSummaryQuery.isLoading || recipientSummaryQuery.isError || (existingRecipients > 0 && !importConfirmed)} className="action-button action-button-primary" data-testid="button-validate-import">{isBusy ? <><LoaderCircle size={16} className="animate-spin" /> {phaseLabel}</> : <><FileCheck2 size={16} /> {phaseLabel}</>}</button>
       </div>
       {phase === 'processing' && job && <div className="mt-5 rounded-xl border border-[#d9e3e0] bg-[#f1f7f5] p-4" data-testid="import-progress">
         <div className="flex items-center justify-between gap-3 text-xs font-bold text-[#247b79]">

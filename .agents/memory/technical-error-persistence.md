@@ -7,4 +7,4 @@ Background job error columns store structured technical details as JSON text, in
 
 **Why:** Replacing the original failure with a friendly sentence prevents diagnosing asynchronous jobs and can expose internal details if the persisted field is returned directly.
 
-**How to apply:** Normalize unknown errors at the server boundary for both logs and persistence, and map internal job errors to safe response text before serializing API output.
+**How to apply:** Normalize unknown errors at the server boundary for both logs and persistence, and map internal job errors to safe response text before serializing API output. Expose a persisted detail only for an explicitly classified, user-correctable validation error; keep all other technical failures masked.

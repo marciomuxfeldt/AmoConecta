@@ -12,6 +12,7 @@ import { findCampaign } from "./campaigns";
 import { supabaseAdminClient } from "../lib/supabase";
 import { recordAuditEvent, teamAuditActor } from "../lib/audit-events";
 import {
+  getPublicImportValidationErrorMessage,
   ImportValidationError,
   validateAndImportCsv,
 } from "../lib/csv-import";
@@ -355,7 +356,8 @@ router.get("/campaigns/:campaignId/imports/:importId", async (req, res) => {
           : null,
         erro:
           data.status === "erro"
-            ? "Não foi possível validar o arquivo."
+            ? getPublicImportValidationErrorMessage(data.erro) ??
+              "Não foi possível validar o arquivo."
             : null,
       }),
     );

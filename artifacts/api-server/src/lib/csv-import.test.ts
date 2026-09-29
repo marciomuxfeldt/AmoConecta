@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner requires the explicit TypeScript extension.
-import { normalizePhone, validateAndImportCsv } from "./csv-import.ts";
+import { getPublicImportValidationErrorMessage, ImportValidationError, normalizePhone, validateAndImportCsv } from "./csv-import.ts";
 
 function streamFromText(value: string): ReadableStream<Uint8Array> {
   return new ReadableStream({
@@ -125,4 +125,73 @@ test("keeps the newest valid purchase date when phones collide", async () => {
     (savedRows[0] as { data_ultima_compra: string }).data_ultima_compra,
     "2026-02-20",
   );
+});
+
+for (const { separator, label } of [
+  { separator: ",", label: "vírgula" },
+  { separator: ";", label: "ponto e vírgula" },
+  { separator: "\t", label: "tabulação" },
+] as const) {
+  test(`detects CSV fields separated by ${label}`, async () => {
+    const savedRows: unknown[] = [];
+    const summary = await validateAndImportCsv({
+      client: emptyImportClient((rows) => savedRows.push(...rows)) as never,
+      stream: streamFromText(
+        [
+          `user_name${separator}user_email${separator}user_phone`,
+          `"Ana, Maria"${separator}ana@example.com${separator}49999990010`,
+        ].join("\r\n"),
+      ),
+      campaignId: "00000000-0000-0000-0000-000000000001",
+      storagePath: `campaign/${label}.csv`,
+      deduplicatePhone: false,
+    });
+
+    assert.equal(summary.validos, 1);
+    assert.equal(savedRows.length, 1);
+    assert.equal((savedRows[0] as { nome: string }).nome, "Ana, Maria");
+    assert.equal(
+      (savedRows[0] as { email: string }).email,
+      "ana@example.com",
+    );
+  });
+}
+
+test("reports the detected separator and found columns for missing headers", async () => {
+  let thrown: unknown;
+  try {
+    await validateAndImportCsv({
+      client: emptyImportClient() as never,
+      stream: streamFromText(
+        "user_email;user_phone\r\nana@example.com;49999990010",
+      ),
+      campaignId: "00000000-0000-0000-0000-000000000001",
+      storagePath: "campaign/missing-name.csv",
+      deduplicatePhone: false,
+    });
+  } catch (error) {
+    thrown = error;
+  }
+
+  assert.ok(thrown instanceof ImportValidationError);
+  assert.match(thrown.message, /ponto e vírgula \(;\)/u);
+  assert.match(thrown.message, /Colunas encontradas: user_email \| user_phone/u);
+});
+
+test("only exposes persisted parser-validation messages at the API boundary", () => {
+  const safeMessage =
+    "Colunas obrigatórias ausentes. Separador detectado: tabulação (TAB).";
+  assert.equal(
+    getPublicImportValidationErrorMessage(
+      JSON.stringify({ name: "ImportValidationError", message: safeMessage }),
+    ),
+    safeMessage,
+  );
+  assert.equal(
+    getPublicImportValidationErrorMessage(
+      JSON.stringify({ name: "PostgrestError", message: "internal detail" }),
+    ),
+    null,
+  );
+  assert.equal(getPublicImportValidationErrorMessage("not-json"), null);
 });
