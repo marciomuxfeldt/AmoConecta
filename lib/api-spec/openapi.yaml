@@ -2314,9 +2314,6 @@ components:
         - duplicados_email
         - duplicados_telefone
         - suprimidos
-        - total_na_lista
-        - suprimidos_no_envio
-        - receberao_de_fato
         - emails_invalidos
         - datas_invalidas
         - nomes_ausentes

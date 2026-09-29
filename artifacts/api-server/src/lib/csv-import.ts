@@ -67,6 +67,9 @@ export type ImportSummary = {
   duplicados_email: number;
   duplicados_telefone: number;
   suprimidos: number;
+  total_na_lista?: number;
+  suprimidos_no_envio?: number;
+  receberao_de_fato?: number;
   emails_invalidos: number;
   datas_invalidas: number;
   nomes_ausentes: number;

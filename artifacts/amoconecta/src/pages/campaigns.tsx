@@ -1162,6 +1162,10 @@ function CampaignForm({
 
 function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
   const maxRecency = Math.max(...(summary.recencia?.map((item) => item.quantidade) ?? [1]), 1);
+  const hasDeliverySnapshot =
+    typeof summary.total_na_lista === 'number' &&
+    typeof summary.suprimidos_no_envio === 'number' &&
+    typeof summary.receberao_de_fato === 'number';
   const issueRows = [
     ['E-mails inválidos', summary.emails_invalidos],
     ['Datas inválidas', summary.datas_invalidas],
@@ -1183,15 +1187,21 @@ function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
          <div className="metric-tile border-[#f1dfb8] bg-[#fff9e9]"><strong className="text-[#9b6b17]">{formatNumber(summary.duplicados_no_arquivo)}</strong><span>Duplicados</span></div>
          <div className="metric-tile"><strong>{formatNumber(summary.suprimidos)}</strong><span>Suprimidos na validação</span></div>
       </div>
-       <div className="mt-6 rounded-xl border border-[#d9e3e0] bg-[#f1f7f5] p-4" data-testid="import-current-delivery-summary">
-         <div className="flex items-center justify-between gap-3"><h4 className="text-sm font-extrabold text-[#263044]">Situação atual da lista</h4><ShieldCheck size={15} className="text-[#247b79]" /></div>
-         <p className="mt-1 text-xs leading-5 text-[#6d7180]">Esses números cruzam a lista atual com a tabela de supressão, inclusive alterações feitas depois desta importação.</p>
-         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-           <div className="rounded-xl border border-[#d9e3e0] bg-white/70 p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#263044]">{formatNumber(summary.total_na_lista)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Total na lista</span></div>
-           <div className="rounded-xl border border-[#efc9ba] bg-[#fff3ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(summary.suprimidos_no_envio)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Serão suprimidos no envio</span></div>
-           <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#417846]">{formatNumber(summary.receberao_de_fato)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Receberão de fato</span></div>
+       {hasDeliverySnapshot ? (
+         <div className="mt-6 rounded-xl border border-[#d9e3e0] bg-[#f1f7f5] p-4" data-testid="import-current-delivery-summary">
+           <div className="flex items-center justify-between gap-3"><h4 className="text-sm font-extrabold text-[#263044]">Situação da lista ao concluir</h4><ShieldCheck size={15} className="text-[#247b79]" /></div>
+           <p className="mt-1 text-xs leading-5 text-[#6d7180]">Números calculados cruzando a lista com as regras de envio no momento em que a importação foi concluída.</p>
+           <div className="mt-4 grid gap-3 sm:grid-cols-3">
+             <div className="rounded-xl border border-[#d9e3e0] bg-white/70 p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#263044]">{formatNumber(summary.total_na_lista)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Total na lista</span></div>
+             <div className="rounded-xl border border-[#efc9ba] bg-[#fff3ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#a64220]">{formatNumber(summary.suprimidos_no_envio)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Serão suprimidos no envio</span></div>
+             <div className="rounded-xl border border-[#cfe4c7] bg-[#f2f8ee] p-3"><strong className="block text-xl font-extrabold tabular-nums text-[#417846]">{formatNumber(summary.receberao_de_fato)}</strong><span className="text-[11px] font-bold text-[#6d7180]">Receberão de fato</span></div>
+           </div>
          </div>
-       </div>
+       ) : (
+         <div className="mt-6 rounded-xl border border-[#f1dfb8] bg-[#fff9e9] p-4 text-xs leading-5 text-[#74561c]" role="status" data-testid="import-current-delivery-summary-unavailable">
+           A importação foi concluída e os resultados estão salvos, mas não foi possível calcular a situação de entrega desta lista agora.
+         </div>
+       )}
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <div className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4">
           <div className="flex items-center justify-between"><h4 className="text-sm font-extrabold text-[#263044]">Pontos de atenção</h4><CircleAlert size={15} className="text-[#d35f2a]" /></div>
@@ -1238,7 +1248,11 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
     query: {
       enabled: Boolean(importJobId),
       queryKey: getGetCampaignImportQueryKey(campaignId, importJobId ?? ''),
-      refetchInterval: 1000,
+      refetchInterval: (query) => {
+        const status = query.state.data?.status;
+        if (status === 'concluida' || status === 'erro') return false;
+        return query.state.error ? 3000 : 1000;
+      },
     },
   });
 
@@ -1247,6 +1261,7 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
     if (!job) return;
     if (job.status === 'concluida') {
       setSummary(job.resultado);
+      setError(null);
       setImportJobId(null);
       setPhase('idle');
       queryClient.invalidateQueries({ queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId) });
@@ -1263,8 +1278,6 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
   useEffect(() => {
     if (!importJobQuery.isError || !importJobId) return;
     setError(getErrorMessage(importJobQuery.error, 'Não foi possível consultar o progresso da validação.'));
-    setImportJobId(null);
-    setPhase('idle');
   }, [importJobQuery.error, importJobQuery.isError, importJobId]);
 
   const chooseFile = (nextFile?: File) => {
@@ -1461,7 +1474,7 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
           <span>{headerInspectionError} Selecione outro CSV ou tente novamente.</span>
         </div>
       )}
-      {file && missingOrderDate && phase === 'idle' && (
+      {file && missingOrderDate && !missingDateConfirmed && phase === 'idle' && (
         <div className="mt-5 rounded-xl border-2 border-[#d85c25] bg-[#fff0e8] px-4 py-4 text-sm leading-6 text-[#8f351c]" role="alert" data-testid="status-missing-order-date-warning">
           <div className="flex items-start gap-3">
             <CircleAlert size={19} className="mt-1 shrink-0" />

@@ -2,9 +2,59 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isRecipientAllowed } from "./safety-mode";
 
 const RECIPIENT_PAGE_SIZE = 1_000;
+const CHRONIC_EMAIL_QUERY_URL_BUDGET = 6_000;
+const CHRONIC_EMAIL_QUERY_CONCURRENCY = 8;
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function chronicEmailFilter(emails: readonly string[]): string {
+  const values = emails
+    .map((email) => `"${email.replace(/\\/gu, "\\\\").replace(/"/gu, '\\"')}"`)
+    .join(",");
+  return `in.(${values})`;
+}
+
+function chronicEmailQueryLength(emails: readonly string[]): number {
+  return new URLSearchParams({
+    select: "email",
+    desengajado_cronico: "eq.true",
+    email: chronicEmailFilter(emails),
+  }).toString().length;
+}
+
+export function buildChronicEmailQueryBatches(
+  emails: readonly string[],
+  maxEncodedQueryLength = CHRONIC_EMAIL_QUERY_URL_BUDGET,
+): string[][] {
+  const batches: string[][] = [];
+  let batch: string[] = [];
+
+  for (const email of emails) {
+    const candidate = [...batch, email];
+    if (
+      batch.length > 0 &&
+      chronicEmailQueryLength(candidate) > maxEncodedQueryLength
+    ) {
+      batches.push(batch);
+      batch = [email];
+    } else {
+      batch = candidate;
+    }
+    if (chronicEmailQueryLength(batch) > maxEncodedQueryLength) {
+      throw new Error("A recipient email exceeds the chronic lookup URL budget.");
+    }
+  }
+
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+function projectionQueryFailure(stage: string, cause: unknown): Error {
+  return new Error(`Recipient delivery projection failed during ${stage}.`, {
+    cause,
+  });
 }
 
 export type RecipientDeliveryProjection = {
@@ -76,7 +126,9 @@ export async function recipientDeliveryProjection(
       .eq("is_lembrete", false)
       .order("id", { ascending: true })
       .range(offset, offset + RECIPIENT_PAGE_SIZE - 1);
-    if (error) throw error;
+    if (error) {
+      throw projectionQueryFailure(`recipient page at offset ${offset}`, error);
+    }
     for (const row of data ?? []) {
       if (typeof row.email === "string") {
         recipientEmails.push(row.email);
@@ -87,22 +139,41 @@ export async function recipientDeliveryProjection(
 
   const chronicDisengagedEmails = new Set<string>();
   const uniqueRecipientEmails = [...new Set(recipientEmails.map(normalizeEmail))];
-  for (let offset = 0; offset < uniqueRecipientEmails.length; offset += RECIPIENT_PAGE_SIZE) {
-    const emailBatch = uniqueRecipientEmails.slice(offset, offset + RECIPIENT_PAGE_SIZE);
-    const { data: chronicRows, error: chronicError } = await client
-      .from("contato_desengajamento")
-      .select("email")
-      .eq("desengajado_cronico", true)
-      .in("email", emailBatch);
-    if (chronicError) throw chronicError;
-    for (const row of chronicRows ?? []) {
+  const chronicEmailBatches = buildChronicEmailQueryBatches(uniqueRecipientEmails);
+  for (
+    let offset = 0;
+    offset < chronicEmailBatches.length;
+    offset += CHRONIC_EMAIL_QUERY_CONCURRENCY
+  ) {
+    const batchGroup = chronicEmailBatches.slice(
+      offset,
+      offset + CHRONIC_EMAIL_QUERY_CONCURRENCY,
+    );
+    const chronicRowsByBatch = await Promise.all(
+      batchGroup.map(async (emailBatch, groupIndex) => {
+        const { data: chronicRows, error: chronicError } = await client
+          .from("contato_desengajamento")
+          .select("email")
+          .eq("desengajado_cronico", true)
+          .in("email", emailBatch);
+        if (chronicError) {
+          const batchNumber = offset + groupIndex + 1;
+          throw projectionQueryFailure(
+            `chronic disengagement batch ${batchNumber}/${chronicEmailBatches.length} (${chronicEmailQueryLength(emailBatch)} encoded query characters)`,
+            chronicError,
+          );
+        }
+        return chronicRows ?? [];
+      }),
+    );
+    for (const row of chronicRowsByBatch.flat()) {
       if (typeof row.email === "string") chronicDisengagedEmails.add(row.email);
     }
   }
 
   const suppressedEmails = new Set<string>();
   const { data, error } = await client.from("supressao").select("email");
-  if (error) throw error;
+  if (error) throw projectionQueryFailure("suppression lookup", error);
   for (const row of data ?? []) {
     if (typeof row.email === "string") suppressedEmails.add(row.email);
   }
@@ -114,7 +185,9 @@ export async function recipientDeliveryProjection(
       .select("incluir_desengajados")
       .eq("id", campaignId)
       .maybeSingle();
-    if (campaignError) throw campaignError;
+    if (campaignError) {
+      throw projectionQueryFailure("campaign setting lookup", campaignError);
+    }
     shouldIncludeDisengaged = campaign?.incluir_desengajados === true;
   }
 

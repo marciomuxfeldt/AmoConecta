@@ -122,11 +122,30 @@ async function processImportJob({
         await updateJob({ linhas_processadas: linesProcessed });
       },
     });
+    let completedSummary = summary;
+    try {
+      const delivery = await recipientDeliveryProjection(client, campaignId);
+      completedSummary = {
+        ...summary,
+        total_na_lista: delivery.total_na_lista,
+        suprimidos_no_envio: delivery.suprimidos_no_envio,
+        receberao_de_fato: delivery.receberao_de_fato,
+      };
+    } catch (error) {
+      logger.error(
+        {
+          technicalError: getTechnicalError(error),
+          importacaoId: importId,
+          campaignId,
+        },
+        "Campaign import delivery projection failed",
+      );
+    }
     await updateJob({
       status: "concluida" satisfies ImportJobStatus,
       linhas_processadas: summary.total_linhas,
       total_linhas: summary.total_linhas,
-      resultado: summary,
+      resultado: completedSummary,
       erro: null,
       concluido_em: new Date().toISOString(),
     });
@@ -345,15 +364,10 @@ router.get("/campaigns/:campaignId/imports/:importId", async (req, res) => {
       res.status(404).json({ error: "Importação não encontrada." });
       return;
     }
-    const currentProjection = data.resultado
-      ? await recipientDeliveryProjection(supabaseAdminClient(), params.data.campaignId)
-      : null;
     res.json(
       GetCampaignImportResponse.parse({
         ...data,
-        resultado: data.resultado
-          ? { ...data.resultado, ...currentProjection }
-          : null,
+        resultado: data.resultado,
         erro:
           data.status === "erro"
             ? getPublicImportValidationErrorMessage(data.erro) ??

@@ -1,6 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRecipientDeliveryProjection } from "./recipient-delivery-projection";
+import {
+  buildChronicEmailQueryBatches,
+  buildRecipientDeliveryProjection,
+} from "./recipient-delivery-projection";
+
+test("bounds encoded chronic-email lookup filters for large recipient lists", () => {
+  const emails = Array.from(
+    { length: 5_136 },
+    (_, index) => `contact-${index}@example.com`,
+  );
+  const batches = buildChronicEmailQueryBatches(emails);
+
+  assert.ok(batches.length > 1);
+  assert.deepEqual(batches.flat(), emails);
+  for (const batch of batches) {
+    const filter = `in.(${batch.map((email) => `"${email}"`).join(",")})`;
+    const queryLength = new URLSearchParams({
+      select: "email",
+      desengajado_cronico: "eq.true",
+      email: filter,
+    }).toString().length;
+    assert.ok(queryLength <= 6_000);
+  }
+});
 
 test("projects suppressed recipients before the worker processes them", () => {
   const projection = buildRecipientDeliveryProjection(
