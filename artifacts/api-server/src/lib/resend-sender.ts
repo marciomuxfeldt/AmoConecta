@@ -9,7 +9,7 @@ let warnedLowIntervalValue: string | undefined;
 
 export type ResendResult = {
   id?: string;
-  error?: { message?: string };
+  error?: { message: string; status?: number; retryAfter?: number };
 };
 
 export type PreparedResendMessage = {
@@ -264,7 +264,22 @@ export async function sendResendMessages(
   apiKey: string,
   messages: PreparedResendMessage[],
 ): Promise<ResendResult[]> {
-  return mapConcurrent(messages, RESEND_SEND_CONCURRENCY, (message) =>
-    sendOne(apiKey, message),
-  );
+  return mapConcurrent(messages, RESEND_SEND_CONCURRENCY, async (message) => {
+    try {
+      return await sendOne(apiKey, message);
+    } catch (error) {
+      const resendError = error as { status?: unknown; retryAfter?: unknown };
+      return {
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+          ...(typeof resendError?.status === "number"
+            ? { status: resendError.status }
+            : {}),
+          ...(typeof resendError?.retryAfter === "number"
+            ? { retryAfter: resendError.retryAfter }
+            : {}),
+        },
+      };
+    }
+  });
 }

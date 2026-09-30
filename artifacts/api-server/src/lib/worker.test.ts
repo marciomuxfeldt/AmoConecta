@@ -116,6 +116,53 @@ test("sends one deterministic idempotency key per Resend request", async () => {
   );
 });
 
+test("keeps an individual Resend 422 isolated to its recipient result", async () => {
+  const requests: string[] = [];
+  globalThis.fetch = async (_input, init) => {
+    const payload = JSON.parse(String(init?.body)) as { to: string[] };
+    const email = payload.to[0];
+    requests.push(email);
+    if (email === "invalid@example.com") {
+      return new Response(
+        JSON.stringify({
+          message:
+            "Invalid `to` field. The email address contains non-ASCII characters.",
+        }),
+        {
+          status: 422,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+    return new Response(JSON.stringify({ id: `resend-${email}` }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  const results = await sendResendMessages("resend-test-key", [
+    testMessage("primeira@example.com"),
+    testMessage("invalid@example.com"),
+    testMessage("terceira@example.com"),
+  ]);
+
+  assert.deepEqual(requests, [
+    "primeira@example.com",
+    "invalid@example.com",
+    "terceira@example.com",
+  ]);
+  assert.deepEqual(results[0], { id: "resend-primeira@example.com" });
+  assert.deepEqual(results[1], {
+    error: {
+      message:
+        "Resend 422: Invalid `to` field. The email address contains non-ASCII characters.",
+      status: 422,
+      retryAfter: 0,
+    },
+  });
+  assert.deepEqual(results[2], { id: "resend-terceira@example.com" });
+});
+
 function testMessage(email: string): PreparedResendMessage {
   return {
     from: "envios@marketing.amo.delivery",

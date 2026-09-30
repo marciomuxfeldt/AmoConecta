@@ -460,44 +460,86 @@ async function sendWithRetries(
   reminder = false,
 ): Promise<void> {
   let lastError: unknown;
+  let pending = recipients;
+  const resultsByRecipient = new Map<
+    string,
+    Awaited<ReturnType<typeof sendBatch>>[number]
+  >();
+
   for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+    if (pending.length === 0) break;
     try {
-      const sendable = await markSuppressedOrBlocked(recipients, campaign);
-      if (sendable.length !== recipients.length) return;
-      const results = await sendBatch(campaign, recipients, { reminder });
-      if (results.length !== recipients.length) {
+      const sendable = await markSuppressedOrBlocked(pending, campaign);
+      if (sendable.length !== pending.length) return;
+      const results = await sendBatch(campaign, pending, { reminder });
+      if (results.length !== pending.length) {
         throw new Error(
-          `Resend retornou ${results.length} resultado(s) para ${recipients.length} mensagem(ns).`,
+          `Resend retornou ${results.length} resultado(s) para ${pending.length} mensagem(ns).`,
         );
       }
-      const sentAt = new Date().toISOString();
-      await Promise.all(
-        recipients.map((recipient, index) =>
-          updateRecipient(recipient.id, {
-            status: results[index]?.error ? "erro" : "enviado",
-            resend_email_id: results[index]?.id ?? null,
-            enviado_em: results[index]?.error ? null : sentAt,
-            processando_em: null,
-            erro: results[index]?.error?.message ?? null,
-          }),
-        ),
-      );
-      return;
+
+      const retryRecipients: WorkerRecipient[] = [];
+      let longestRetryDelay = 0;
+      results.forEach((result, index) => {
+        const recipient = pending[index];
+        const recipientError = result?.error;
+        const hasAnotherAttempt = attempt + 1 < MAX_RETRIES;
+        const shouldRetry =
+          Boolean(recipientError) &&
+          hasAnotherAttempt &&
+          (recipientError?.status === 429 || attempt < 1);
+
+        if (shouldRetry && recipientError) {
+          retryRecipients.push(recipient);
+          longestRetryDelay = Math.max(
+            longestRetryDelay,
+            retryDelay(recipientError, attempt),
+          );
+        } else {
+          resultsByRecipient.set(recipient.id, result);
+        }
+      });
+
+      pending = retryRecipients;
+      lastError = undefined;
+      if (pending.length > 0 && attempt + 1 < MAX_RETRIES) {
+        await sleep(longestRetryDelay);
+      }
     } catch (error) {
       lastError = error;
       if ((error as { status?: number })?.status !== 429 && attempt >= 1) break;
-      if (attempt + 1 < MAX_RETRIES) await sleep(retryDelay(error, attempt));
+      if (attempt + 1 < MAX_RETRIES) {
+        await sleep(retryDelay(error, attempt));
+      }
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : String(lastError);
+  const sentAt = new Date().toISOString();
+  const unresolvedError =
+    lastError instanceof Error
+      ? lastError.message
+      : lastError === undefined
+        ? "Resend não retornou um resultado para este destinatário."
+        : String(lastError);
   await Promise.all(
     recipients.map((recipient) =>
-      updateRecipient(recipient.id, {
-        status: "erro",
-        processando_em: null,
-        erro: message,
-      }),
+      (() => {
+        const result = resultsByRecipient.get(recipient.id);
+        if (!result) {
+          return updateRecipient(recipient.id, {
+            status: "erro",
+            processando_em: null,
+            erro: unresolvedError,
+          });
+        }
+        return updateRecipient(recipient.id, {
+          status: result.error ? "erro" : "enviado",
+          resend_email_id: result.id ?? null,
+          enviado_em: result.error ? null : sentAt,
+          processando_em: null,
+          erro: result.error?.message ?? null,
+        });
+      })(),
     ),
   );
 }

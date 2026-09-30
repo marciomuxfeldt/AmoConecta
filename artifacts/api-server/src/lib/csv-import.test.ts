@@ -67,7 +67,47 @@ test("does not treat duplicate rows as invalid or validation errors", async () =
   assert.equal(summary.invalidos, 1);
   assert.equal(summary.emails_invalidos, 1);
   assert.equal(summary.amostras_erros.length, 1);
-  assert.equal(summary.amostras_erros[0]?.motivo, "e-mail ausente ou inválido");
+  assert.equal(
+    summary.amostras_erros[0]?.motivo,
+    "e-mail ausente ou inválido: (vazio após limpeza)",
+  );
+});
+
+test("removes invisible controls from e-mail before validating and saving", async () => {
+  const savedRows: unknown[] = [];
+  const summary = await validateAndImportCsv({
+    client: emptyImportClient((rows) => savedRows.push(...rows)) as never,
+    stream: streamFromText(
+      "nome,email\nPessoa,ana\u200B\u00A0@ex\u2060ample.com",
+    ),
+    campaignId: "00000000-0000-0000-0000-000000000001",
+    storagePath: "campaign/invisible-email.csv",
+    deduplicatePhone: false,
+  });
+
+  assert.equal(summary.invalidos, 0);
+  assert.equal(summary.validos, 1);
+  assert.equal((savedRows[0] as { email: string }).email, "ana@example.com");
+});
+
+test("rejects remaining non-ASCII e-mails and includes the address in the sample", async () => {
+  const savedRows: unknown[] = [];
+  const summary = await validateAndImportCsv({
+    client: emptyImportClient((rows) => savedRows.push(...rows)) as never,
+    stream: streamFromText("nome,email\nPessoa,jöhn@example.com"),
+    campaignId: "00000000-0000-0000-0000-000000000001",
+    storagePath: "campaign/non-ascii-email.csv",
+    deduplicatePhone: false,
+  });
+
+  assert.equal(summary.emails_invalidos, 1);
+  assert.equal(summary.invalidos, 1);
+  assert.equal(summary.validos, 0);
+  assert.equal(savedRows.length, 0);
+  assert.equal(
+    summary.amostras_erros[0]?.motivo,
+    "e-mail ausente ou inválido: jöhn@example.com",
+  );
 });
 
 test("matches the reference file totals after phone normalization", async () => {

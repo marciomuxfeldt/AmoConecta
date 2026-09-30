@@ -126,7 +126,12 @@ function normalizeName(value: string): string {
 }
 
 function normalizeEmail(value: string): string {
-  return value.trim().replace(/\s+/g, "").toLocaleLowerCase("pt-BR");
+  return value
+    .replace(/\u00A0/gu, " ")
+    .replace(/[\p{Cc}\p{Cf}]/gu, "")
+    .trim()
+    .replace(/\s+/gu, "")
+    .toLocaleLowerCase("pt-BR");
 }
 
 function fallbackName(email: string): string | null {
@@ -151,7 +156,10 @@ export function normalizePhone(value: string): string | null {
 }
 
 function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/u.test(value);
+  return (
+    /^[\x00-\x7F]+$/u.test(value) &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/u.test(value)
+  );
 }
 
 function parseDate(value: string): { date: string | null; invalid: boolean } {
@@ -558,7 +566,11 @@ export async function validateAndImportCsv({
     if (!isValidEmail(email)) {
       summary.emails_invalidos += 1;
       summary.invalidos += 1;
-      addError(summary, record.line, "e-mail ausente ou inválido");
+      addError(
+        summary,
+        record.line,
+        `e-mail ausente ou inválido: ${email || "(vazio após limpeza)"}`,
+      );
       await reportProgress();
       continue;
     }
