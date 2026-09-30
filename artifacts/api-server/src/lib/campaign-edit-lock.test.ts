@@ -73,9 +73,19 @@ test("does not lock content before the campaign is scheduled or sending", () => 
   );
 });
 
+test("locks content on a terminally cancelled campaign until it is reopened", () => {
+  assert.deepEqual(
+    changedLockedCampaignFields(
+      { ...existingCampaign, status: "cancelada" },
+      { assunto: "Oferta alterada" },
+    ),
+    ["assunto"],
+  );
+});
+
 test("describes the fields that cannot be edited", () => {
   assert.equal(
     campaignContentLockMessage(["assunto", "corpo"]),
-    "Não é possível editar o assunto e o corpo do e-mail depois que a campanha entra em agendamento ou envio.",
+    "Não é possível editar o assunto e o corpo do e-mail enquanto a campanha está agendada, enviando, pausada ou cancelada.",
   );
 });

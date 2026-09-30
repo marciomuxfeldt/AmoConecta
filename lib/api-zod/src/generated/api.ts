@@ -1479,7 +1479,7 @@ export const ResumeCampaignResponse = zod.object({
 
 
 /**
- * @summary Cancela uma campanha operacional
+ * @summary Cancela uma campanha; sem envios volta a rascunho, com envios permanece terminal
  */
 export const CancelCampaignParams = zod.object({
   "campaignId": zod.coerce.string().uuid()

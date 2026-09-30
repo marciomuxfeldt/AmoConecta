@@ -26,6 +26,15 @@ begin
     where d.campanha_id = p_campanha_id
       and d.is_lembrete = p_is_lembrete
       and d.status = 'pendente'
+      and exists (
+        select 1
+        from public.campanha c
+        where c.id = p_campanha_id
+          and c.status = case
+            when p_is_lembrete then 'concluida'
+            else 'enviando'
+          end
+      )
     order by d.data_ultima_compra desc nulls last, d.id
     limit greatest(1, least(p_limite, 100))
     for update skip locked
@@ -116,6 +125,15 @@ begin
     where d.campanha_id = p_campanha_id
       and d.is_lembrete = p_is_lembrete
       and d.status = 'pendente'
+      and exists (
+        select 1
+        from public.campanha c
+        where c.id = p_campanha_id
+          and c.status = case
+            when p_is_lembrete then 'concluida'
+            else 'enviando'
+          end
+      )
     order by d.data_ultima_compra desc nulls last, d.id
     limit greatest(1, least(p_limite, 100))
     for update skip locked
@@ -206,6 +224,15 @@ begin
     where d.campanha_id = p_campanha_id
       and d.is_lembrete = p_is_lembrete
       and d.status = 'pendente'
+      and exists (
+        select 1
+        from public.campanha c
+        where c.id = p_campanha_id
+          and c.status = case
+            when p_is_lembrete then 'concluida'
+            else 'enviando'
+          end
+      )
     order by d.data_ultima_compra desc nulls last, d.id
     limit greatest(1, least(p_limite, 100))
     for update skip locked
@@ -296,6 +323,15 @@ begin
     where d.campanha_id = p_campanha_id
       and d.is_lembrete = p_is_lembrete
       and d.status = 'pendente'
+      and exists (
+        select 1
+        from public.campanha c
+        where c.id = p_campanha_id
+          and c.status = case
+            when p_is_lembrete then 'concluida'
+            else 'enviando'
+          end
+      )
     order by d.data_ultima_compra desc nulls last, d.id
     limit greatest(1, least(p_limite, 100))
     for update skip locked

@@ -4,6 +4,7 @@ export const CAMPAIGN_CONTENT_LOCKED_STATUSES = [
   "agendada",
   "enviando",
   "pausada",
+  "cancelada",
 ] as const;
 
 export const CAMPAIGN_CONTENT_LOCKED_FIELDS = [
@@ -71,5 +72,5 @@ export function campaignContentLockMessage(
     labels.length === 1
       ? labels[0]
       : `${labels.slice(0, -1).join(", ")} e ${labels[labels.length - 1]}`;
-  return `Não é possível editar ${formatted} depois que a campanha entra em agendamento ou envio.`;
+  return `Não é possível editar ${formatted} enquanto a campanha está agendada, enviando, pausada ou cancelada.`;
 }

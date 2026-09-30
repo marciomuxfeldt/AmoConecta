@@ -2692,7 +2692,7 @@ export const getCancelCampaignUrl = (campaignId: string,) => {
 }
 
 /**
- * @summary Cancela uma campanha operacional
+ * @summary Cancela uma campanha; sem envios volta a rascunho, com envios permanece terminal
  */
 export const cancelCampaign = async (campaignId: string, options?: Parameters<typeof customFetch>[1]): Promise<Campaign> => {
 
@@ -2744,7 +2744,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CancelCampaignMutationVariables = {campaignId: string}
 
     /**
- * @summary Cancela uma campanha operacional
+ * @summary Cancela uma campanha; sem envios volta a rascunho, com envios permanece terminal
  */
 export const useCancelCampaign = <TError = ErrorType<Error>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelCampaign>>, TError,CancelCampaignMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}

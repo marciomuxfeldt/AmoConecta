@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ImportPanel } from "./campaigns";
+import { campaignCancelSuccessMessage, ImportPanel } from "./campaigns";
 
 const campaignId = "campaign-under-test";
 const recipientSummaryUrl = `/api/campaigns/${campaignId}/recipients/summary`;
@@ -196,5 +196,16 @@ describe("campaign CSV import confirmation", () => {
       expect(mutationRequests(uploadUrlEndpoint)).toHaveLength(1);
       expect(mutationRequests(validateEndpoint)).toHaveLength(1);
     });
+  });
+});
+
+describe("campaign cancellation feedback", () => {
+  it("distinguishes an unsent draft reset from a terminal cancellation", () => {
+    expect(campaignCancelSuccessMessage("rascunho")).toContain(
+      "Nenhum e-mail havia sido enviado",
+    );
+    expect(campaignCancelSuccessMessage("cancelada")).toContain(
+      "estado terminal",
+    );
   });
 });

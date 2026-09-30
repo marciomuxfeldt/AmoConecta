@@ -16,6 +16,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   ShieldCheck,
   Trash2,
@@ -629,7 +630,17 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 function campaignContentIsLocked(status?: string): boolean {
-  return status === 'agendada' || status === 'enviando' || status === 'pausada';
+  return status === 'agendada' || status === 'enviando' || status === 'pausada' || status === 'cancelada';
+}
+
+export function campaignCancelSuccessMessage(status?: string): string {
+  if (status === 'rascunho') {
+    return 'Nenhum e-mail havia sido enviado. A campanha voltou para rascunho e pode ser ajustada e agendada novamente.';
+  }
+  if (status === 'cancelada') {
+    return 'Já houve envio. A campanha permanece cancelada em estado terminal; um lote que já estava em processamento pode concluir. Crie uma nova campanha para enviar novamente.';
+  }
+  return 'O estado da campanha foi atualizado.';
 }
 
 function blocksForUrlValidation(blocks: EmailBlock[]) {
@@ -739,6 +750,8 @@ function CampaignForm({
   recipientSection,
   onCancel,
   cancelPending = false,
+  campaignHasSentMessages = false,
+  recipientsLoading = false,
 }: {
   campaign?: Campaign;
   draftId?: string;
@@ -760,6 +773,8 @@ function CampaignForm({
   recipientSection?: ReactNode;
   onCancel?: () => void;
   cancelPending?: boolean;
+  campaignHasSentMessages?: boolean;
+  recipientsLoading?: boolean;
 }) {
   const create = useCreateCampaign();
   const update = useUpdateCampaign();
@@ -1072,7 +1087,7 @@ function CampaignForm({
            </div>
          )}
        </section>
-       {contentLocked && <p className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] px-4 py-3 text-xs leading-5 text-[#6d7180]" role="status" data-testid="campaign-content-locked">O corpo, assunto, remetente e links ficam bloqueados enquanto a campanha está agendada, enviando ou pausada.</p>}
+       {contentLocked && <p className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] px-4 py-3 text-xs leading-5 text-[#6d7180]" role="status" data-testid="campaign-content-locked">O corpo, assunto, remetente e links ficam bloqueados enquanto a campanha está agendada, enviando, pausada ou cancelada.</p>}
       {form.formState.errors.corpo?.message && <p className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs leading-5 text-[#a64220]" data-testid="error-email-content">{form.formState.errors.corpo.message}</p>}
       {isUploadPending && <p className="flex items-center gap-2 rounded-xl border border-[#d4e5df] bg-[#f1f7f5] px-4 py-3 text-xs text-[#247b79]" role="status" data-testid="status-image-upload-blocking"><LoaderCircle size={14} className="animate-spin" /> Aguarde o upload das imagens terminar para salvar a campanha.</p>}
       </div>
@@ -1121,7 +1136,7 @@ function CampaignForm({
                 </div>
               </Field>
             </div>
-            <Field label="Horas até o lembrete"><input {...form.register('lembrete_horas')} type="number" min="24" max="168" className="field-control" data-testid="input-reminder-hours" /></Field>
+            <Field label="Horas até o lembrete"><input {...form.register('lembrete_horas')} disabled={contentLocked} type="number" min="24" max="168" className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" data-testid="input-reminder-hours" /></Field>
              <Field label="Teto por hora" hint="Sugestão inicial para a rampa: 100."><input {...form.register('teto_hora')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-hour-cap" /></Field>
              <Field label="Teto por dia" hint="Sugestão inicial para a rampa: 1.000."><input {...form.register('teto_dia')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-day-cap" /></Field>
         </div>
@@ -1144,10 +1159,29 @@ function CampaignForm({
          )}
           {campaign && ['agendada', 'enviando', 'pausada'].includes(campaign.status) && onCancel && (
             <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[#eee7dc] pt-5" data-testid="campaign-cancel-control">
-              <div><p className="text-xs font-extrabold text-[#263044]">Cancelar campanha</p><p className="mt-1 text-[11px] text-[#777984]">Interrompe o agendamento ou o envio desta campanha.</p></div>
+               <div><p className="text-xs font-extrabold text-[#263044]">Cancelar campanha</p><p className="mt-1 text-[11px] text-[#777984]">Sem envios, volta para rascunho. Com algum envio, fica terminal; um lote ativo pode concluir.</p></div>
               <button type="button" onClick={onCancel} disabled={cancelPending} className="action-button action-button-secondary !text-[#a64220]" data-testid="button-cancel-campaign">
                 {cancelPending ? <LoaderCircle size={15} className="animate-spin" /> : <X size={15} />} Cancelar envio
               </button>
+            </div>
+          )}
+          {campaign?.status === 'cancelada' && onCancel && (
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[#eee7dc] pt-5" data-testid="campaign-cancelled-state">
+              <div className="min-w-0">
+                <p className="text-xs font-extrabold text-[#263044]">Campanha cancelada</p>
+                <p className="mt-1 text-[11px] leading-5 text-[#777984]">
+                  {campaignHasSentMessages
+                    ? 'Já houve envio. Esta campanha é terminal; um lote ativo pode concluir. Crie outra campanha para um novo envio.'
+                    : recipientsLoading
+                      ? 'Verificando se algum e-mail foi enviado.'
+                      : 'Campanhas canceladas antigas sem envios podem ser reabertas como rascunho.'}
+                </p>
+              </div>
+              {!campaignHasSentMessages && !recipientsLoading && (
+                <button type="button" onClick={onCancel} disabled={cancelPending} className="action-button action-button-secondary" data-testid="button-reopen-cancelled-campaign">
+                  {cancelPending ? <LoaderCircle size={15} className="animate-spin" /> : <RotateCcw size={15} />} Reabrir como rascunho
+                </button>
+              )}
             </div>
           )}
          {sendQuotaPanel}
@@ -1913,6 +1947,7 @@ const campaignAuditActionLabels: Record<string, string> = {
   campaign_paused: 'Campanha pausada',
   campaign_resumed: 'Campanha retomada',
   campaign_cancelled: 'Campanha cancelada',
+  campaign_reopened: 'Campanha reaberta como rascunho',
   campaign_auto_paused: 'Pausa automática',
   campaign_test_sent: 'Teste enviado',
   campaign_updated: 'Campanha atualizada',
@@ -1963,7 +1998,15 @@ function campaignAuditDescription(event: CampaignAuditEvent): string | null {
     case 'campaign_resumed':
       return from && to ? `${from} → ${to}.` : 'Retomada do envio registrada.';
     case 'campaign_cancelled':
-      return from && to ? `${from} → ${to}.` : 'Cancelamento registrado.';
+      if (from && to) {
+        const inFlight = typeof metadata.in_flight_recipients === 'number'
+          ? metadata.in_flight_recipients
+          : 0;
+        return `${from} → ${to}.${inFlight > 0 ? ` ${inFlight} destinatário(s) já estavam em processamento e podem concluir.` : ''}`;
+      }
+      return 'Cancelamento registrado.';
+    case 'campaign_reopened':
+      return 'Nenhum envio foi registrado; a campanha voltou para rascunho.';
     case 'campaign_auto_paused': {
       const reason = typeof metadata.reason === 'string' ? metadata.reason : '';
       const bounce = typeof metadata.bounce_rate === 'number'
@@ -2275,6 +2318,8 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
     const onError = (error: unknown) => {
       setOperationSuccess(null);
       setOperationError(getErrorMessage(error, 'Não foi possível alterar o estado da campanha.'));
+      void queryClient.invalidateQueries({ queryKey: getGetCampaignQueryKey(campaignId) });
+      void queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
     };
     if (status === 'pausada') {
       pauseCampaign.mutate({ campaignId }, { onSuccess, onError });
@@ -2305,12 +2350,15 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
           queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
           queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
           setOperationError(null);
-          setOperationSuccess('Envio cancelado com sucesso.');
+          setOperationSuccess(campaignCancelSuccessMessage(updated.status));
           queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
         },
         onError: (error) => {
           setOperationSuccess(null);
-          setOperationError(getErrorMessage(error, 'Não foi possível cancelar a campanha.'));
+          setOperationError(getErrorMessage(error, 'Não foi possível cancelar ou reabrir a campanha.'));
+          void queryClient.invalidateQueries({ queryKey: getGetCampaignQueryKey(campaignId) });
+          void queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+          void queryClient.invalidateQueries({ queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId) });
         },
       },
     );
@@ -2320,7 +2368,11 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
     setOperationError(null);
     setOperationSuccess(null);
     if (latestCampaign.status !== 'rascunho') {
-      setOperationError('Somente campanhas em rascunho podem ser agendadas.');
+      setOperationError(
+        latestCampaign.status === 'cancelada'
+          ? 'Reabra a campanha como rascunho antes de agendar. Campanhas que já tiveram envios são terminais.'
+          : 'Somente campanhas em rascunho podem ser agendadas.',
+      );
       return;
     }
     if (!latestCampaign.agendada_para || Number.isNaN(Date.parse(latestCampaign.agendada_para)) || Date.parse(latestCampaign.agendada_para) <= Date.now()) {
@@ -2384,7 +2436,10 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       setOperationError(campaignTestRequirementMessage(importedRecipientCount));
       return;
     }
-    if (total > 5000 && scheduleConfirmation.trim() !== String(total)) return;
+    if (total > 5000 && scheduleConfirmation.trim() !== String(total)) {
+      setOperationError(`Digite ${total} para confirmar o total que receberá o envio.`);
+      return;
+    }
     scheduleCampaign.mutate(
       { campaignId, data: { confirmacao_destinatarios: scheduleConfirmation.trim() } },
       {
@@ -2517,6 +2572,11 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
           {reputationResumePanel}
           <CampaignForm
             campaign={campaign}
+            campaignHasSentMessages={
+              (recipientSummaryQuery.data?.metricas_email.enviados.quantidade ?? 0) > 0 ||
+              (recipientSummaryQuery.data?.metricas_email_lembrete.enviados.quantidade ?? 0) > 0
+            }
+            recipientsLoading={recipientSummaryQuery.isLoading}
              recipientSection={
                <CampaignRecipientsBlock
                  campaignId={campaignId}

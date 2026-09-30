@@ -1028,6 +1028,54 @@ router.get("/campaigns/:campaignId/recipients/summary", async (req, res) => {
   }
 });
 
+async function campaignHasSentMessages(campaignId: string): Promise<boolean> {
+  const client = supabaseAdminClient();
+  const sentStatuses = ["enviado", "entregue", "aberto", "clicado", "bounce"];
+  const sentEventTypes = [
+    "email.sent",
+    "email.delivered",
+    "email.opened",
+    "email.clicked",
+    "email.bounced",
+    "email.complained",
+  ];
+  const [byTimestamp, byStatus, byEvent] = await Promise.all([
+    client
+      .from("destinatario")
+      .select("id", { count: "exact", head: true })
+      .eq("campanha_id", campaignId)
+      .not("enviado_em", "is", null),
+    client
+      .from("destinatario")
+      .select("id", { count: "exact", head: true })
+      .eq("campanha_id", campaignId)
+      .in("status", sentStatuses),
+    client
+      .from("evento_email")
+      .select("id", { count: "exact", head: true })
+      .eq("campanha_id", campaignId)
+      .in("tipo", sentEventTypes),
+  ]);
+  if (byTimestamp.error) throw byTimestamp.error;
+  if (byStatus.error) throw byStatus.error;
+  if (byEvent.error) throw byEvent.error;
+  return (byTimestamp.count ?? 0) > 0 ||
+    (byStatus.count ?? 0) > 0 ||
+    (byEvent.count ?? 0) > 0;
+}
+
+async function countInFlightCampaignRecipients(
+  campaignId: string,
+): Promise<number> {
+  const { count, error } = await supabaseAdminClient()
+    .from("destinatario")
+    .select("id", { count: "exact", head: true })
+    .eq("campanha_id", campaignId)
+    .eq("status", "processando");
+  if (error) throw error;
+  return count ?? 0;
+}
+
 async function validateSchedule(
   campaign: Awaited<ReturnType<typeof findCampaign>>,
   confirmation: string | null | undefined,
@@ -1160,9 +1208,16 @@ async function runSimpleCampaignTransition(
       .from("campanha")
       .update(update)
       .eq("id", params.data.campaignId)
+      .eq("status", existing.status)
       .select(CAMPAIGN_COLUMNS)
-      .single();
+      .maybeSingle();
     if (error) throw error;
+    if (!data) {
+      res.status(409).json({
+        error: "O estado da campanha mudou antes da operação. Atualize a página e tente novamente.",
+      });
+      return;
+    }
     const action =
       config.targetStatus === "pausada"
         ? "campaign_paused"
@@ -1202,12 +1257,21 @@ router.post("/campaigns/:campaignId/agendar", async (req, res) => {
       res.status(404).json({ error: "Campanha não encontrada." });
       return;
     }
+    if (campaign.status !== "rascunho") {
+      res.status(409).json({
+        error:
+          campaign.status === "cancelada"
+            ? "Esta campanha está cancelada. Reabra-a como rascunho antes de agendar."
+            : "Somente campanhas em rascunho podem ser agendadas.",
+      });
+      return;
+    }
     const validationError = await validateSchedule(
       campaign,
       body.data.confirmacao_destinatarios,
     );
     if (validationError) {
-      res.status(validationError.includes("estado atual") ? 409 : 422).json({ error: validationError });
+      res.status(422).json({ error: validationError });
       return;
     }
     const scheduledAt = new Date().toISOString();
@@ -1221,9 +1285,16 @@ router.post("/campaigns/:campaignId/agendar", async (req, res) => {
         agendado_em: scheduledAt,
       })
       .eq("id", params.data.campaignId)
+      .eq("status", "rascunho")
       .select(CAMPAIGN_COLUMNS)
-      .single();
+      .maybeSingle();
     if (error) throw error;
+    if (!data) {
+      res.status(409).json({
+        error: "O estado da campanha mudou antes do agendamento. Atualize a página e tente novamente.",
+      });
+      return;
+    }
     await recordCampaignAudit(
       req,
       session,
@@ -1262,12 +1333,149 @@ router.post("/campaigns/:campaignId/retomar", (req, res) => {
   });
 });
 
-router.post("/campaigns/:campaignId/cancelar", (req, res) =>
-  runSimpleCampaignTransition(req, res, {
-    targetStatus: "cancelada",
-    allowedStatuses: ["agendada", "enviando", "pausada"],
-  }),
-);
+router.post("/campaigns/:campaignId/cancelar", async (req, res): Promise<void> => {
+  const params = GetCampaignParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(422).json({ error: "Identificador de campanha inválido." });
+    return;
+  }
+  try {
+    const session = await getSupabaseUser(req, res);
+    if (!session) {
+      res.status(401).json({ error: "Sessão expirada. Entre novamente." });
+      return;
+    }
+    const existing = await findCampaign(params.data.campaignId);
+    if (!existing) {
+      res.status(404).json({ error: "Campanha não encontrada." });
+      return;
+    }
+    const allowedStatuses = ["agendada", "enviando", "pausada", "cancelada"];
+    if (!allowedStatuses.includes(existing.status)) {
+      res.status(409).json({
+        error: "Só é possível cancelar ou reabrir uma campanha agendada, enviando, pausada ou cancelada.",
+      });
+      return;
+    }
+
+    let current = existing;
+    let hasSentMessages = await campaignHasSentMessages(existing.id);
+    if (existing.status === "cancelada" && hasSentMessages) {
+      res.status(409).json({
+        error: "Esta campanha já teve envios e está cancelada em estado terminal. Crie uma nova campanha para enviar novamente.",
+      });
+      return;
+    }
+
+    let pausedForSafeCancellation = false;
+    if (current.status === "enviando" && !hasSentMessages) {
+      const pausedAt = new Date().toISOString();
+      const { data, error } = await supabaseAdminClient()
+        .from("campanha")
+        .update({
+          status: "pausada",
+          pausa_motivo: "Pausa temporária para interromper novos lotes antes de cancelar uma campanha sem envios.",
+          pausada_em: pausedAt,
+          pausa_taxa_bounce: null,
+          pausa_taxa_reclamacao: null,
+          pausado_por_id: session.user.id,
+          pausado_por_nome: session.user.name,
+          pausado_por_email: session.user.email,
+        })
+        .eq("id", existing.id)
+        .eq("status", "enviando")
+        .select(CAMPAIGN_COLUMNS)
+        .maybeSingle();
+      if (error) throw error;
+      if (data) {
+        current = data;
+        pausedForSafeCancellation = true;
+      } else {
+        const refreshed = await findCampaign(existing.id);
+        if (!refreshed || !allowedStatuses.includes(refreshed.status)) {
+          res.status(409).json({
+            error: "O estado da campanha mudou durante o cancelamento. Atualize a página e tente novamente.",
+          });
+          return;
+        }
+        current = refreshed;
+      }
+    }
+
+    const inFlightCount = await countInFlightCampaignRecipients(existing.id);
+    hasSentMessages = await campaignHasSentMessages(existing.id);
+    if (!hasSentMessages && inFlightCount > 0) {
+      if (pausedForSafeCancellation && current.status === "pausada") {
+        await recordCampaignAudit(req, session, "campaign_paused", existing.id, {
+          from_status: "enviando",
+          to_status: "pausada",
+          reason: "Pausa temporária enquanto o lote em andamento é concluído antes do cancelamento.",
+        });
+      }
+      res.status(409).json({
+        error: "A campanha foi mantida pausada para evitar novos lotes. Ainda há destinatários em processamento; aguarde a conclusão do lote e clique em cancelar novamente.",
+      });
+      return;
+    }
+
+    if (current.status === "cancelada" && hasSentMessages) {
+      res.status(409).json({
+        error: "Esta campanha já teve envios e está cancelada em estado terminal. Crie uma nova campanha para enviar novamente.",
+      });
+      return;
+    }
+
+    const targetStatus = hasSentMessages ? "cancelada" : "rascunho";
+    const update =
+      targetStatus === "rascunho"
+        ? {
+            status: targetStatus,
+            agendada_para: null,
+            agendado_por_id: null,
+            agendado_por_nome: null,
+            agendado_por_email: null,
+            agendado_em: null,
+            pausa_motivo: null,
+            pausa_taxa_bounce: null,
+            pausa_taxa_reclamacao: null,
+            pausada_em: null,
+            pausado_por_id: null,
+            pausado_por_nome: null,
+            pausado_por_email: null,
+          }
+        : { status: targetStatus };
+    const { data, error } = await supabaseAdminClient()
+      .from("campanha")
+      .update(update)
+      .eq("id", existing.id)
+      .eq("status", current.status)
+      .select(CAMPAIGN_COLUMNS)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      res.status(409).json({
+        error: "O estado da campanha mudou durante o cancelamento. Atualize a página e tente novamente.",
+      });
+      return;
+    }
+
+    const action =
+      existing.status === "cancelada" && targetStatus === "rascunho"
+        ? "campaign_reopened"
+        : "campaign_cancelled";
+    await recordCampaignAudit(req, session, action, existing.id, {
+      from_status: existing.status,
+      to_status: targetStatus,
+      sent_messages: hasSentMessages,
+      in_flight_recipients: inFlightCount,
+      paused_before_cancellation: pausedForSafeCancellation,
+    });
+    res.json(GetCampaignResponse.parse(await withSendMetrics(data)));
+  } catch (error) {
+    logSupabaseError(req, "Campaign cancellation failed", error);
+    res.status(502).json({ error: "Não foi possível cancelar ou reabrir a campanha." });
+  }
+});
 
 router.delete("/campaigns/:campaignId/recipients", async (req, res) => {
   const params = GetCampaignParams.safeParse(req.params);

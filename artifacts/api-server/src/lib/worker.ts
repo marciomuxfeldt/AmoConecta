@@ -40,7 +40,11 @@ const WORKER_LOCK_RELEASE_RPC = "liberar_lock_worker";
 const missingReplyToWarnings = new Set<string>();
 // Fixed database-wide lock key. It must remain stable across worker processes.
 const WORKER_LOCK_KEY = 4_782_913_421;
-const WORKER_LOCK_TOKEN = randomUUID();
+
+export type WorkerLockLease = {
+  key: number;
+  token: string;
+};
 
 type Campaign = {
   id: string;
@@ -179,10 +183,11 @@ function isMissingWorkerLockRpc(error: { code?: string } | null): boolean {
   return error?.code === "PGRST202" || error?.code === "42883";
 }
 
-async function acquireWorkerLock(): Promise<boolean> {
+export async function acquireWorkerLock(): Promise<WorkerLockLease | null> {
+  const token = randomUUID();
   const { data, error } = await supabaseAdminClient().rpc(
     WORKER_LOCK_ACQUIRE_RPC,
-    { p_chave: WORKER_LOCK_KEY, p_token: WORKER_LOCK_TOKEN },
+    { p_chave: WORKER_LOCK_KEY, p_token: token },
   );
   if (error) {
     if (isMissingWorkerLockRpc(error)) {
@@ -192,13 +197,13 @@ async function acquireWorkerLock(): Promise<boolean> {
     }
     throw error;
   }
-  return data === true;
+  return data === true ? { key: WORKER_LOCK_KEY, token } : null;
 }
 
-async function releaseWorkerLock(): Promise<void> {
+export async function releaseWorkerLock(lease: WorkerLockLease): Promise<void> {
   const { data, error } = await supabaseAdminClient().rpc(
     WORKER_LOCK_RELEASE_RPC,
-    { p_chave: WORKER_LOCK_KEY, p_token: WORKER_LOCK_TOKEN },
+    { p_chave: lease.key, p_token: lease.token },
   );
   if (error) {
     if (isMissingWorkerLockRpc(error)) {
@@ -210,8 +215,8 @@ async function releaseWorkerLock(): Promise<void> {
   }
   if (data !== true) {
     logger.warn(
-      { lockKey: WORKER_LOCK_KEY },
-       "AmoConecta worker lock was not owned by this worker",
+      { lockKey: lease.key },
+      "AmoConecta worker lock was not owned by this process",
     );
   }
 }
@@ -273,13 +278,18 @@ async function updateRecipient(
 async function updateCampaignStatus(
   campaignId: string,
   status: string,
+  expectedStatus: string,
   extra: Record<string, unknown> = {},
-): Promise<void> {
-  const { error } = await supabaseAdminClient()
+): Promise<boolean> {
+  const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .update({ status, ...extra })
-    .eq("id", campaignId);
+    .eq("id", campaignId)
+    .eq("status", expectedStatus)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  return Boolean(data);
 }
 
 function sender(campaign: Campaign): string {
@@ -524,15 +534,21 @@ async function maybePauseCampaign(campaignId: string): Promise<boolean> {
     reasons.push(`reclamações ${((complaintRate * 100).toFixed(2))}% (limite 0,2%)`);
   }
   if (reasons.length === 0) return false;
-  await updateCampaignStatus(campaignId, "pausada", {
-    pausa_motivo: `Pausa automática: ${reasons.join(" e ")}.`,
-    pausa_taxa_bounce: bounceRate,
-    pausa_taxa_reclamacao: complaintRate,
-    pausada_em: new Date().toISOString(),
-    pausado_por_id: null,
-    pausado_por_nome: "Sistema",
-    pausado_por_email: null,
-  });
+  const didPause = await updateCampaignStatus(
+    campaignId,
+    "pausada",
+    "enviando",
+    {
+      pausa_motivo: `Pausa automática: ${reasons.join(" e ")}.`,
+      pausa_taxa_bounce: bounceRate,
+      pausa_taxa_reclamacao: complaintRate,
+      pausada_em: new Date().toISOString(),
+      pausado_por_id: null,
+      pausado_por_nome: "Sistema",
+      pausado_por_email: null,
+    },
+  );
+  if (!didPause) return true;
   try {
     await recordAuditEvent({
       actor: systemAuditActor,
@@ -770,36 +786,64 @@ export async function processCampaign(campaignId: string): Promise<number> {
   }
 
   if (campaign.status === "agendada") {
-    await updateCampaignStatus(campaignId, "enviando");
+    const didStart = await updateCampaignStatus(
+      campaignId,
+      "enviando",
+      "agendada",
+    );
+    if (!didStart) return 0;
     campaign = { ...campaign, status: "enviando" };
   }
   let processed = 0;
   while (true) {
+    const current = await loadCampaign(campaignId);
+    if (!current || current.status !== "enviando") break;
+    campaign = current;
     if (await maybePauseCampaign(campaignId)) break;
     const remaining = await quotaRemaining(campaign);
     if (remaining <= 0) break;
     const reserved = await reserveRecipients(campaignId, remaining);
     if (reserved.length === 0) {
-      await updateCampaignStatus(campaignId, "concluida");
-      processed += await processReminderQueue(campaign);
+      const didComplete = await updateCampaignStatus(
+        campaignId,
+        "concluida",
+        "enviando",
+      );
+      if (didComplete) {
+        processed += await processReminderQueue(campaign);
+      }
       break;
     }
     const sendable = await markSuppressedOrBlocked(reserved, campaign);
     if (sendable.length > 0) {
+      const beforeSend = await loadCampaign(campaignId);
+      if (!beforeSend || beforeSend.status !== "enviando") {
+        await Promise.all(
+          sendable.map((recipient) =>
+            updateRecipient(recipient.id, {
+              status: "pendente",
+              tentativas: Math.max(0, recipient.tentativas - 1),
+              processando_em: null,
+              erro: null,
+            }),
+          ),
+        );
+        break;
+      }
       await sendWithRetries(campaign, sendable);
       processed += sendable.length;
     }
     await maybePauseCampaign(campaignId);
     const refreshed = await loadCampaign(campaignId);
-    if (!refreshed || refreshed.status === "pausada") break;
+    if (!refreshed || refreshed.status !== "enviando") break;
     campaign = refreshed;
   }
   return processed;
 }
 
 export async function processDueCampaigns(): Promise<number> {
-  const lockAcquired = await acquireWorkerLock();
-  if (!lockAcquired) {
+  const lockLease = await acquireWorkerLock();
+  if (!lockLease) {
     logger.info(
       { lockKey: WORKER_LOCK_KEY },
       "AmoConecta worker skipped because another execution is still running",
@@ -843,7 +887,7 @@ export async function processDueCampaigns(): Promise<number> {
     return processed;
   } finally {
     try {
-      await releaseWorkerLock();
+      await releaseWorkerLock(lockLease);
     } catch (error) {
       logger.error(
         {
