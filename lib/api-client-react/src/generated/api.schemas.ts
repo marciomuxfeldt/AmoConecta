@@ -192,6 +192,8 @@ export interface RecipientStatusSummary {
   /** @minimum 0 */
   entregue: number;
   /** @minimum 0 */
+  bounce: number;
+  /** @minimum 0 */
   bloqueado: number;
   /** @minimum 0 */
   suprimido: number;

@@ -20,6 +20,7 @@ import {
 } from "@workspace/api-zod";
 import { getSupabaseUser } from "./auth";
 import { supabaseAdminClient } from "../lib/supabase";
+import { buildCampaignEmailMetrics } from "../lib/campaign-email-metrics";
 import {
   recordAuditEvent,
   teamAuditActor,
@@ -580,6 +581,7 @@ async function recipientSummary(campaignId: string) {
     ["pendente", ["pendente", "processando"]],
     ["enviado", ["enviado"]],
     ["entregue", ["entregue", "aberto", "clicado"]],
+    ["bounce", ["bounce"]],
     ["bloqueado", ["bloqueado_modo_teste", "bloqueado_desengajado"]],
     ["suprimido", ["suprimido"]],
     ["erro", ["erro"]],
@@ -618,23 +620,10 @@ async function recipientSummary(campaignId: string) {
   const reminderEmail = reminderRollups.get(campaignId) ?? emptyEmailRollup();
   const totalSent = email.enviados;
   const totalDelivered = email.entregues;
-  const reminderTotalSent = reminderEmail.enviados;
-  const reminderTotalDelivered = reminderEmail.entregues;
   const bounceRate =
     totalSent > 0 ? (email.bouncesPermanentes / totalSent) * 100 : 0;
   const complaintRate =
     totalDelivered > 0 ? (email.reclamacoes / totalDelivered) * 100 : 0;
-  const metric = (quantity: number, denominator = totalDelivered) => ({
-    quantidade: quantity,
-    percentual: denominator > 0 ? (quantity / denominator) * 100 : 0,
-  });
-  const reminderMetric = (
-    quantity: number,
-    denominator = reminderTotalDelivered,
-  ) => ({
-    quantidade: quantity,
-    percentual: denominator > 0 ? (quantity / denominator) * 100 : 0,
-  });
 
   return GetCampaignRecipientSummaryResponse.parse({
     campanha_id: campaignId,
@@ -648,38 +637,22 @@ async function recipientSummary(campaignId: string) {
       pendente: statusCounts[0],
       enviado: statusCounts[1],
       entregue: statusCounts[2],
-      bloqueado: statusCounts[3],
-      suprimido: statusCounts[4],
-      erro: statusCounts[5],
+      bounce: statusCounts[3],
+      bloqueado: statusCounts[4],
+      suprimido: statusCounts[5],
+      erro: statusCounts[6],
     },
     status_lembrete: {
       pendente: reminderStatusCounts[0],
       enviado: reminderStatusCounts[1],
       entregue: reminderStatusCounts[2],
-      bloqueado: reminderStatusCounts[3],
-      suprimido: reminderStatusCounts[4],
-      erro: reminderStatusCounts[5],
+      bounce: reminderStatusCounts[3],
+      bloqueado: reminderStatusCounts[4],
+      suprimido: reminderStatusCounts[5],
+      erro: reminderStatusCounts[6],
     },
     metricas_email_lembrete: {
-      enviados: reminderMetric(reminderEmail.enviados, reminderTotalSent),
-      entregues: reminderMetric(reminderEmail.entregues),
-      aberturas: reminderMetric(reminderEmail.aberturas),
-      cliques: reminderMetric(reminderEmail.cliques),
-      bounces: reminderMetric(reminderEmail.bounces, reminderTotalSent),
-      bounces_permanentes: reminderMetric(
-        reminderEmail.bouncesPermanentes,
-        reminderTotalSent,
-      ),
-      bounces_temporarios: reminderMetric(
-        reminderEmail.bouncesTemporarios,
-        reminderTotalSent,
-      ),
-      bounces_indeterminados: reminderMetric(
-        reminderEmail.bouncesIndeterminados,
-        reminderTotalSent,
-      ),
-      reclamacoes: reminderMetric(reminderEmail.reclamacoes),
-      descadastros: reminderMetric(reminderEmail.descadastros),
+      ...buildCampaignEmailMetrics(reminderEmail),
     },
     desengajados_total: disengagedCount,
     desengajados_na_lista: deliveryProjection.desengajados_na_lista,
@@ -699,16 +672,7 @@ async function recipientSummary(campaignId: string) {
       },
     },
     metricas_email: {
-      enviados: metric(email.enviados),
-      entregues: metric(email.entregues),
-      aberturas: metric(email.aberturas),
-      cliques: metric(email.cliques),
-      bounces: metric(email.bounces, totalSent),
-      bounces_permanentes: metric(email.bouncesPermanentes, totalSent),
-      bounces_temporarios: metric(email.bouncesTemporarios, totalSent),
-      bounces_indeterminados: metric(email.bouncesIndeterminados, totalSent),
-      reclamacoes: metric(email.reclamacoes),
-      descadastros: metric(email.descadastros),
+      ...buildCampaignEmailMetrics(email, deliveryProjection.total_na_lista),
     },
     recencia: RECENCY_BUCKETS.map((faixa, index) => ({
       faixa,

@@ -186,13 +186,13 @@ function formatPercentage(value: number) {
   return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
 }
 
-function reputationTone(percentual: number, limit: number) {
+export function reputationTone(percentual: number, limit: number) {
   if (percentual >= limit) {
     return {
       card: 'border-[#efc9ba] bg-[#fff0e9]',
       value: 'text-[#a64220]',
       badge: 'bg-[#bd4f26] text-[#fffaf6]',
-      label: 'No limite de pausa',
+      label: percentual > limit ? 'Acima do limite' : 'No limite',
     };
   }
   if (percentual >= limit / 2) {
@@ -1576,7 +1576,7 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
   );
 }
 
-function RecipientSummaryPanel({
+export function RecipientSummaryPanel({
   summary,
   loading,
   onClear,
@@ -1601,6 +1601,7 @@ function RecipientSummaryPanel({
     { key: 'pendente', label: 'Pendente', tone: 'text-[#9b6b17]', dot: 'bg-[#d5a42e]' },
     { key: 'enviado', label: 'Enviado', tone: 'text-[#247b79]', dot: 'bg-[#247b79]' },
     { key: 'entregue', label: 'Entregue', tone: 'text-[#417846]', dot: 'bg-[#63a76f]' },
+    { key: 'bounce', label: 'Bounce', tone: 'text-[#a64220]', dot: 'bg-[#bd4f26]' },
     { key: 'bloqueado', label: 'Bloqueado', tone: 'text-[#8e3a20]', dot: 'bg-[#d35f2a]' },
     { key: 'suprimido', label: 'Suprimido (processado)', tone: 'text-[#6d7180]', dot: 'bg-[#8f9299]' },
     { key: 'erro', label: 'Erro', tone: 'text-[#a64220]', dot: 'bg-[#bd4f26]' },
@@ -1624,16 +1625,16 @@ function RecipientSummaryPanel({
     : [];
   const emailMetrics = summary?.metricas_email
     ? [
-        { key: 'enviados', label: 'Enviados', metric: summary.metricas_email.enviados },
-        { key: 'entregues', label: 'Entregues', metric: summary.metricas_email.entregues },
-        { key: 'aberturas', label: 'Aberturas únicas', metric: summary.metricas_email.aberturas },
-        { key: 'cliques', label: 'Cliques únicos', metric: summary.metricas_email.cliques },
-        { key: 'bounces', label: 'Bounces totais', metric: summary.metricas_email.bounces },
-        { key: 'bounces_permanentes', label: 'Bounces permanentes', metric: summary.metricas_email.bounces_permanentes },
-        { key: 'bounces_temporarios', label: 'Bounces temporários', metric: summary.metricas_email.bounces_temporarios },
-        { key: 'bounces_indeterminados', label: 'Bounces não classificados', metric: summary.metricas_email.bounces_indeterminados },
-        { key: 'reclamacoes', label: 'Reclamações', metric: summary.metricas_email.reclamacoes },
-        { key: 'descadastros', label: 'Descadastros', metric: summary.metricas_email.descadastros },
+        { key: 'enviados', label: 'Enviados', base: 'lista', metric: summary.metricas_email.enviados },
+        { key: 'entregues', label: 'Entregues', base: 'enviados', metric: summary.metricas_email.entregues },
+        { key: 'aberturas', label: 'Aberturas únicas', base: 'entregues', metric: summary.metricas_email.aberturas },
+        { key: 'cliques', label: 'Cliques únicos', base: 'entregues', metric: summary.metricas_email.cliques },
+        { key: 'bounces', label: 'Bounces totais', base: 'enviados', metric: summary.metricas_email.bounces },
+        { key: 'bounces_permanentes', label: 'Bounces permanentes', base: 'enviados', metric: summary.metricas_email.bounces_permanentes },
+        { key: 'bounces_temporarios', label: 'Bounces temporários', base: 'enviados', metric: summary.metricas_email.bounces_temporarios },
+        { key: 'bounces_indeterminados', label: 'Bounces não classificados', base: 'enviados', metric: summary.metricas_email.bounces_indeterminados },
+        { key: 'reclamacoes', label: 'Reclamações', base: 'entregues', metric: summary.metricas_email.reclamacoes },
+        { key: 'descadastros', label: 'Descadastros', base: 'entregues', metric: summary.metricas_email.descadastros },
       ]
     : [];
 
@@ -1664,10 +1665,10 @@ function RecipientSummaryPanel({
       {error ? (
         <div className="mt-5 flex items-start gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-recipient-summary-error"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{error}</span></div>
       ) : loading ? (
-        <div className="mt-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="skeleton h-16 rounded-xl" />)}</div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">{Array.from({ length: 7 }).map((_, index) => <div key={index} className="skeleton h-16 rounded-xl" />)}</div>
       ) : (
         <>
-          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
             {statusRows.map((row) => (
               <div key={row.key} className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3" data-testid={`recipient-status-${row.key}`}>
                 <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${row.dot}`} /><span className="text-[11px] font-bold text-[#6d7180]">{row.label}</span></div>
@@ -1679,7 +1680,7 @@ function RecipientSummaryPanel({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-sm font-extrabold text-[#263044]">Resultados do envio</h3>
-                <p className="mt-1 text-xs text-[#7d7e87]">Engajamento usa entregues; as taxas de bounce usam enviados como base.</p>
+                <p className="mt-1 text-xs text-[#7d7e87]">Enviados usam o total da lista; entregues e bounces usam enviados; abertura, clique, reclamação e descadastro usam entregues.</p>
               </div>
             </div>
             {emailMetrics.length > 0 && (
@@ -1697,7 +1698,7 @@ function RecipientSummaryPanel({
                       <span className="text-[11px] font-bold text-[#6d7180]">{item.label}</span>
                       <div className="mt-2 flex items-baseline justify-between gap-2">
                         <strong className="text-xl font-extrabold tabular-nums tracking-[-.05em] text-[#263044]">{formatNumber(item.metric.quantidade)}</strong>
-                        <span className="font-mono text-[10px] text-[#7d7e87]">{formatPercentage(item.metric.percentual)}</span>
+                        <span className="text-right font-mono text-[10px] text-[#7d7e87]">{formatPercentage(item.metric.percentual)} sobre {item.base}</span>
                       </div>
                     </div>
                   ))}

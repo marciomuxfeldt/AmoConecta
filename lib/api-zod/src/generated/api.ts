@@ -1636,6 +1636,8 @@ export const getCampaignRecipientSummaryResponseStatusEnviadoMin = 0;
 
 export const getCampaignRecipientSummaryResponseStatusEntregueMin = 0;
 
+export const getCampaignRecipientSummaryResponseStatusBounceMin = 0;
+
 export const getCampaignRecipientSummaryResponseStatusBloqueadoMin = 0;
 
 export const getCampaignRecipientSummaryResponseStatusSuprimidoMin = 0;
@@ -1703,6 +1705,8 @@ export const getCampaignRecipientSummaryResponseStatusLembretePendenteMin = 0;
 export const getCampaignRecipientSummaryResponseStatusLembreteEnviadoMin = 0;
 
 export const getCampaignRecipientSummaryResponseStatusLembreteEntregueMin = 0;
+
+export const getCampaignRecipientSummaryResponseStatusLembreteBounceMin = 0;
 
 export const getCampaignRecipientSummaryResponseStatusLembreteBloqueadoMin = 0;
 
@@ -1772,6 +1776,7 @@ export const GetCampaignRecipientSummaryResponse = zod.object({
   "pendente": zod.number().int().min(getCampaignRecipientSummaryResponseStatusPendenteMin),
   "enviado": zod.number().int().min(getCampaignRecipientSummaryResponseStatusEnviadoMin),
   "entregue": zod.number().int().min(getCampaignRecipientSummaryResponseStatusEntregueMin),
+  "bounce": zod.number().int().min(getCampaignRecipientSummaryResponseStatusBounceMin),
   "bloqueado": zod.number().int().min(getCampaignRecipientSummaryResponseStatusBloqueadoMin),
   "suprimido": zod.number().int().min(getCampaignRecipientSummaryResponseStatusSuprimidoMin),
   "erro": zod.number().int().min(getCampaignRecipientSummaryResponseStatusErroMin)
@@ -1836,6 +1841,7 @@ export const GetCampaignRecipientSummaryResponse = zod.object({
   "pendente": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembretePendenteMin),
   "enviado": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteEnviadoMin),
   "entregue": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteEntregueMin),
+  "bounce": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteBounceMin),
   "bloqueado": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteBloqueadoMin),
   "suprimido": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteSuprimidoMin),
   "erro": zod.number().int().min(getCampaignRecipientSummaryResponseStatusLembreteErroMin)

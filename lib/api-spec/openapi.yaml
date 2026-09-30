@@ -1626,6 +1626,9 @@ components:
         entregue:
           type: integer
           minimum: 0
+        bounce:
+          type: integer
+          minimum: 0
         bloqueado:
           type: integer
           minimum: 0
@@ -1635,7 +1638,7 @@ components:
         erro:
           type: integer
           minimum: 0
-      required: [pendente, enviado, entregue, bloqueado, suprimido, erro]
+      required: [pendente, enviado, entregue, bounce, bloqueado, suprimido, erro]
     RecipientReputationMetric:
       type: object
       properties:

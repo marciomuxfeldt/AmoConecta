@@ -2,7 +2,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { campaignCancelSuccessMessage, ImportPanel } from "./campaigns";
+import type { CampaignRecipientSummary } from "@workspace/api-client-react";
+import {
+  campaignCancelSuccessMessage,
+  ImportPanel,
+  RecipientSummaryPanel,
+} from "./campaigns";
 
 const campaignId = "campaign-under-test";
 const recipientSummaryUrl = `/api/campaigns/${campaignId}/recipients/summary`;
@@ -206,6 +211,88 @@ describe("campaign cancellation feedback", () => {
     );
     expect(campaignCancelSuccessMessage("cancelada")).toContain(
       "estado terminal",
+    );
+  });
+});
+
+describe("campaign recipient summary", () => {
+  it("shows bounce as a status and renders corrected rate bases", () => {
+    const summary = {
+      total: 43,
+      total_na_lista: 43,
+      status: {
+        pendente: 0,
+        enviado: 1,
+        entregue: 32,
+        bounce: 6,
+        bloqueado: 0,
+        suprimido: 0,
+        erro: 4,
+      },
+      reputacao: {
+        total_enviado: 39,
+        total_entregue: 32,
+        bounce: {
+          quantidade: 6,
+          percentual: 15.38,
+          limite_percentual: 2,
+        },
+        reclamacao: {
+          quantidade: 0,
+          percentual: 0,
+          limite_percentual: 0.2,
+        },
+      },
+      metricas_email: {
+        enviados: { quantidade: 39, percentual: (39 / 43) * 100 },
+        entregues: { quantidade: 32, percentual: (32 / 39) * 100 },
+        aberturas: { quantidade: 20, percentual: (20 / 32) * 100 },
+        cliques: { quantidade: 8, percentual: (8 / 32) * 100 },
+        bounces: { quantidade: 6, percentual: (6 / 39) * 100 },
+        bounces_permanentes: { quantidade: 6, percentual: (6 / 39) * 100 },
+        bounces_temporarios: { quantidade: 0, percentual: 0 },
+        bounces_indeterminados: { quantidade: 0, percentual: 0 },
+        reclamacoes: { quantidade: 0, percentual: 0 },
+        descadastros: { quantidade: 0, percentual: 0 },
+      },
+      recencia: [],
+    } as unknown as CampaignRecipientSummary;
+
+    render(
+      <RecipientSummaryPanel
+        summary={summary}
+        loading={false}
+        onClear={() => undefined}
+        confirmClear={false}
+        onCancelClear={() => undefined}
+        canClear
+        clearPending={false}
+      />,
+    );
+
+    const displayedStatusTotal = [
+      "pendente",
+      "enviado",
+      "entregue",
+      "bounce",
+      "bloqueado",
+      "suprimido",
+      "erro",
+    ].reduce((total, status) => {
+      const card = screen.getByTestId(`recipient-status-${status}`);
+      return total + Number(card.querySelector("strong")?.textContent);
+    }, 0);
+
+    expect(displayedStatusTotal).toBe(43);
+    expect(screen.getByTestId("recipient-status-bounce").textContent).toContain("6");
+    expect(screen.getByTestId("recipient-email-metric-enviados").textContent).toContain(
+      "90,7% sobre lista",
+    );
+    expect(screen.getByTestId("recipient-email-metric-entregues").textContent).toContain(
+      "82,05% sobre enviados",
+    );
+    expect(screen.getByTestId("recipient-reputation-bounce").textContent).toContain(
+      "Acima do limite",
     );
   });
 });
