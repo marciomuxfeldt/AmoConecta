@@ -59,3 +59,13 @@ test("normalizes recipient and suppression e-mails before crossing the lists", (
     },
   );
 });
+
+test("excluded recipients remain in the list but do not count as eligible or test-blocked", () => {
+  const result = buildRecipientDeliveryProjection(
+    ["excluded@example.test", "active@example.test"],
+    new Set(), new Set(), false, new Set(["excluded@example.test"]),
+  );
+  assert.equal(result.total_na_lista, 2);
+  assert.equal(result.suprimidos_no_envio, 0);
+  assert.equal(result.bloqueados_modo_teste + result.permitidos_modo_teste, 1);
+});

@@ -29,6 +29,7 @@ import {
 import { logger } from "./logger";
 import { getTechnicalError } from "./technical-error";
 import { recordAuditEvent, systemAuditActor } from "./audit-events";
+import { loadReputationCounts, evaluateReputation, reputationPeriod } from "./campaign-reputation";
 
 const RESEND_BATCH_SIZE = 100;
 const MAX_RETRIES = 3;
@@ -68,6 +69,7 @@ type Campaign = {
   pausa_motivo?: string | null;
   pausa_taxa_bounce?: number | null;
   pausa_taxa_reclamacao?: number | null;
+  retomada_em?: string | null;
 };
 
 export type WorkerRecipient = {
@@ -78,6 +80,7 @@ export type WorkerRecipient = {
   status: string;
   tentativas: number;
   resend_email_id?: string | null;
+  excluido_em?: string | null;
 };
 
 export class WorkerConfigurationError extends Error {}
@@ -546,104 +549,21 @@ async function sendWithRetries(
 
 async function maybePauseCampaign(campaignId: string): Promise<boolean> {
   const client = supabaseAdminClient();
-  const { count: sent, error: sentError } = await client
-    .from("destinatario")
-    .select("id", { count: "exact", head: true })
-    .eq("campanha_id", campaignId)
-    .eq("is_lembrete", false)
-    .not("enviado_em", "is", null);
-  if (sentError) throw sentError;
-  if (!sent || sent < 1000) return false;
-  const [delivered, hardBounces, complaints] = await Promise.all([
-    client
-      .from("destinatario")
-      .select("id", { count: "exact", head: true })
-      .eq("campanha_id", campaignId)
-      .eq("is_lembrete", false)
-      .not("entregue_em", "is", null),
-    countDistinctCampaignEventContacts(campaignId, "email.bounced", true),
-    countDistinctCampaignEventContacts(campaignId, "email.complained"),
-  ]);
-  if (delivered.error) throw delivered.error;
-  const deliveredCount = delivered.count ?? 0;
-  const bounceRate = hardBounces / sent || 0;
-  const complaintRate = deliveredCount > 0 ? complaints / deliveredCount : 0;
-  const reasons: string[] = [];
-  if (bounceRate > 0.02) {
-    reasons.push(`bounce permanente ${((bounceRate * 100).toFixed(2))}% (limite 2%)`);
-  }
-  if (complaintRate > 0.002) {
-    reasons.push(`reclamações ${((complaintRate * 100).toFixed(2))}% (limite 0,2%)`);
-  }
-  if (reasons.length === 0) return false;
-  const didPause = await updateCampaignStatus(
-    campaignId,
-    "pausada",
-    "enviando",
-    {
-      pausa_motivo: `Pausa automática: ${reasons.join(" e ")}.`,
-      pausa_taxa_bounce: bounceRate,
-      pausa_taxa_reclamacao: complaintRate,
-      pausada_em: new Date().toISOString(),
-      pausado_por_id: null,
-      pausado_por_nome: "Sistema",
-      pausado_por_email: null,
-    },
-  );
-  if (!didPause) return true;
-  try {
-    await recordAuditEvent({
-      actor: systemAuditActor,
-      action: "campaign_auto_paused",
-      entityType: "campaign",
-      entityId: campaignId,
-      metadata: {
-        bounce_rate: bounceRate,
-        complaint_rate: complaintRate,
-        reason: reasons.join(" e "),
-      },
-    });
-  } catch (error) {
-    logger.error(
-      {
-        campaignId,
-        technicalError: getTechnicalError(error),
-      },
-      "Campaign automatic-pause audit event could not be persisted",
-    );
-  }
+  const campaign = await loadCampaign(campaignId);
+  if (!campaign || campaign.status !== "enviando") return true;
+  const counts = await loadReputationCounts(client, campaignId, campaign.retomada_em ?? null);
+  const decision = evaluateReputation(counts);
+  if (!decision) return false;
+  const cumulative = reputationPeriod(await loadReputationCounts(client, campaignId));
+  const { error } = await client.rpc("transition_campaign_with_audit", {
+    p_campanha_id: campaignId, p_expected: "enviando", p_target: "pausada",
+    p_actor_id: null, p_actor_nome: "Sistema", p_actor_email: null,
+    p_motivo: decision.motivo, p_bounce: decision.taxa_bounce, p_reclamacao: decision.taxa_reclamacao,
+    p_metadata: { gatilho: decision.gatilho, periodo_atual: decision,
+      acumulada: cumulative, marco_retomada: campaign.retomada_em ?? null },
+  });
+  if (error) throw error; // Fail closed; never send after an unaudited pause.
   return true;
-}
-
-async function countDistinctCampaignEventContacts(
-  campaignId: string,
-  eventType: string,
-  permanentBounceOnly = false,
-): Promise<number> {
-  const client = supabaseAdminClient();
-  const emails = new Set<string>();
-  const pageSize = 1000;
-  let offset = 0;
-  while (true) {
-    let query = client
-      .from("evento_email")
-      .select("email")
-      .eq("campanha_id", campaignId)
-      .eq("tipo", eventType)
-      .not("email", "is", null)
-      .order("id", { ascending: true });
-    if (permanentBounceOnly) query = query.eq("bounce_permanente", true);
-    const { data, error } = await query.range(offset, offset + pageSize - 1);
-    if (error) throw error;
-    for (const row of data ?? []) {
-      if (typeof row.email === "string" && row.email.trim()) {
-        emails.add(normalize(row.email));
-      }
-    }
-    if ((data?.length ?? 0) < pageSize) break;
-    offset += pageSize;
-  }
-  return emails.size;
 }
 
 export async function processPendingEmailEvents(): Promise<number> {
@@ -846,11 +766,9 @@ export async function processCampaign(campaignId: string): Promise<number> {
     if (remaining <= 0) break;
     const reserved = await reserveRecipients(campaignId, remaining);
     if (reserved.length === 0) {
-      const didComplete = await updateCampaignStatus(
-        campaignId,
-        "concluida",
-        "enviando",
-      );
+      const { data: didComplete, error: completeError } = await supabaseAdminClient()
+        .rpc("complete_campaign_if_queue_empty", { p_campanha_id: campaignId });
+      if (completeError) throw completeError;
       if (didComplete) {
         processed += await processReminderQueue(campaign);
       }

@@ -9,6 +9,14 @@ import type { CampaignStatus } from './campaignStatus';
 import type { EmailBlock } from './emailBlock';
 
 export interface Campaign {
+  /** @nullable */
+  retomada_em?: Date | null;
+  /** @nullable */
+  retomada_enviados_base?: number | null;
+  /** @nullable */
+  retomado_por_nome?: string | null;
+  /** @nullable */
+  retomado_por_email?: string | null;
   id: string;
   nome: string;
   assunto: string;

@@ -14,8 +14,8 @@
     "@replit/connectors-sdk": "^0.4.3",
     "@supabase/supabase-js": "^2.57.4",
     "@workspace/api-zod": "workspace:*",
-    "@workspace/email-template": "workspace:*",
     "@workspace/db": "workspace:*",
+    "@workspace/email-template": "workspace:*",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "drizzle-orm": "catalog:",
@@ -24,6 +24,7 @@
     "pino-http": "^10.5.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",

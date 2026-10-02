@@ -1,0 +1,403 @@
+<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>AmoConecta — SQLs e guia de aplicação</title><style>body{font:16px/1.6 system-ui;margin:40px auto;padding:0 22px;max-width:1080px;color:#243044}h1,h2,h3{line-height:1.3}h2{margin-top:40px}pre{font:13px/1.6 ui-monospace,monospace;background:#f3f5f7;padding:20px;border:1px solid #ddd;overflow:auto;white-space:pre}code{font-family:ui-monospace,monospace}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;text-align:left;padding:12px;vertical-align:top}th{background:#f3f5f7}@media print{pre{white-space:pre-wrap;overflow:visible}body{margin:0;max-width:none}}</style><body><h1>AmoConecta — SQLs e guia de aplicação</h1><p><strong>Aplicação manual pendente.</strong> Nada deste documento foi executado no Supabase. Não se alterou ENVIO_LIBERADO, allowlist, segurança ou assinatura de webhooks. Nenhum e-mail de teste foi enviado.</p><h2>O que foi implementado</h2><ul><li>Exclusão por provedor ou CSV e desfazer, sem apagar destinatários, alterar status pendente ou tocar em supressao; diagnóstico, cartão Excluídos e motivo no BI.</li><li>Bounce permanente terminal; soft bounce registra ultimo_soft_bounce_em sem mudar status; reclamações continuam suprimindo mesmo após abertura ou clique.</li><li>Gatilhos catástrofe: ≥200 enviados e bounce &gt;4% ou reclamação &gt;0,5%; normal: ≥1.000 e &gt;2% ou &gt;0,2%. Bounce dividido por enviados, reclamações por entregues.</li><li>Retomada com marco, base e autor; envios posteriores ao marco determinam a pausa. Eventos tardios dos envios antigos continuam apenas na taxa acumulada. Pausa e retomada são auditadas na mesma transação.</li><li>Avisos de datas ausentes, aviso persistente acima de 20%, e domínios suspeitos com sugestão, sem correção ou rejeição automática.</li></ul><h2>Causa do 502</h2><p>O GET antigo recalculava a projeção de entrega somente quando resultado estava preenchido. O filtro PostgREST incluía até 1.000 e-mails por URL. Uma reprodução com endereços sintéticos gerou 35.963 caracteres e recebeu HTTP 431 do Supabase; o catch do endpoint devolvia 502. Por isso aparecia depois da conclusão, embora os destinatários já estivessem salvos. O código atual já evita essa leitura no polling e divide filtros pelo tamanho codificado (6.000 caracteres), não apenas pelo número de e-mails. Mantivemos essa proteção e os testes de regressão; a projeção opcional não transforma importação concluída em erro. As três importações consultadas estavam concluídas com os campos obrigatórios presentes; não se confirmou a hipótese de resumo legado incompatível.</p><h2>Ordem de aplicação manual</h2><ol><li>Usar o Supabase SQL Editor do mesmo projeto que o Repl principal e o worker usam. Aplicar a migração 016 abaixo, seguida da 017. Elas assumem as migrações anteriores já instaladas.</li><li>Aplicar o reparo histórico, após as duas migrações. Ele altera eventos/classificação e status incorretos, registra auditoria e não reserva destinatários, não torna enviados pendentes e não envia mensagens. Erros reais da API não são recuperados como soft bounce.</li><li>Propagar os arquivos do worker listados abaixo, reconstruir e reiniciar/publicar o worker. Não reaplicar migrações antigas depois das novas, pois sobrescreveriam as funções.</li><li>Atualizar/publicar o Repl principal após o SQL. Os serviços de desenvolvimento foram reiniciados; nenhuma publicação foi feita pelo agente.</li><li>Não há novo segredo, bucket, provedor ou configuração de assinatura. Manter limites de envio, ENVIO_LIBERADO e allowlist atuais. O arquivo standalone de reserva foi alinhado ao filtro de exclusão; se reaplicado, exige a 016 instalada.</li></ol><p>Exclusão afeta somente pendentes. Destinatários já reservados/processando ou já enviados não são cancelados; as quantidades não alteradas são mostradas na resposta. A conclusão usa uma checagem transacional da fila para não concluir indevidamente enquanto há destinatários restaurados ou em processamento.</p><h2>Testar sem uma campanha ruim</h2><p>Executar <code>bash scripts/test-campaign-operational.sh</code> na raiz, após <code>pnpm install</code>. São 28 testes de lógica/importação/exportação, 5 grupos de testes SQL em PostgreSQL local descartável (PGlite) e 11 testes de interface. Não usam Supabase nem Resend para escrever dados ou enviar.</p><table><thead><tr><th>Cenário simulado</th><th>Resultado esperado</th></tr></thead><tbody><tr><td>199 enviados e 10 bounces</td><td>Sem pausa: amostra insuficiente</td></tr><tr><td>200 enviados e 10 bounces (5%)</td><td>Pausa catástrofe</td></tr><tr><td>200 enviados e 8 bounces (4%)</td><td>Sem pausa pelo bounce: limiar estritamente acima</td></tr><tr><td>999 enviados e 30 bounces</td><td>Sem pausa normal</td></tr><tr><td>1.000 enviados e 30 bounces (3%)</td><td>Pausa normal</td></tr><tr><td>200 enviados, 100 entregues, 1 reclamação</td><td>Pausa catástrofe</td></tr><tr><td>1.000 enviados, 900 entregues, 2 reclamações</td><td>Pausa normal</td></tr><tr><td>Retomar após os bounces antigos, com zero envios novos</td><td>Acumulada preservada; período novo zerado. Novos gatilhos só após 200/1.000 envios novos</td></tr><tr><td>Webhook tardio de envio anterior à retomada</td><td>Não contamina o período novo</td></tr></tbody></table><p>Os testes SQL também simulam exclusão, restauração, reserva filtrada, hard bounce após entregue/aberto/clicado/erro, soft bounce sem erro, reclamação após clique e reparo repetível sem reenvio. A integração com o Supabase real depende de aplicar os SQLs. Para checar manualmente a interface depois, use uma campanha de teste sem disparar: exclua pendentes, confirme o registro e o motivo no BI, desfaça e confira a volta à fila. Não faça testes de gatilho com a campanha real.</p><h2>O que propagar ao Repl separado do worker</h2><table><tr><th>Arquivo</th><th>Por quê</th></tr><tr><td>artifacts/api-server/src/lib/worker.ts</td><td>Nova pausa, leitura do marco e conclusão transacional. A reserva continua chamando reservar_destinatarios, cuja seleção foi corrigida no SQL.</td></tr><tr><td>artifacts/api-server/src/lib/campaign-reputation.ts (novo)</td><td>Contadores por coorte, denominadores e avaliação dos dois gatilhos; dependência direta de worker.ts.</td></tr><tr><td>artifacts/api-server/src/lib/worker-export.ts</td><td>Lê exclusão e exporta seu motivo.</td></tr><tr><td>artifacts/api-server/src/lib/csv-export.ts</td><td>Produz excluido: &lt;motivo&gt; sem alterar o status.</td></tr><tr><td>supabase/functions/worker-reservation.sql</td><td>Todas as definições do arquivo agora filtram excluido_em IS NULL e serializam com exclusão/restauração.</td></tr><tr><td>SQLs 016, 017 e reparo</td><td>Aplicar uma vez no banco compartilhado, não executar a cada ciclo nem separadamente para cada Repl.</td></tr></table><p>O processador de eventos chama a função no banco: a correção de bounce está na 017, não em alteração de assinatura. worker-entry.ts não mudou. UI, rotas de exclusão/campanha/importação e csv-import.ts pertencem ao Repl principal; não são necessários ao processo do worker separado. A nova dependência PGlite é somente de desenvolvimento/testes; não é necessária ao runtime do worker. Se propagar o pacote inteiro e o lockfile, mantenha-os sincronizados.</p><h2>Verificação concluída</h2><p>Typechecks e builds da API e do frontend passaram. Os 44 testes automatizados passaram. O navegador verificou o painel em desktop e celular, confirmação de exclusão, desfazer individual/total e recuperação do diagnóstico na retomada. Todos os 46 pedidos de API desse teste foram interceptados com dados sintéticos; nenhum pedido de retomada foi enviado e nenhum banco real foi alterado. Isso verifica a interface, não substitui a confirmação da integração real após aplicar as migrações.</p><h2>SQL completo</h2><p>Copie cada bloco integralmente e execute na ordem. Cada bloco contém sua própria transação.</p><h3>supabase/migrations/202610020016_campaign_exclusions_reputation.sql</h3><pre><code>-- Aplicação MANUAL. Não envia mensagens nem modifica supressao.
+BEGIN;
+ALTER TABLE public.destinatario
+  ADD COLUMN IF NOT EXISTS excluido_em timestamptz,
+  ADD COLUMN IF NOT EXISTS exclusao_motivo text,
+  ADD COLUMN IF NOT EXISTS excluido_por_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS excluido_por_nome text,
+  ADD COLUMN IF NOT EXISTS excluido_por_email text,
+  ADD COLUMN IF NOT EXISTS ultimo_soft_bounce_em timestamptz;
+ALTER TABLE public.campanha
+  ADD COLUMN IF NOT EXISTS retomada_em timestamptz,
+  ADD COLUMN IF NOT EXISTS retomada_enviados_base integer,
+  ADD COLUMN IF NOT EXISTS retomado_por_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS retomado_por_nome text,
+  ADD COLUMN IF NOT EXISTS retomado_por_email text;
+CREATE INDEX IF NOT EXISTS destinatario_nao_excluido_campanha_idx
+  ON public.destinatario(campanha_id) WHERE excluido_em IS NULL;
+CREATE INDEX IF NOT EXISTS destinatario_fila_ativa_idx
+  ON public.destinatario(campanha_id,is_lembrete,data_ultima_compra DESC NULLS LAST,id)
+  WHERE excluido_em IS NULL AND status = 'pendente';
+CREATE INDEX IF NOT EXISTS destinatario_reputacao_periodo_idx
+  ON public.destinatario(campanha_id,enviado_em,id) WHERE is_lembrete = false;
+
+CREATE OR REPLACE FUNCTION public.email_provider(p_email text)
+RETURNS text LANGUAGE sql IMMUTABLE SET search_path = public AS $$
+  SELECT CASE
+    WHEN split_part(lower(btrim(p_email)), '@', 2) IN ('gmail.com','googlemail.com') THEN 'gmail'
+    WHEN split_part(lower(btrim(p_email)), '@', 2) ~ '^(hotmail|outlook|live|msn)\.' THEN 'microsoft'
+    WHEN split_part(lower(btrim(p_email)), '@', 2) ~ '^(yahoo|ymail|rocketmail)\.' THEN 'yahoo'
+    ELSE 'outros' END;
+$$;
+
+-- Event flags belong to the exact main send, never a reminder or another
+-- campaign. EXISTS prevents repeated webhooks from inflating numerators.
+CREATE OR REPLACE FUNCTION public.campaign_reputation_counts(
+  p_campanha_id uuid, p_desde timestamptz DEFAULT NULL
+) RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  WITH cohort AS (
+    SELECT d.* FROM public.destinatario d
+    WHERE d.campanha_id = p_campanha_id AND d.is_lembrete = false
+      AND d.enviado_em IS NOT NULL
+      AND (p_desde IS NULL OR d.enviado_em &gt; p_desde)
+  )
+  SELECT jsonb_build_object(
+    'enviados', count(*),
+    'entregues', count(*) FILTER (WHERE d.entregue_em IS NOT NULL),
+    'bounces_permanentes', count(*) FILTER (WHERE EXISTS (
+      SELECT 1 FROM public.evento_email e WHERE
+        (e.destinatario_id = d.id OR e.resend_email_id = d.resend_email_id)
+        AND e.tipo = 'email.bounced' AND e.bounce_permanente = true
+    )),
+    'reclamacoes', count(*) FILTER (WHERE EXISTS (
+      SELECT 1 FROM public.evento_email e WHERE
+        (e.destinatario_id = d.id OR e.resend_email_id = d.resend_email_id)
+        AND e.tipo = 'email.complained'
+    ))
+  ) FROM cohort d;
+$$;
+
+CREATE OR REPLACE FUNCTION public.campaign_provider_diagnostics(p_campanha_id uuid)
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  WITH flags AS (
+    SELECT d.*, public.email_provider(d.email) AS provider,
+      EXISTS (SELECT 1 FROM public.evento_email e WHERE
+        (e.destinatario_id = d.id OR e.resend_email_id = d.resend_email_id)
+        AND e.tipo = 'email.bounced') AS bounced,
+      EXISTS (SELECT 1 FROM public.evento_email e WHERE
+        (e.destinatario_id = d.id OR e.resend_email_id = d.resend_email_id)
+        AND e.tipo = 'email.bounced' AND e.bounce_permanente = true) AS hard
+    FROM public.destinatario d WHERE d.campanha_id = p_campanha_id AND d.is_lembrete = false
+  ), grouped AS (
+    SELECT p.provider AS provedor, count(d.id) AS total,
+      count(d.id) FILTER (WHERE d.status = 'pendente' AND d.excluido_em IS NULL) AS pendentes,
+      count(d.id) FILTER (WHERE d.excluido_em IS NOT NULL) AS excluidos,
+      count(d.id) FILTER (WHERE d.enviado_em IS NOT NULL) AS enviados,
+      count(d.id) FILTER (WHERE d.entregue_em IS NOT NULL) AS entregues,
+      count(d.id) FILTER (WHERE d.enviado_em IS NOT NULL AND d.bounced) AS bounces,
+      count(d.id) FILTER (WHERE d.enviado_em IS NOT NULL AND d.hard) AS bounces_permanentes
+    FROM (VALUES ('gmail'),('microsoft'),('yahoo'),('outros')) p(provider)
+    LEFT JOIN flags d ON d.provider = p.provider GROUP BY p.provider
+  )
+  SELECT jsonb_agg(to_jsonb(g) || jsonb_build_object(
+    'taxa_bounce', coalesce(g.bounces::numeric / nullif(g.enviados,0),0),
+    'taxa_bounce_permanente', coalesce(g.bounces_permanentes::numeric / nullif(g.enviados,0),0)
+  ) ORDER BY g.provedor) FROM grouped g;
+$$;
+
+CREATE OR REPLACE FUNCTION public.change_campaign_exclusions(
+  p_campanha_id uuid, p_restore boolean, p_motivo text,
+  p_actor_id uuid, p_actor_nome text, p_actor_email text,
+  p_provedores text[] DEFAULT '{}', p_emails text[] DEFAULT '{}',
+  p_ids uuid[] DEFAULT '{}', p_todos boolean DEFAULT false
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_status text;
+  v_main integer;
+  v_reminder integer;
+  v_processing integer;
+  v_processed integer;
+  v_missing integer;
+  v_result jsonb;
+BEGIN
+  SELECT status INTO v_status FROM public.campanha WHERE id = p_campanha_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'campaign_not_found'; END IF;
+  IF v_status IN ('concluida','cancelada') THEN RAISE EXCEPTION 'campaign_finished'; END IF;
+  IF NOT p_restore AND (nullif(btrim(p_motivo),'') IS NULL OR length(p_motivo)&gt;500) THEN
+    RAISE EXCEPTION 'exclusion_reason_required';
+  END IF;
+  IF NOT p_restore AND cardinality(p_provedores)=0 AND cardinality(p_emails)=0 THEN
+    RAISE EXCEPTION 'exclusion_selection_required';
+  END IF;
+  IF p_restore AND NOT p_todos AND cardinality(p_ids)=0 THEN
+    RAISE EXCEPTION 'restoration_selection_required';
+  END IF;
+  IF EXISTS (SELECT 1 FROM unnest(p_provedores) p WHERE p NOT IN ('gmail','microsoft','yahoo','outros')) THEN
+    RAISE EXCEPTION 'invalid_provider';
+  END IF;
+  WITH locked AS (
+    SELECT d.id FROM public.destinatario d WHERE d.campanha_id = p_campanha_id
+      AND d.status = 'pendente'
+      AND CASE WHEN p_restore THEN
+        d.excluido_em IS NOT NULL AND (p_todos OR d.id = ANY(p_ids)
+          OR d.email IN (SELECT x.email FROM public.destinatario x WHERE x.id = ANY(p_ids)
+            AND x.campanha_id = p_campanha_id AND x.is_lembrete = false AND x.excluido_em IS NOT NULL))
+      ELSE d.excluido_em IS NULL AND
+        (public.email_provider(d.email)=ANY(p_provedores) OR lower(btrim(d.email))=ANY(p_emails)) END
+    FOR UPDATE SKIP LOCKED
+  ), changed AS (
+    UPDATE public.destinatario d SET
+      excluido_em = CASE WHEN p_restore THEN NULL ELSE clock_timestamp() END,
+      exclusao_motivo = CASE WHEN p_restore THEN NULL ELSE btrim(p_motivo) END,
+      excluido_por_id = CASE WHEN p_restore THEN NULL ELSE p_actor_id END,
+      excluido_por_nome = CASE WHEN p_restore THEN NULL ELSE p_actor_nome END,
+      excluido_por_email = CASE WHEN p_restore THEN NULL ELSE p_actor_email END
+    FROM locked WHERE d.id = locked.id RETURNING d.is_lembrete
+  )
+  SELECT count(*) FILTER (WHERE NOT is_lembrete), count(*) FILTER (WHERE is_lembrete)
+    INTO v_main,v_reminder FROM changed;
+  SELECT
+    count(*) FILTER (WHERE d.status='processando'),
+    count(*) FILTER (WHERE d.status NOT IN ('pendente','processando'))
+    INTO v_processing,v_processed FROM public.destinatario d
+    WHERE d.campanha_id=p_campanha_id AND d.is_lembrete=false
+      AND (public.email_provider(d.email)=ANY(p_provedores) OR lower(btrim(d.email))=ANY(p_emails));
+  SELECT count(*) INTO v_missing FROM unnest(p_emails) e WHERE NOT EXISTS (
+    SELECT 1 FROM public.destinatario d WHERE d.campanha_id=p_campanha_id
+      AND d.is_lembrete=false AND lower(btrim(d.email))=e
+  );
+  v_result := jsonb_build_object('alterados',v_main,'lembretes_alterados',v_reminder,
+    'em_processamento',v_processing,'ja_processados',v_processed,'nao_encontrados',v_missing);
+  INSERT INTO public.evento_auditoria(actor_user_id,actor_name,actor_email,action,entity_type,entity_id,metadata)
+  VALUES(p_actor_id,p_actor_nome,p_actor_email,
+    CASE WHEN p_restore THEN 'campaign_recipients_restored' ELSE 'campaign_recipients_excluded' END,
+    'campaign',p_campanha_id,v_result || jsonb_build_object('motivo',p_motivo,
+      'provedores',to_jsonb(p_provedores),'origem',CASE WHEN cardinality(p_emails)&gt;0 THEN 'lista' ELSE 'provedor' END));
+  RETURN v_result;
+END;
+$$;
+
+-- A pause/resume and its audit record succeed or roll back together.
+CREATE OR REPLACE FUNCTION public.transition_campaign_with_audit(
+  p_campanha_id uuid, p_expected text, p_target text,
+  p_actor_id uuid, p_actor_nome text, p_actor_email text,
+  p_motivo text DEFAULT NULL, p_bounce numeric DEFAULT NULL,
+  p_reclamacao numeric DEFAULT NULL, p_metadata jsonb DEFAULT '{}'
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_row public.campanha%ROWTYPE; v_now timestamptz := clock_timestamp(); v_base integer;
+BEGIN
+  SELECT * INTO v_row FROM public.campanha WHERE id=p_campanha_id FOR UPDATE;
+  IF NOT FOUND OR v_row.status&lt;&gt;p_expected THEN RETURN NULL; END IF;
+  IF NOT ((p_target='pausada' AND p_expected='enviando') OR
+    (p_target='enviando' AND p_expected='pausada')) THEN RAISE EXCEPTION 'invalid_transition'; END IF;
+  SELECT count(*) INTO v_base FROM public.destinatario
+    WHERE campanha_id=p_campanha_id AND NOT is_lembrete AND enviado_em IS NOT NULL;
+  UPDATE public.campanha SET status=p_target,
+    pausa_motivo=CASE WHEN p_target='pausada' THEN p_motivo ELSE NULL END,
+    pausa_taxa_bounce=CASE WHEN p_target='pausada' THEN p_bounce ELSE NULL END,
+    pausa_taxa_reclamacao=CASE WHEN p_target='pausada' THEN p_reclamacao ELSE NULL END,
+    pausada_em=CASE WHEN p_target='pausada' THEN v_now ELSE NULL END,
+    pausado_por_id=CASE WHEN p_target='pausada' THEN p_actor_id ELSE pausado_por_id END,
+    pausado_por_nome=CASE WHEN p_target='pausada' THEN p_actor_nome ELSE pausado_por_nome END,
+    pausado_por_email=CASE WHEN p_target='pausada' THEN p_actor_email ELSE pausado_por_email END,
+    retomada_em=CASE WHEN p_target='enviando' THEN v_now ELSE retomada_em END,
+    retomada_enviados_base=CASE WHEN p_target='enviando' THEN v_base ELSE retomada_enviados_base END,
+    retomado_por_id=CASE WHEN p_target='enviando' THEN p_actor_id ELSE retomado_por_id END,
+    retomado_por_nome=CASE WHEN p_target='enviando' THEN p_actor_nome ELSE retomado_por_nome END,
+    retomado_por_email=CASE WHEN p_target='enviando' THEN p_actor_email ELSE retomado_por_email END
+    WHERE id=p_campanha_id RETURNING * INTO v_row;
+  INSERT INTO public.evento_auditoria(actor_user_id,actor_name,actor_email,action,entity_type,entity_id,metadata)
+  VALUES(p_actor_id,p_actor_nome,p_actor_email,
+    CASE WHEN p_target='enviando' THEN 'campaign_resumed'
+      WHEN p_actor_id IS NULL THEN 'campaign_auto_paused' ELSE 'campaign_paused' END,
+    'campaign',p_campanha_id,p_metadata || jsonb_build_object('from_status',p_expected,
+      'to_status',p_target,'bounce_rate',p_bounce,'complaint_rate',p_reclamacao,
+      'reason',p_motivo,'retomada_em',v_row.retomada_em,'retomada_enviados_base',v_row.retomada_enviados_base));
+  RETURN to_jsonb(v_row);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.reservar_destinatarios(
+  p_campanha_id uuid,p_limite integer DEFAULT 100,p_is_lembrete boolean DEFAULT false
+) RETURNS SETOF public.destinatario LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  -- Serializes queue reservation against exclusion/restore/completion.
+  PERFORM 1 FROM public.campanha c WHERE c.id=p_campanha_id
+    AND c.status=CASE WHEN p_is_lembrete THEN 'concluida' ELSE 'enviando' END FOR UPDATE;
+  IF NOT FOUND THEN RETURN; END IF;
+  RETURN QUERY WITH locked AS (
+    SELECT d.id FROM public.destinatario d WHERE d.campanha_id=p_campanha_id
+      AND d.is_lembrete=p_is_lembrete AND d.status='pendente' AND d.excluido_em IS NULL
+    ORDER BY d.data_ultima_compra DESC NULLS LAST,d.id
+    LIMIT greatest(1,least(p_limite,100)) FOR UPDATE SKIP LOCKED
+  ), claimed AS (
+    UPDATE public.destinatario d SET status='processando',tentativas=d.tentativas+1,
+      processando_em=now(),erro=NULL FROM locked WHERE d.id=locked.id RETURNING d.*
+  ) SELECT * FROM claimed;
+END;
+$$;
+CREATE OR REPLACE FUNCTION public.complete_campaign_if_queue_empty(p_campanha_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  PERFORM 1 FROM public.campanha WHERE id=p_campanha_id AND status='enviando' FOR UPDATE;
+  IF NOT FOUND THEN RETURN false; END IF;
+  IF EXISTS (SELECT 1 FROM public.destinatario WHERE campanha_id=p_campanha_id
+    AND is_lembrete=false AND excluido_em IS NULL AND status IN ('pendente','processando')) THEN RETURN false; END IF;
+  UPDATE public.campanha SET status='concluida' WHERE id=p_campanha_id;
+  RETURN true;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.complete_campaign_if_queue_empty(uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.complete_campaign_if_queue_empty(uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.email_provider(text) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.campaign_reputation_counts(uuid,timestamptz) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.campaign_provider_diagnostics(uuid) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.change_campaign_exclusions(uuid,boolean,text,uuid,text,text,text[],text[],uuid[],boolean) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.transition_campaign_with_audit(uuid,text,text,uuid,text,text,text,numeric,numeric,jsonb) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.reservar_destinatarios(uuid,integer,boolean) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.email_provider(text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.campaign_reputation_counts(uuid,timestamptz) TO service_role;
+GRANT EXECUTE ON FUNCTION public.campaign_provider_diagnostics(uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.change_campaign_exclusions(uuid,boolean,text,uuid,text,text,text[],text[],uuid[],boolean) TO service_role;
+GRANT EXECUTE ON FUNCTION public.transition_campaign_with_audit(uuid,text,text,uuid,text,text,text,numeric,numeric,jsonb) TO service_role;
+GRANT EXECUTE ON FUNCTION public.reservar_destinatarios(uuid,integer,boolean) TO service_role;
+COMMIT;</code></pre><h3>supabase/migrations/202610020017_bounce_terminal_semantics.sql</h3><pre><code>-- Requer 016. Não muda assinatura/recepção dos webhooks.
+BEGIN;
+CREATE OR REPLACE FUNCTION public.process_resend_email_event(p_event_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_event public.evento_email%ROWTYPE;
+  v_recipient public.destinatario%ROWTYPE;
+  v_raw text;
+  v_permanent boolean;
+  v_temporary boolean;
+BEGIN
+  SELECT * INTO v_event FROM public.evento_email WHERE id=p_event_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('processed',false,'reason','event_not_found'); END IF;
+  IF v_event.processado_em IS NOT NULL THEN RETURN jsonb_build_object('processed',true,'duplicate',true); END IF;
+  IF v_event.proxima_tentativa_em&gt;now() THEN
+    RETURN jsonb_build_object('processed',false,'retryable',true,'reason','retry_not_due');
+  END IF;
+  IF v_event.tipo NOT IN ('email.sent','email.delivered','email.delivery_delayed',
+    'email.bounced','email.complained','email.opened','email.clicked') THEN
+    UPDATE public.evento_email SET processado_em=now(),erro_processamento=NULL WHERE id=p_event_id;
+    RETURN jsonb_build_object('processed',true,'supported',false);
+  END IF;
+  IF v_event.resend_email_id IS NULL THEN
+    UPDATE public.evento_email SET processado_em=now(),proxima_tentativa_em=NULL,
+      erro_processamento='missing_resend_email_id' WHERE id=p_event_id;
+    RETURN jsonb_build_object('processed',true,'matched',false);
+  END IF;
+  SELECT * INTO v_recipient FROM public.destinatario
+    WHERE resend_email_id=v_event.resend_email_id ORDER BY criado_em LIMIT 1 FOR UPDATE;
+  IF NOT FOUND THEN
+    IF v_event.recebido_em&lt;now()-interval '24 hours' THEN
+      UPDATE public.evento_email SET processado_em=now(),proxima_tentativa_em=NULL,
+        erro_processamento='recipient_not_found_after_24h',tentativas=tentativas+1 WHERE id=p_event_id;
+      RETURN jsonb_build_object('processed',true,'matched',false);
+    END IF;
+    UPDATE public.evento_email SET proxima_tentativa_em=now()+interval '30 seconds',
+      erro_processamento='recipient_not_ready',tentativas=tentativas+1 WHERE id=p_event_id;
+    RETURN jsonb_build_object('processed',false,'matched',false,'retryable',true);
+  END IF;
+  v_raw := coalesce(
+    nullif(btrim(v_event.payload #&gt;&gt; '{data,bounce,type}'),''),
+    nullif(btrim(v_event.payload #&gt;&gt; '{data,bounce_type}'),''),
+    nullif(btrim(v_event.payload #&gt;&gt; '{data,bounceType}'),''),
+    nullif(btrim(v_event.payload #&gt;&gt; '{data,bounce}'),'')
+  );
+  v_permanent := v_event.tipo='email.bounced' AND lower(coalesce(v_raw,'')) IN ('permanent','hard');
+  v_temporary := v_event.tipo='email.bounced' AND lower(coalesce(v_raw,'')) IN ('transient','temporary','soft','delayed');
+  UPDATE public.evento_email SET destinatario_id=v_recipient.id,campanha_id=v_recipient.campanha_id,
+    email=lower(btrim(v_recipient.email)),
+    bounce_tipo_bruto=CASE WHEN v_event.tipo='email.bounced' THEN coalesce(v_raw,'&lt;missing&gt;') ELSE NULL END,
+    bounce_permanente=CASE WHEN v_event.tipo='email.bounced' THEN v_permanent ELSE NULL END WHERE id=p_event_id;
+  UPDATE public.destinatario d SET
+    enviado_em=CASE WHEN v_event.tipo='email.sent'
+      THEN least(coalesce(d.enviado_em,v_event.ocorrido_em),v_event.ocorrido_em) ELSE d.enviado_em END,
+    entregue_em=CASE WHEN v_event.tipo IN ('email.delivered','email.complained','email.opened','email.clicked')
+      THEN least(coalesce(d.entregue_em,v_event.ocorrido_em),v_event.ocorrido_em) ELSE d.entregue_em END,
+    aberto_em=CASE WHEN v_event.tipo='email.opened'
+      THEN least(coalesce(d.aberto_em,v_event.ocorrido_em),v_event.ocorrido_em) ELSE d.aberto_em END,
+    clicado_em=CASE WHEN v_event.tipo='email.clicked'
+      THEN least(coalesce(d.clicado_em,v_event.ocorrido_em),v_event.ocorrido_em) ELSE d.clicado_em END,
+    ultimo_soft_bounce_em=CASE WHEN v_temporary
+      THEN greatest(d.ultimo_soft_bounce_em,v_event.ocorrido_em) ELSE d.ultimo_soft_bounce_em END,
+    status=CASE
+      WHEN d.status='bounce' THEN d.status
+      WHEN v_permanent THEN 'bounce'
+      WHEN v_event.tipo IN ('email.bounced','email.delivery_delayed') THEN d.status
+      WHEN v_event.tipo='email.clicked' THEN 'clicado'
+      WHEN v_event.tipo='email.opened' AND d.status&lt;&gt;'clicado' THEN 'aberto'
+      WHEN v_event.tipo IN ('email.delivered','email.complained') AND d.status NOT IN ('aberto','clicado') THEN 'entregue'
+      WHEN v_event.tipo='email.sent' AND d.status IN ('pendente','processando') THEN 'enviado'
+      ELSE d.status END,
+    erro=CASE WHEN v_permanent THEN NULL
+      WHEN d.status='erro' AND v_event.tipo IN ('email.delivered','email.complained','email.opened','email.clicked') THEN NULL
+      ELSE d.erro END,
+    processando_em=CASE WHEN v_permanent THEN NULL ELSE d.processando_em END
+    WHERE d.id=v_recipient.id;
+  -- Complaint is terminal for eligibility (suppression), not a regression of
+  -- clicked/opened delivery state. It is never blocked by recipient status.
+  IF v_permanent OR v_event.tipo='email.complained' THEN
+    INSERT INTO public.supressao(email,motivo,origem)
+    VALUES(lower(btrim(v_recipient.email)),CASE WHEN v_permanent THEN 'bounce' ELSE 'reclamacao' END,
+      'campanha:'||v_recipient.campanha_id::text)
+    ON CONFLICT(email) WHERE email IS NOT NULL DO NOTHING;
+  END IF;
+  UPDATE public.evento_email SET processado_em=now(),proxima_tentativa_em=NULL,erro_processamento=NULL
+    WHERE id=p_event_id;
+  RETURN jsonb_build_object('processed',true,'matched',true);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.process_resend_email_event(uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.process_resend_email_event(uuid) TO service_role;
+COMMIT;</code></pre><h3>supabase/repairs/20261002_repair_bounce_statuses.sql</h3><pre><code>-- Aplicar manualmente APÓS 016 e 017. Não reserva nem envia e-mails.
+-- Reexecutável: não põe destinatários enviados de volta em pendente.
+BEGIN;
+WITH classification AS (
+  SELECT id, coalesce(
+    nullif(btrim(payload #&gt;&gt; '{data,bounce,type}'),''),
+    nullif(btrim(payload #&gt;&gt; '{data,bounce_type}'),''),
+    nullif(btrim(payload #&gt;&gt; '{data,bounceType}'),''),
+    nullif(btrim(payload #&gt;&gt; '{data,bounce}'),''),bounce_tipo_bruto,'&lt;missing&gt;'
+  ) AS raw FROM public.evento_email WHERE tipo='email.bounced'
+)
+UPDATE public.evento_email e SET bounce_tipo_bruto=c.raw,
+  bounce_permanente=lower(c.raw) IN ('permanent','hard')
+  FROM classification c WHERE e.id=c.id;
+
+-- Item 2: desfecho permanente vence entregue/aberto/clicado/erro.
+WITH fixed AS (
+  UPDATE public.destinatario d SET status='bounce',erro=NULL,processando_em=NULL
+  WHERE d.status&lt;&gt;'bounce' AND EXISTS (
+    SELECT 1 FROM public.evento_email e WHERE e.tipo='email.bounced' AND e.bounce_permanente=true
+      AND (e.destinatario_id=d.id OR e.resend_email_id=d.resend_email_id)
+  ) RETURNING d.campanha_id
+)
+INSERT INTO public.evento_auditoria(actor_name,action,entity_type,entity_id,metadata)
+SELECT 'Sistema','campaign_bounce_status_repaired','campaign',campanha_id,
+  jsonb_build_object('permanentes_corrigidos',count(*)) FROM fixed GROUP BY campanha_id;
+
+-- Item 3: só desfaz o erro que a antiga RPC escreveu para soft/unknown
+-- bounce. Erros reais da API não são tocados. Evidência mais forte vence.
+WITH evidence AS (
+  SELECT d.id,
+    min(e.ocorrido_em) FILTER (WHERE e.tipo='email.sent') AS sent,
+    min(e.ocorrido_em) FILTER (WHERE e.tipo IN ('email.delivered','email.complained','email.opened','email.clicked')) AS delivered,
+    min(e.ocorrido_em) FILTER (WHERE e.tipo='email.opened') AS opened,
+    min(e.ocorrido_em) FILTER (WHERE e.tipo='email.clicked') AS clicked,
+    min(e.ocorrido_em) FILTER (WHERE e.tipo='email.bounced') AS bounced
+  FROM public.destinatario d JOIN public.evento_email e
+    ON e.destinatario_id=d.id OR e.resend_email_id=d.resend_email_id
+  WHERE d.status='erro' AND (d.erro LIKE 'Bounce temporário informado pelo Resend%'
+    OR d.erro LIKE 'Bounce não classificado informado pelo Resend%')
+  GROUP BY d.id
+), fixed AS (
+  UPDATE public.destinatario d SET
+    status=CASE
+      WHEN coalesce(d.clicado_em,x.clicked) IS NOT NULL THEN 'clicado'
+      WHEN coalesce(d.aberto_em,x.opened) IS NOT NULL THEN 'aberto'
+      WHEN coalesce(d.entregue_em,x.delivered) IS NOT NULL THEN 'entregue'
+      ELSE 'enviado' END,
+    enviado_em=coalesce(d.enviado_em,x.sent,x.bounced),
+    entregue_em=coalesce(d.entregue_em,x.delivered),
+    aberto_em=coalesce(d.aberto_em,x.opened),clicado_em=coalesce(d.clicado_em,x.clicked),
+    erro=NULL,processando_em=NULL
+  FROM evidence x WHERE d.id=x.id AND x.bounced IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public.evento_email e WHERE e.tipo='email.bounced' AND e.bounce_permanente=true
+      AND (e.destinatario_id=d.id OR e.resend_email_id=d.resend_email_id)
+  ) RETURNING d.campanha_id
+)
+INSERT INTO public.evento_auditoria(actor_name,action,entity_type,entity_id,metadata)
+SELECT 'Sistema','campaign_soft_bounce_status_repaired','campaign',campanha_id,
+  jsonb_build_object('temporarios_corrigidos',count(*)) FROM fixed GROUP BY campanha_id;
+
+UPDATE public.destinatario d SET ultimo_soft_bounce_em=x.latest
+FROM (
+  SELECT d.id,max(e.ocorrido_em) AS latest FROM public.destinatario d JOIN public.evento_email e
+    ON e.destinatario_id=d.id OR e.resend_email_id=d.resend_email_id
+  WHERE e.tipo='email.bounced' AND lower(e.bounce_tipo_bruto) IN ('transient','temporary','soft','delayed')
+  GROUP BY d.id
+) x WHERE d.id=x.id AND (d.ultimo_soft_bounce_em IS NULL OR d.ultimo_soft_bounce_em&lt;x.latest);
+COMMIT;</code></pre></body></html>

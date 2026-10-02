@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner requires the explicit TypeScript extension.
-import { getPublicImportValidationErrorMessage, ImportValidationError, normalizePhone, validateAndImportCsv } from "./csv-import.ts";
+import { getPublicImportValidationErrorMessage, ImportValidationError, normalizePhone, validateAndImportCsv, suggestEmailDomain } from "./csv-import.ts";
 
 function streamFromText(value: string): ReadableStream<Uint8Array> {
   return new ReadableStream({
@@ -38,6 +38,25 @@ function emptyImportClient(onUpsert?: (rows: unknown[]) => void) {
     },
   };
 }
+
+test("counts all missing dates without rejecting rows or silently correcting typo domains", async () => {
+  const savedRows: unknown[] = [];
+  const summary = await validateAndImportCsv({
+    client: emptyImportClient((rows) => savedRows.push(...rows)) as never,
+    stream: streamFromText("nome,email,last_order_date\nAna,a@gnail.com,\nBia,b@outllok.com,\nCris,c@gmail.com.br,2026-09-01"),
+    campaignId: "00000000-0000-0000-0000-000000000001",
+    storagePath: "campaign/warnings.csv", deduplicatePhone: false,
+  });
+  assert.equal(summary.datas_ausentes, 2);
+  assert.equal(summary.datas_ausentes_percentual, 2 / 3 * 100);
+  assert.equal(summary.validos, 3);
+  assert.equal(summary.invalidos, 0);
+  assert.deepEqual(summary.dominios_suspeitos.map((x) => x.sugestao), ["a@gmail.com", "b@outlook.com", "c@gmail.com"]);
+  assert.deepEqual(savedRows.map((x) => (x as { email: string }).email), ["a@gnail.com", "b@outllok.com", "c@gmail.com.br"]);
+  assert.equal(suggestEmailDomain("a@yahoo.com.br"), null);
+  assert.equal(suggestEmailDomain("a@corporate.example"), null);
+  assert.equal(suggestEmailDomain("a@gamil.com"), "a@gmail.com");
+});
 
 test("normalizes Brazilian phone variants to one comparison key", () => {
   assert.equal(normalizePhone("049988154909"), "49988154909");

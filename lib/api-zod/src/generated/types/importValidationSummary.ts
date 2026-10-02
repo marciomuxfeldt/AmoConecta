@@ -6,9 +6,17 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ImportValidationError } from './importValidationError';
+import type { ImportValidationSummaryDominiosSuspeitosItem } from './importValidationSummaryDominiosSuspeitosItem';
 import type { RecencyBucket } from './recencyBucket';
 
 export interface ImportValidationSummary {
+  /** @minimum 0 */
+  datas_ausentes?: number;
+  /** @minimum 0 */
+  datas_ausentes_percentual?: number;
+  /** @minimum 0 */
+  dominios_suspeitos_total?: number;
+  dominios_suspeitos?: ImportValidationSummaryDominiosSuspeitosItem[];
   storage_path: string;
   total_linhas: number;
   validos: number;

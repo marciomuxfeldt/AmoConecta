@@ -14,3 +14,4 @@
 - [Campaign click destinations](campaign-click-destinations.md) — button-block URLs are active; legacy campaign URL columns stay stored but are not exposed or used.
 - [Chronic disengagement state](chronic-disengagement-state.md) — keep one normalized row per e-mail and refresh it in cursor-based batches, never flags per delivery.
 - [TypeScript API tests](typescript-api-tests.md) — Node's built-in TypeScript stripping does not resolve the API test suites' extensionless ESM imports.
+- [Campaign operational scope](campaign-operational-policy.md) — exclusions are campaign-only; resumed sends drive the next pause; external validation stays out of this batch.

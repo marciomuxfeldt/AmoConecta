@@ -45,7 +45,10 @@ export type BiExportRow = {
 export function deriveBiExportReason(
   status: unknown,
   error: unknown,
+  excludedAt?: unknown,
+  exclusionReason?: unknown,
 ): string | null {
+  if (excludedAt != null) return `excluido: ${typeof exclusionReason === "string" ? exclusionReason : ""}`;
   switch (status) {
     case "suprimido":
       return "suprimido";

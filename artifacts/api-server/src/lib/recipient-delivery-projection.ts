@@ -72,7 +72,9 @@ export function buildRecipientDeliveryProjection(
   suppressedEmails: ReadonlySet<string>,
   chronicDisengagedEmails: ReadonlySet<string> = new Set(),
   includeDisengaged = false,
+  excludedEmails: ReadonlySet<string> = new Set(),
 ): RecipientDeliveryProjection {
+  const normalizedExcluded = new Set([...excludedEmails].map(normalizeEmail));
   const normalizedSuppressedEmails = new Set(
     [...suppressedEmails].map((email) => normalizeEmail(email)),
   );
@@ -91,6 +93,7 @@ export function buildRecipientDeliveryProjection(
   const recipientsAfterSuppression = normalizedRecipients.filter(
     (email) =>
       !normalizedSuppressedEmails.has(email) &&
+      !normalizedExcluded.has(email) &&
       (includeDisengaged || !normalizedChronicEmails.has(email)),
   );
   const permitidosModoTeste = recipientsAfterSuppression.filter(isRecipientAllowed).length;
@@ -118,10 +121,11 @@ export async function recipientDeliveryProjection(
   includeDisengaged?: boolean,
 ): Promise<RecipientDeliveryProjection> {
   const recipientEmails: string[] = [];
+  const excludedEmails = new Set<string>();
   for (let offset = 0; ; offset += RECIPIENT_PAGE_SIZE) {
     const { data, error } = await client
       .from("destinatario")
-      .select("email")
+      .select("email,excluido_em")
       .eq("campanha_id", campaignId)
       .eq("is_lembrete", false)
       .order("id", { ascending: true })
@@ -132,6 +136,7 @@ export async function recipientDeliveryProjection(
     for (const row of data ?? []) {
       if (typeof row.email === "string") {
         recipientEmails.push(row.email);
+        if (row.excluido_em != null) excludedEmails.add(row.email);
       }
     }
     if (!data || data.length < RECIPIENT_PAGE_SIZE) break;
@@ -196,5 +201,6 @@ export async function recipientDeliveryProjection(
     suppressedEmails,
     chronicDisengagedEmails,
     shouldIncludeDisengaged,
+    excludedEmails,
   );
 }

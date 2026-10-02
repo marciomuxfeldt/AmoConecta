@@ -11,6 +11,8 @@ import type { RecipientReputationSummary } from './recipientReputationSummary';
 import type { RecipientStatusSummary } from './recipientStatusSummary';
 
 export interface CampaignRecipientSummary {
+  /** @minimum 0 */
+  excluidos?: number;
   campanha_id: string;
   /** @minimum 0 */
   total: number;

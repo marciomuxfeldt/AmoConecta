@@ -50,6 +50,8 @@ const webhookBodyParserError: ErrorRequestHandler = (error, _req, res, next) => 
   next(error);
 };
 app.use("/api/webhooks/resend", webhookBodyParserError);
+// CSV exclusions are bounded, parsed in memory and never stored as file bytes.
+app.use("/api/campaigns/:campaignId/exclusions", express.json({ limit: "11mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -58,6 +60,10 @@ app.use("/api", router);
 const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
   if (res.headersSent) {
     next(error);
+    return;
+  }
+  if ((error as { status?: number })?.status === 413) {
+    res.status(413).json({ error: "O arquivo excede o limite permitido. Divida a lista e tente novamente." });
     return;
   }
   req.log.error(

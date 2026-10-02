@@ -14,3 +14,9 @@ CSV validation is represented by a persisted import job with status and progress
 **Why:** A transient large-list projection query can fail after the import itself has completed; putting that read on each status poll made a successful import appear to fail.
 
 **How to apply:** Compute optional delivery metrics once after import writes, outside the import-failure path, and keep status GETs focused on the persisted job result.
+
+Large PostgREST `in.(...)` filters must be bounded by encoded URL size, not only recipient count.
+
+**Why:** A read-only reproduction with 1,000 synthetic e-mails generated a 35,963-character URL and received HTTP 431 from Supabase. Previously this optional read was reached only after import completion and surfaced as a generic 502, although recipients were already saved.
+
+**How to apply:** Keep encoded filters below a conservative 6,000-character budget, preserve stage-specific errors, and do not retry imports to repair a failed progress read.

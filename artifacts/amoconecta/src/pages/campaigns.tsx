@@ -42,6 +42,7 @@ import {
   getListCampaignsQueryKey,
   getGetSafetyModeQueryKey,
   getGetCampaignAuditQueryKey,
+  getGetCampaignExclusionsQueryKey,
   useGetCampaignDefaults,
   useCreateCampaign,
   useCreateCampaignDraft,
@@ -71,6 +72,14 @@ import {
   validateEmailButtonDestinations,
 } from '@workspace/email-template';
 import { EmailEditor } from '../components/EmailEditor';
+import {
+  CampaignExclusionPanel,
+  CampaignMissingDateNotice,
+  ImportDataQualityNotices,
+  ResumeDiagnostics,
+  auditExtraDescription,
+  useCampaignExclusionOverview,
+} from '../components/CampaignExclusionPanel';
 import { inspectCampaignCsvHeader } from '../lib/campaign-csv-header';
 
 export type SessionUser = { email: string } | null;
@@ -1254,6 +1263,7 @@ function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
            A importação foi concluída e os resultados estão salvos, mas não foi possível calcular a situação de entrega desta lista agora.
          </div>
        )}
+      <ImportDataQualityNotices summary={summary} />
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <div className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4">
           <div className="flex items-center justify-between"><h4 className="text-sm font-extrabold text-[#263044]">Pontos de atenção</h4><CircleAlert size={15} className="text-[#d35f2a]" /></div>
@@ -1668,14 +1678,19 @@ export function RecipientSummaryPanel({
         <div className="mt-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">{Array.from({ length: 7 }).map((_, index) => <div key={index} className="skeleton h-16 rounded-xl" />)}</div>
       ) : (
         <>
-          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
             {statusRows.map((row) => (
               <div key={row.key} className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3" data-testid={`recipient-status-${row.key}`}>
                 <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${row.dot}`} /><span className="text-[11px] font-bold text-[#6d7180]">{row.label}</span></div>
                 <strong className={`mt-2 block text-xl font-extrabold tabular-nums tracking-[-.05em] ${row.tone}`}>{formatNumber(summary?.status[row.key])}</strong>
               </div>
             ))}
+            <div className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3" data-testid="recipient-status-excluidos">
+              <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-[#263044]" /><span className="text-[11px] font-bold text-[#6d7180]">Excluídos</span></div>
+              <strong className="mt-2 block text-xl font-extrabold tabular-nums tracking-[-.05em] text-[#263044]">{formatNumber(summary?.excluidos)}</strong>
+            </div>
           </div>
+          <CampaignMissingDateNotice summary={summary} />
           <div className="mt-5 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4" data-testid="panel-email-engagement">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1713,7 +1728,7 @@ export function RecipientSummaryPanel({
              <div className="flex items-start justify-between gap-3">
                <div>
                  <h3 className="text-sm font-extrabold text-[#263044]">Sinais de reputação</h3>
-                  <p className="mt-1 text-xs text-[#7d7e87]">Bounce permanente é calculado sobre enviados; reclamações, sobre entregues. Estes indicadores orientam a pausa automática.</p>
+                  <p className="mt-1 text-xs text-[#7d7e87]">Bounce permanente é calculado sobre enviados; reclamações, sobre entregues. Estes são os números acumulados da campanha. Após uma retomada, a pausa automática avalia o período atual, não o acumulado; compare os dois no painel de provedores e exclusões.</p>
                </div>
                <ShieldCheck size={16} className="text-[#247b79]" />
              </div>
@@ -1954,6 +1969,8 @@ const campaignAuditActionLabels: Record<string, string> = {
   campaign_updated: 'Campanha atualizada',
   campaign_deleted: 'Campanha excluída',
   campaign_import_started: 'Importação iniciada',
+  campaign_recipients_excluded: 'Destinatários excluídos',
+  campaign_recipients_restored: 'Destinatários restaurados',
 };
 
 const campaignAuditStatusLabels: Record<string, string> = {
@@ -2061,7 +2078,10 @@ function AuditTimeline({ events, loading, error, onRetry }: { events?: CampaignA
       {events && events.length > 0 ? (
         <ol className="mt-7 ml-2 border-l border-[#ded5c8]">
           {events.map((event) => {
-            const description = campaignAuditDescription(event);
+            const description = [
+              campaignAuditDescription(event),
+              auditExtraDescription(event.action, event.metadata ?? {}),
+            ].filter(Boolean).join(' · ') || null;
             return (
               <li key={event.id} className="relative pb-7 pl-7 last:pb-0" data-testid={`row-campaign-audit-${event.id}`}>
                 <span className="absolute -left-[7px] top-1 h-3 w-3 rounded-full border-2 border-[#fbf9f5] bg-[#e96527] shadow-[0_0_0_1px_#e96527]" />
@@ -2238,6 +2258,8 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
         campaignQuery.data?.status === CampaignStatus.enviando ? 15000 : false,
     },
   });
+  const [exclusionOffset, setExclusionOffset] = useState(0);
+  const exclusionQuery = useCampaignExclusionOverview(campaignId, exclusionOffset, campaignQuery.data?.status);
   const deleteCampaign = useDeleteCampaign();
   const clearRecipients = useClearCampaignRecipients();
   const sendTest = useSendCampaignTest();
@@ -2312,6 +2334,8 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
       queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
       queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
+      void queryClient.invalidateQueries({ queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId) });
+      void queryClient.invalidateQueries({ queryKey: getGetCampaignExclusionsQueryKey(campaignId) });
       setOperationError(null);
       setOperationSuccess(status === 'pausada' ? 'Envio pausado. A data, o motivo e o usuário responsável foram registrados.' : 'Envio retomado com sucesso.');
       if (status === 'enviando') setConfirmReputationResume(false);
@@ -2504,20 +2528,14 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
         Esta campanha foi pausada por reputação.
       </h3>
       <p className="mt-2 text-sm leading-6 text-[#6d7180]">{campaign.pausa_motivo}</p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-[#efc9ba] bg-[#fffaf6] p-3">
-          <span className="text-[11px] font-bold text-[#6d7180]">Bounce permanente / limite 2%</span>
-          <strong className="mt-1 block text-xl font-extrabold tabular-nums text-[#a64220]">
-            {formatPercentage((campaign.pausa_taxa_bounce ?? 0) * 100)}
-          </strong>
-        </div>
-        <div className="rounded-xl border border-[#efc9ba] bg-[#fffaf6] p-3">
-          <span className="text-[11px] font-bold text-[#6d7180]">Reclamações / limite 0,2%</span>
-          <strong className="mt-1 block text-xl font-extrabold tabular-nums text-[#a64220]">
-            {formatPercentage((campaign.pausa_taxa_reclamacao ?? 0) * 100)}
-          </strong>
-        </div>
-      </div>
+      <ResumeDiagnostics
+        rates={{ bounce: campaign.pausa_taxa_bounce, complaint: campaign.pausa_taxa_reclamacao }}
+        reason={null}
+        overview={exclusionQuery.data}
+        loading={exclusionQuery.isLoading}
+        error={exclusionQuery.isError}
+        onRetry={() => { void exclusionQuery.refetch(); }}
+      />
       <p className="mt-4 text-xs leading-5 text-[#7d6c6c]">
         Só retome depois de investigar a causa. Ao confirmar, o worker voltará a enviar para os destinatários pendentes.
       </p>
@@ -2533,8 +2551,8 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
         <button
           type="button"
           onClick={() => changeCampaignStatus('enviando', true)}
-          disabled={resumeCampaign.isPending}
-          className="action-button action-button-danger"
+          disabled={resumeCampaign.isPending || exclusionQuery.isError || exclusionQuery.isFetching || !exclusionQuery.data}
+          className="action-button action-button-danger disabled:opacity-50"
           data-testid="button-confirm-reputation-resume"
         >
           {resumeCampaign.isPending ? <><LoaderCircle size={15} className="animate-spin" /> Retomando...</> : 'Confirmar retomada'}
@@ -2571,6 +2589,20 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
              onRetry={() => { void auditQuery.refetch(); }}
            />
           {reputationResumePanel}
+          {campaign.retomada_em && (
+            <p className="rounded-xl border border-[#e5ddd0] bg-[#fbf9f5] px-4 py-3 text-xs text-[#6d7180]" data-testid="text-campaign-resumed-by">
+              Retomada em {formatDate(campaign.retomada_em)}
+              {campaign.retomado_por_nome || campaign.retomado_por_email ? ` por ${campaign.retomado_por_nome ?? campaign.retomado_por_email}` : ''}
+              {campaign.retomada_enviados_base != null ? ` · base de ${formatNumber(campaign.retomada_enviados_base)} envios anteriores` : ''}.
+            </p>
+          )}
+          <CampaignExclusionPanel
+            campaignId={campaignId}
+            campaignStatus={campaign.status}
+            offset={exclusionOffset}
+            onOffsetChange={setExclusionOffset}
+            query={exclusionQuery}
+          />
           <CampaignForm
             campaign={campaign}
             campaignHasSentMessages={

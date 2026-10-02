@@ -72,6 +72,10 @@ export type ImportSummary = {
   receberao_de_fato?: number;
   emails_invalidos: number;
   datas_invalidas: number;
+  datas_ausentes: number;
+  datas_ausentes_percentual: number;
+  dominios_suspeitos_total: number;
+  dominios_suspeitos: Array<{ linha: number; email: string; sugestao: string }>;
   nomes_ausentes: number;
   telefones_invalidos: number;
   destinatarios_salvos: number;
@@ -125,7 +129,7 @@ function normalizeName(value: string): string {
     .join(" ");
 }
 
-function normalizeEmail(value: string): string {
+export function normalizeEmail(value: string): string {
   return value
     .replace(/\u00A0/gu, " ")
     .replace(/[\p{Cc}\p{Cf}]/gu, "")
@@ -155,7 +159,7 @@ export function normalizePhone(value: string): string | null {
   return digits.length >= 8 && digits.length <= 15 ? digits : null;
 }
 
-function isValidEmail(value: string): boolean {
+export function isValidEmail(value: string): boolean {
   return (
     /^[\x00-\x7F]+$/u.test(value) &&
     /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/u.test(value)
@@ -321,7 +325,7 @@ function parseCsvRecord(record: string, separator: CsvSeparator): string[] {
   return values.map((item) => item.trim());
 }
 
-async function* recordsFromStream(
+export async function* recordsFromStream(
   stream: ReadableStream<Uint8Array>,
 ): AsyncGenerator<CsvRecord> {
   const reader = stream.getReader();
@@ -438,6 +442,10 @@ function buildSummary(storagePath: string): ImportSummary {
     suprimidos: 0,
     emails_invalidos: 0,
     datas_invalidas: 0,
+    datas_ausentes: 0,
+    datas_ausentes_percentual: 0,
+    dominios_suspeitos_total: 0,
+    dominios_suspeitos: [],
     nomes_ausentes: 0,
     telefones_invalidos: 0,
     destinatarios_salvos: 0,
@@ -559,6 +567,7 @@ export async function validateAndImportCsv({
     const telefone = rawPhone.trim() ? normalizePhone(rawPhone) : null;
     const regiao = rawRegion.trim() || null;
     const parsedDate = parseDate(rawDate);
+    if (!rawDate.trim()) summary.datas_ausentes += 1;
 
     if (!normalizedName) {
       summary.nomes_ausentes += 1;
@@ -579,6 +588,13 @@ export async function validateAndImportCsv({
     }
     if (parsedDate.invalid) {
       summary.datas_invalidas += 1;
+    }
+    const suggestion = suggestEmailDomain(email);
+    if (suggestion) {
+      summary.dominios_suspeitos_total += 1;
+      if (summary.dominios_suspeitos.length < 200) {
+        summary.dominios_suspeitos.push({ linha: record.line, email, sugestao: suggestion });
+      }
     }
     if (suppression.emails.has(email) || (telefone && suppression.phones.has(telefone))) {
       summary.suprimidos += 1;
@@ -663,10 +679,46 @@ export async function validateAndImportCsv({
     }
   }
   await flush();
+  summary.datas_ausentes_percentual = summary.total_linhas > 0
+    ? summary.datas_ausentes / summary.total_linhas * 100
+    : 0;
   if (onProgress && summary.total_linhas > lastReportedLines) {
     await onProgress(summary.total_linhas);
   }
   return summary;
+}
+
+const KNOWN_EMAIL_DOMAINS = [
+  "gmail.com", "googlemail.com", "hotmail.com", "hotmail.com.br",
+  "outlook.com", "outlook.com.br", "live.com", "live.com.br", "msn.com",
+  "yahoo.com", "yahoo.com.br", "ymail.com", "rocketmail.com",
+  "icloud.com", "me.com", "bol.com.br", "uol.com.br",
+];
+
+function oneEditApart(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  if (a.length === b.length) {
+    const different = [...a].map((char, index) => char === b[index] ? -1 : index).filter((i) => i >= 0);
+    return different.length === 1 || (different.length === 2 &&
+      different[1] === different[0]! + 1 &&
+      a[different[0]!] === b[different[1]!] && a[different[1]!] === b[different[0]!]);
+  }
+  const shorter = a.length < b.length ? a : b;
+  const longer = a.length < b.length ? b : a;
+  let i = 0;
+  while (i < shorter.length && shorter[i] === longer[i]) i += 1;
+  return shorter.slice(i) === longer.slice(i + 1);
+}
+
+export function suggestEmailDomain(email: string): string | null {
+  const normalized = normalizeEmail(email);
+  const index = normalized.lastIndexOf("@");
+  if (index < 0) return null;
+  const domain = normalized.slice(index + 1);
+  if (KNOWN_EMAIL_DOMAINS.includes(domain)) return null;
+  const suggestion = domain === "gmail.com.br" ? "gmail.com"
+    : KNOWN_EMAIL_DOMAINS.find((candidate) => oneEditApart(domain, candidate));
+  return suggestion ? `${normalized.slice(0, index)}@${suggestion}` : null;
 }
 
 export function getPublicImportValidationErrorMessage(

@@ -19,6 +19,9 @@ security definer
 set search_path = public
 as $$
 begin
+  perform 1 from public.campanha c where c.id = p_campanha_id
+    and c.status = case when p_is_lembrete then 'concluida' else 'enviando' end for update;
+  if not found then return; end if;
   return query
   with locked as (
     select d.id
@@ -26,6 +29,7 @@ begin
     where d.campanha_id = p_campanha_id
       and d.is_lembrete = p_is_lembrete
       and d.status = 'pendente'
+      and d.excluido_em is null
       and exists (
         select 1
         from public.campanha c
@@ -118,6 +122,9 @@ security definer
 set search_path = public
 as $$
 begin
+  perform 1 from public.campanha c where c.id = p_campanha_id
+    and c.status = case when p_is_lembrete then 'concluida' else 'enviando' end for update;
+  if not found then return; end if;
   return query
   with locked as (
     select d.id
@@ -125,6 +132,7 @@ begin
     where d.campanha_id = p_campanha_id
       and d.is_lembrete = p_is_lembrete
       and d.status = 'pendente'
+      and d.excluido_em is null
       and exists (
         select 1
         from public.campanha c
@@ -217,6 +225,9 @@ security definer
 set search_path = public
 as $$
 begin
+  perform 1 from public.campanha c where c.id = p_campanha_id
+    and c.status = case when p_is_lembrete then 'concluida' else 'enviando' end for update;
+  if not found then return; end if;
   return query
   with locked as (
     select d.id
@@ -224,6 +235,7 @@ begin
     where d.campanha_id = p_campanha_id
       and d.is_lembrete = p_is_lembrete
       and d.status = 'pendente'
+      and d.excluido_em is null
       and exists (
         select 1
         from public.campanha c
@@ -316,6 +328,9 @@ security definer
 set search_path = public
 as $$
 begin
+  perform 1 from public.campanha c where c.id = p_campanha_id
+    and c.status = case when p_is_lembrete then 'concluida' else 'enviando' end for update;
+  if not found then return; end if;
   return query
   with locked as (
     select d.id
@@ -323,6 +338,7 @@ begin
     where d.campanha_id = p_campanha_id
       and d.is_lembrete = p_is_lembrete
       and d.status = 'pendente'
+      and d.excluido_em is null
       and exists (
         select 1
         from public.campanha c

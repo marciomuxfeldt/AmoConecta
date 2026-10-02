@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "bt2Q_kq5meCtKweyRmZtl"
+uri = "file://docs/amoconecta-operacao-sql.html"
+type = "html"
+title = "SQLs completos e guia de aplicação — AmoConecta"
+description = "Migrações 016 e 017, reparo histórico sem reenvio, aplicação manual, testes e arquivos a propagar ao worker. SQLs em blocos copiáveis."
+logical_id = "1aa6f0d7-49cf-46ea-b376-383adc50979a"
+content_hash = "sha256:6b95583cfe1ef8e0c8e46a1b8d57bbe4b48e2fdec0a028a2ea8b29885af57332"
+size = 32359
+mtime_ms = 1790982863562
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:e7ca3411-5cbd-43e8-9eea-6b66a6f25bb3/1aa6f0d7-49cf-46ea-b376-383adc50979a/a1f5bd67-5e57-4f31-913a-6e01c8814a53"
+storage_version_token = "1790982864085227"
+content_type = "text/html"

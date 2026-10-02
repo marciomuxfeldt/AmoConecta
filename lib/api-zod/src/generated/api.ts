@@ -569,6 +569,10 @@ export const createCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https
 
 
 export const CreateCampaignResponse = zod.object({
+  "retomada_em": zod.coerce.date().nullish(),
+  "retomada_enviados_base": zod.number().int().nullish(),
+  "retomado_por_nome": zod.string().nullish(),
+  "retomado_por_email": zod.string().nullish(),
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
@@ -689,6 +693,10 @@ export const createCampaignDraftResponseCorpoItemThreeHrefRegExp = new RegExp('^
 
 
 export const CreateCampaignDraftResponse = zod.object({
+  "retomada_em": zod.coerce.date().nullish(),
+  "retomada_enviados_base": zod.number().int().nullish(),
+  "retomado_por_nome": zod.string().nullish(),
+  "retomado_por_email": zod.string().nullish(),
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
@@ -809,6 +817,10 @@ export const getCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https:/'
 
 
 export const GetCampaignResponse = zod.object({
+  "retomada_em": zod.coerce.date().nullish(),
+  "retomada_enviados_base": zod.number().int().nullish(),
+  "retomado_por_nome": zod.string().nullish(),
+  "retomado_por_email": zod.string().nullish(),
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
@@ -1020,6 +1032,10 @@ export const updateCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https
 
 
 export const UpdateCampaignResponse = zod.object({
+  "retomada_em": zod.coerce.date().nullish(),
+  "retomada_enviados_base": zod.number().int().nullish(),
+  "retomado_por_nome": zod.string().nullish(),
+  "retomado_por_email": zod.string().nullish(),
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
@@ -1160,6 +1176,10 @@ export const scheduleCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^htt
 
 
 export const ScheduleCampaignResponse = zod.object({
+  "retomada_em": zod.coerce.date().nullish(),
+  "retomada_enviados_base": zod.number().int().nullish(),
+  "retomado_por_nome": zod.string().nullish(),
+  "retomado_por_email": zod.string().nullish(),
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
@@ -1280,6 +1300,10 @@ export const pauseCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https:
 
 
 export const PauseCampaignResponse = zod.object({
+  "retomada_em": zod.coerce.date().nullish(),
+  "retomada_enviados_base": zod.number().int().nullish(),
+  "retomado_por_nome": zod.string().nullish(),
+  "retomado_por_email": zod.string().nullish(),
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
@@ -1404,6 +1428,10 @@ export const resumeCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https
 
 
 export const ResumeCampaignResponse = zod.object({
+  "retomada_em": zod.coerce.date().nullish(),
+  "retomada_enviados_base": zod.number().int().nullish(),
+  "retomado_por_nome": zod.string().nullish(),
+  "retomado_por_email": zod.string().nullish(),
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
@@ -1524,6 +1552,10 @@ export const cancelCampaignResponseCorpoItemThreeHrefRegExp = new RegExp('^https
 
 
 export const CancelCampaignResponse = zod.object({
+  "retomada_em": zod.coerce.date().nullish(),
+  "retomada_enviados_base": zod.number().int().nullish(),
+  "retomado_por_nome": zod.string().nullish(),
+  "retomado_por_email": zod.string().nullish(),
   "id": zod.string().uuid(),
   "nome": zod.string(),
   "assunto": zod.string(),
@@ -1617,6 +1649,8 @@ export const SendCampaignTestResponse = zod.object({
 export const GetCampaignRecipientSummaryParams = zod.object({
   "campaignId": zod.coerce.string().uuid()
 })
+
+export const getCampaignRecipientSummaryResponseExcluidosMin = 0;
 
 export const getCampaignRecipientSummaryResponseTotalMin = 0;
 
@@ -1765,6 +1799,7 @@ export const getCampaignRecipientSummaryResponseRecenciaItemQuantidadeMin = 0;
 
 
 export const GetCampaignRecipientSummaryResponse = zod.object({
+  "excluidos": zod.number().int().min(getCampaignRecipientSummaryResponseExcluidosMin).optional(),
   "campanha_id": zod.string().uuid(),
   "total": zod.number().int().min(getCampaignRecipientSummaryResponseTotalMin),
   "total_na_lista": zod.number().int().min(getCampaignRecipientSummaryResponseTotalNaListaMin).describe('Total atual de destinatários na lista principal.'),
@@ -1984,6 +2019,12 @@ export const validateCampaignImportResponseLinhasProcessadasMin = 0;
 
 export const validateCampaignImportResponseTotalLinhasMin = 0;
 
+export const validateCampaignImportResponseResultadoOneDatasAusentesMin = 0;
+
+export const validateCampaignImportResponseResultadoOneDatasAusentesPercentualMin = 0;
+
+export const validateCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin = 0;
+
 export const validateCampaignImportResponseResultadoOneTotalNaListaMin = 0;
 
 export const validateCampaignImportResponseResultadoOneSuprimidosNoEnvioMin = 0;
@@ -2000,6 +2041,14 @@ export const ValidateCampaignImportResponse = zod.object({
   "linhas_processadas": zod.number().int().min(validateCampaignImportResponseLinhasProcessadasMin),
   "total_linhas": zod.number().int().min(validateCampaignImportResponseTotalLinhasMin).nullable(),
   "resultado": zod.union([zod.object({
+  "datas_ausentes": zod.number().int().min(validateCampaignImportResponseResultadoOneDatasAusentesMin).optional(),
+  "datas_ausentes_percentual": zod.number().min(validateCampaignImportResponseResultadoOneDatasAusentesPercentualMin).optional(),
+  "dominios_suspeitos_total": zod.number().int().min(validateCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin).optional(),
+  "dominios_suspeitos": zod.array(zod.object({
+  "linha": zod.number().int(),
+  "email": zod.string(),
+  "sugestao": zod.string()
+})).optional(),
   "storage_path": zod.string(),
   "total_linhas": zod.number().int(),
   "validos": zod.number().int(),
@@ -2045,6 +2094,12 @@ export const getCampaignImportResponseLinhasProcessadasMin = 0;
 
 export const getCampaignImportResponseTotalLinhasMin = 0;
 
+export const getCampaignImportResponseResultadoOneDatasAusentesMin = 0;
+
+export const getCampaignImportResponseResultadoOneDatasAusentesPercentualMin = 0;
+
+export const getCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin = 0;
+
 export const getCampaignImportResponseResultadoOneTotalNaListaMin = 0;
 
 export const getCampaignImportResponseResultadoOneSuprimidosNoEnvioMin = 0;
@@ -2061,6 +2116,14 @@ export const GetCampaignImportResponse = zod.object({
   "linhas_processadas": zod.number().int().min(getCampaignImportResponseLinhasProcessadasMin),
   "total_linhas": zod.number().int().min(getCampaignImportResponseTotalLinhasMin).nullable(),
   "resultado": zod.union([zod.object({
+  "datas_ausentes": zod.number().int().min(getCampaignImportResponseResultadoOneDatasAusentesMin).optional(),
+  "datas_ausentes_percentual": zod.number().min(getCampaignImportResponseResultadoOneDatasAusentesPercentualMin).optional(),
+  "dominios_suspeitos_total": zod.number().int().min(getCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin).optional(),
+  "dominios_suspeitos": zod.array(zod.object({
+  "linha": zod.number().int(),
+  "email": zod.string(),
+  "sugestao": zod.string()
+})).optional(),
   "storage_path": zod.string(),
   "total_linhas": zod.number().int(),
   "validos": zod.number().int(),
@@ -2091,6 +2154,131 @@ export const GetCampaignImportResponse = zod.object({
   "erro": zod.string().nullable(),
   "criado_em": zod.coerce.date(),
   "concluido_em": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Diagnóstico por provedor e exclusões reversíveis
+ */
+export const GetCampaignExclusionsParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const getCampaignExclusionsQueryOffsetDefault = 0;
+export const getCampaignExclusionsQueryOffsetMin = 0;
+
+export const getCampaignExclusionsQueryLimitDefault = 25;
+export const getCampaignExclusionsQueryLimitMax = 100;
+
+
+
+export const GetCampaignExclusionsQueryParams = zod.object({
+  "offset": zod.coerce.number().int().min(getCampaignExclusionsQueryOffsetMin).default(getCampaignExclusionsQueryOffsetDefault),
+  "limit": zod.coerce.number().int().min(1).max(getCampaignExclusionsQueryLimitMax).default(getCampaignExclusionsQueryLimitDefault)
+})
+
+export const GetCampaignExclusionsResponse = zod.object({
+  "provedores": zod.array(zod.object({
+  "provedor": zod.enum(['gmail', 'microsoft', 'yahoo', 'outros']),
+  "total": zod.number().int(),
+  "pendentes": zod.number().int(),
+  "excluidos": zod.number().int(),
+  "enviados": zod.number().int(),
+  "entregues": zod.number().int(),
+  "bounces": zod.number().int(),
+  "bounces_permanentes": zod.number().int(),
+  "taxa_bounce": zod.number(),
+  "taxa_bounce_permanente": zod.number()
+})),
+  "excluidos": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "email": zod.string(),
+  "nome": zod.string().nullable(),
+  "status": zod.string(),
+  "excluido_em": zod.coerce.date(),
+  "exclusao_motivo": zod.string(),
+  "excluido_por_nome": zod.string().nullable(),
+  "excluido_por_email": zod.string().nullable()
+})),
+  "total_excluidos": zod.number().int(),
+  "pendentes_na_fila": zod.number().int(),
+  "exclusoes_desde_pausa": zod.number().int(),
+  "retomada_em": zod.coerce.date().nullable(),
+  "retomada_enviados_base": zod.number().int().nullable(),
+  "acumulada": zod.object({
+  "enviados": zod.number().int(),
+  "entregues": zod.number().int(),
+  "bounces_permanentes": zod.number().int(),
+  "reclamacoes": zod.number().int(),
+  "taxa_bounce": zod.number(),
+  "taxa_reclamacao": zod.number()
+}),
+  "periodo_atual": zod.object({
+  "enviados": zod.number().int(),
+  "entregues": zod.number().int(),
+  "bounces_permanentes": zod.number().int(),
+  "reclamacoes": zod.number().int(),
+  "taxa_bounce": zod.number(),
+  "taxa_reclamacao": zod.number()
+})
+})
+
+
+/**
+ * @summary Exclui somente destinatários pendentes, sem suprimir ou apagar
+ */
+export const ExcludeCampaignRecipientsParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const excludeCampaignRecipientsBodyMotivoMax = 500;
+
+export const excludeCampaignRecipientsBodyProvedoresMax = 4;
+
+export const excludeCampaignRecipientsBodyEmailsMax = 50000;
+
+export const excludeCampaignRecipientsBodyCsvMax = 5000000;
+
+
+
+export const ExcludeCampaignRecipientsBody = zod.object({
+  "motivo": zod.string().min(1).max(excludeCampaignRecipientsBodyMotivoMax),
+  "provedores": zod.array(zod.enum(['gmail', 'microsoft', 'yahoo', 'outros'])).max(excludeCampaignRecipientsBodyProvedoresMax).optional(),
+  "emails": zod.array(zod.string().email()).max(excludeCampaignRecipientsBodyEmailsMax).optional(),
+  "csv": zod.string().min(1).max(excludeCampaignRecipientsBodyCsvMax).optional()
+})
+
+export const ExcludeCampaignRecipientsResponse = zod.object({
+  "alterados": zod.number().int(),
+  "lembretes_alterados": zod.number().int(),
+  "em_processamento": zod.number().int(),
+  "ja_processados": zod.number().int(),
+  "nao_encontrados": zod.number().int()
+})
+
+
+/**
+ * @summary Desfaz exclusões enquanto a campanha não terminou
+ */
+export const RestoreCampaignRecipientsParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const restoreCampaignRecipientsBodyIdsMax = 1000;
+
+
+
+export const RestoreCampaignRecipientsBody = zod.object({
+  "ids": zod.array(zod.string().uuid()).min(1).max(restoreCampaignRecipientsBodyIdsMax).optional(),
+  "todos": zod.boolean().optional()
+})
+
+export const RestoreCampaignRecipientsResponse = zod.object({
+  "alterados": zod.number().int(),
+  "lembretes_alterados": zod.number().int(),
+  "em_processamento": zod.number().int(),
+  "ja_processados": zod.number().int(),
+  "nao_encontrados": zod.number().int()
 })
 
 

@@ -421,7 +421,7 @@ async function processExport(job: ExportJob): Promise<boolean> {
       let query = client
         .from("destinatario")
         .select(
-          "id,email,nome,id_usuario,regiao,data_ultima_compra,campanha_id,is_lembrete,status,enviado_em,entregue_em,aberto_em,clicado_em,erro",
+          "id,email,nome,id_usuario,regiao,data_ultima_compra,campanha_id,is_lembrete,status,enviado_em,entregue_em,aberto_em,clicado_em,erro,excluido_em,exclusao_motivo",
         )
         .order("id", { ascending: true })
         .limit(EXPORT_PAGE_SIZE);
@@ -574,7 +574,7 @@ async function processExport(job: ExportJob): Promise<boolean> {
             entregue_em: (row.entregue_em as string | null) ?? null,
             aberto_em: (row.aberto_em as string | null) ?? null,
             clicado_em: (row.clicado_em as string | null) ?? null,
-            motivo_nao_envio: deriveBiExportReason(row.status, row.erro),
+            motivo_nao_envio: deriveBiExportReason(row.status, row.erro, row.excluido_em, row.exclusao_motivo),
           } satisfies BiExportRow),
         );
       }

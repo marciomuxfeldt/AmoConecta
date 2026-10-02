@@ -252,6 +252,8 @@ export interface RecipientRecencyBucket {
 }
 
 export interface CampaignRecipientSummary {
+  /** @minimum 0 */
+  excluidos?: number;
   campanha_id: string;
   /** @minimum 0 */
   total: number;
@@ -417,6 +419,14 @@ export interface EmailDividerBlock {
 export type EmailBlock = EmailTextBlock | EmailImageBlock | EmailButtonBlock | EmailDividerBlock;
 
 export interface Campaign {
+  /** @nullable */
+  retomada_em?: string | null;
+  /** @nullable */
+  retomada_enviados_base?: number | null;
+  /** @nullable */
+  retomado_por_nome?: string | null;
+  /** @nullable */
+  retomado_por_email?: string | null;
   id: string;
   nome: string;
   assunto: string;
@@ -636,7 +646,20 @@ export interface ImportValidationError {
   motivo: string;
 }
 
+export type ImportValidationSummaryDominiosSuspeitosItem = {
+  linha: number;
+  email: string;
+  sugestao: string;
+};
+
 export interface ImportValidationSummary {
+  /** @minimum 0 */
+  datas_ausentes?: number;
+  /** @minimum 0 */
+  datas_ausentes_percentual?: number;
+  /** @minimum 0 */
+  dominios_suspeitos_total?: number;
+  dominios_suspeitos?: ImportValidationSummaryDominiosSuspeitosItem[];
   storage_path: string;
   total_linhas: number;
   validos: number;
@@ -689,6 +712,110 @@ export interface ImportValidationJob {
   criado_em: string;
   /** @nullable */
   concluido_em: string | null;
+}
+
+export type CampaignExclusionInputProvedoresItem = typeof CampaignExclusionInputProvedoresItem[keyof typeof CampaignExclusionInputProvedoresItem];
+
+
+export const CampaignExclusionInputProvedoresItem = {
+  gmail: 'gmail',
+  microsoft: 'microsoft',
+  yahoo: 'yahoo',
+  outros: 'outros',
+} as const;
+
+export interface CampaignExclusionInput {
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  motivo: string;
+  /** @maxItems 4 */
+  provedores?: CampaignExclusionInputProvedoresItem[];
+  /** @maxItems 50000 */
+  emails?: string[];
+  /**
+     * @minLength 1
+     * @maxLength 5000000
+     */
+  csv?: string;
+}
+
+export interface CampaignRestoreInput {
+  /**
+     * @minItems 1
+     * @maxItems 1000
+     */
+  ids?: string[];
+  todos?: boolean;
+}
+
+export interface CampaignExclusionResult {
+  alterados: number;
+  lembretes_alterados: number;
+  em_processamento: number;
+  ja_processados: number;
+  nao_encontrados: number;
+}
+
+export type ProviderRecipientDiagnosticProvedor = typeof ProviderRecipientDiagnosticProvedor[keyof typeof ProviderRecipientDiagnosticProvedor];
+
+
+export const ProviderRecipientDiagnosticProvedor = {
+  gmail: 'gmail',
+  microsoft: 'microsoft',
+  yahoo: 'yahoo',
+  outros: 'outros',
+} as const;
+
+export interface ProviderRecipientDiagnostic {
+  provedor: ProviderRecipientDiagnosticProvedor;
+  total: number;
+  pendentes: number;
+  excluidos: number;
+  enviados: number;
+  entregues: number;
+  bounces: number;
+  bounces_permanentes: number;
+  taxa_bounce: number;
+  taxa_bounce_permanente: number;
+}
+
+export interface CampaignReputationPeriod {
+  enviados: number;
+  entregues: number;
+  bounces_permanentes: number;
+  reclamacoes: number;
+  taxa_bounce: number;
+  taxa_reclamacao: number;
+}
+
+export interface CampaignExcludedRecipient {
+  id: string;
+  email: string;
+  /** @nullable */
+  nome: string | null;
+  status: string;
+  excluido_em: string;
+  exclusao_motivo: string;
+  /** @nullable */
+  excluido_por_nome: string | null;
+  /** @nullable */
+  excluido_por_email: string | null;
+}
+
+export interface CampaignExclusionOverview {
+  provedores: ProviderRecipientDiagnostic[];
+  excluidos: CampaignExcludedRecipient[];
+  total_excluidos: number;
+  pendentes_na_fila: number;
+  exclusoes_desde_pausa: number;
+  /** @nullable */
+  retomada_em: string | null;
+  /** @nullable */
+  retomada_enviados_base: number | null;
+  acumulada: CampaignReputationPeriod;
+  periodo_atual: CampaignReputationPeriod;
 }
 
 export interface TeamInvitationInput {
@@ -764,4 +891,16 @@ export interface CampaignAuditEvent {
 export interface CampaignAuditResponse {
   events: CampaignAuditEvent[];
 }
+
+export type GetCampaignExclusionsParams = {
+/**
+ * @minimum 0
+ */
+offset?: number;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+};
 

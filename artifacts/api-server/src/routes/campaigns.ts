@@ -51,6 +51,7 @@ import {
   noEligibleRecipientsScheduleMessage,
 } from "../lib/campaign-schedule-policy";
 import { recipientDeliveryProjection } from "../lib/recipient-delivery-projection";
+import { loadReputationCounts, reputationPeriod } from "../lib/campaign-reputation";
 import {
   applyConfiguredReplyTo,
   configuredSenderEmail,
@@ -63,7 +64,7 @@ import {
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
-  "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,status,agendada_para,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em,criado_por_id,criado_por_nome,criado_por_email,agendado_por_id,agendado_por_nome,agendado_por_email,agendado_em,pausado_por_id,pausado_por_nome,pausado_por_email";
+  "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,status,agendada_para,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em,criado_por_id,criado_por_nome,criado_por_email,agendado_por_id,agendado_por_nome,agendado_por_email,agendado_em,pausado_por_id,pausado_por_nome,pausado_por_email,retomada_em,retomada_enviados_base,retomado_por_nome,retomado_por_email";
 // Public by design: this bucket contains only e-mail image assets.
 // Never reuse the private CSV bucket from routes/imports.ts here.
 const EMAIL_ASSET_BUCKET = "amoconecta-assets";
@@ -351,7 +352,7 @@ async function countMainRecipients(
   if (query?.lte) request = request.lte("data_ultima_compra", query.lte);
   if (query?.isNull) request = request.is("data_ultima_compra", null);
   if (query?.isNotNull) request = request.not(query.isNotNull, "is", null);
-  if (query?.statuses) request = request.in("status", query.statuses);
+  if (query?.statuses) request = request.in("status", query.statuses).is("excluido_em", null);
 
   const { count, error } = await request;
   if (error) throw error;
@@ -589,6 +590,10 @@ async function recipientSummary(campaignId: string) {
   const statusCounts = await Promise.all(
     statusQueries.map(async ([, statuses]) => countMainRecipients(campaignId, { statuses })),
   );
+  const { count: excludedCount, error: excludedError } = await supabaseAdminClient()
+    .from("destinatario").select("id", { count: "exact", head: true })
+    .eq("campanha_id", campaignId).eq("is_lembrete", false).not("excluido_em", "is", null);
+  if (excludedError) throw excludedError;
   const reminderStatusCounts = await Promise.all(
     statusQueries.map(async ([, statuses]) =>
       countMainRecipients(campaignId, { statuses }, true),
@@ -629,6 +634,7 @@ async function recipientSummary(campaignId: string) {
     campanha_id: campaignId,
     total: deliveryProjection.total_na_lista,
     total_na_lista: deliveryProjection.total_na_lista,
+    excluidos: excludedCount ?? 0,
     suprimidos_no_envio: deliveryProjection.suprimidos_no_envio,
     permitidos_modo_teste: deliveryProjection.permitidos_modo_teste,
     bloqueados_modo_teste: deliveryProjection.bloqueados_modo_teste,
@@ -725,7 +731,7 @@ async function findCampaign(campaignId: string) {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,status,assunto,preheader,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,lembrete_horas,teste_enviado,corpo,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao",
+      "id,status,assunto,preheader,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,lembrete_horas,teste_enviado,corpo,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,retomada_em",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -1146,28 +1152,30 @@ async function runSimpleCampaignTransition(
       });
       return;
     }
-    const transitionAt = new Date().toISOString();
-    const update =
-      config.targetStatus === "pausada"
-        ? {
-            status: config.targetStatus,
-            pausa_motivo: `Pausa manual por ${session.user.email ?? session.user.id}.`,
-            pausada_em: transitionAt,
-            pausa_taxa_bounce: null,
-            pausa_taxa_reclamacao: null,
-            pausado_por_id: session.user.id,
-            pausado_por_nome: session.user.name,
-            pausado_por_email: session.user.email,
-          }
-        : config.targetStatus === "enviando"
-          ? {
-              status: config.targetStatus,
-              pausa_motivo: null,
-              pausada_em: null,
-              pausa_taxa_bounce: null,
-              pausa_taxa_reclamacao: null,
-            }
-          : { status: config.targetStatus };
+    if (config.targetStatus === "pausada" || config.targetStatus === "enviando") {
+      const client = supabaseAdminClient();
+      const [cumulative, period] = await Promise.all([
+        loadReputationCounts(client, params.data.campaignId),
+        loadReputationCounts(client, params.data.campaignId, existing.retomada_em),
+      ]);
+      const rates = reputationPeriod(period);
+      const { data, error } = await client.rpc("transition_campaign_with_audit", {
+        p_campanha_id: params.data.campaignId, p_expected: existing.status, p_target: config.targetStatus,
+        p_actor_id: session.user.id, p_actor_nome: session.user.name, p_actor_email: session.user.email,
+        p_motivo: config.targetStatus === "pausada"
+          ? `Pausa manual por ${session.user.email ?? session.user.id}.` : existing.pausa_motivo,
+        p_bounce: config.targetStatus === "pausada" ? rates.taxa_bounce : existing.pausa_taxa_bounce,
+        p_reclamacao: config.targetStatus === "pausada" ? rates.taxa_reclamacao : existing.pausa_taxa_reclamacao,
+        p_metadata: { periodo_atual: rates, acumulada: reputationPeriod(cumulative) },
+      });
+      if (error) throw error;
+      if (!data) {
+        res.status(409).json({ error: "O estado mudou. Atualize a campanha antes de tentar novamente." }); return;
+      }
+      res.json(GetCampaignResponse.parse(await withSendMetrics(data)));
+      return;
+    }
+    const update = { status: config.targetStatus };
     const { data, error } = await supabaseAdminClient()
       .from("campanha")
       .update(update)
@@ -1182,13 +1190,7 @@ async function runSimpleCampaignTransition(
       });
       return;
     }
-    const action =
-      config.targetStatus === "pausada"
-        ? "campaign_paused"
-        : config.targetStatus === "enviando"
-          ? "campaign_resumed"
-          : "campaign_cancelled";
-    await recordCampaignAudit(req, session, action, params.data.campaignId, {
+    await recordCampaignAudit(req, session, "campaign_cancelled", params.data.campaignId, {
       from_status: existing.status,
       to_status: config.targetStatus,
     });

@@ -333,6 +333,7 @@ router.post("/campaigns/:campaignId/imports/validate", async (req, res) => {
 });
 
 router.get("/campaigns/:campaignId/imports/:importId", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   const params = GetCampaignImportParams.safeParse(req.params);
   if (!params.success) {
     res.status(422).json({ error: "Identificador de importação inválido." });
@@ -364,6 +365,9 @@ router.get("/campaigns/:campaignId/imports/:importId", async (req, res) => {
       res.status(404).json({ error: "Importação não encontrada." });
       return;
     }
+    // Polling must only serialize the persisted job. Never recompute delivery
+    // projection here: its old 1,000-email URL filters caused upstream 431s
+    // only after completion, which this boundary exposed as a misleading 502.
     res.json(
       GetCampaignImportResponse.parse({
         ...data,

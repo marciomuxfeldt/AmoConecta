@@ -29,9 +29,13 @@ import type {
   CampaignAuditResponse,
   CampaignDefaults,
   CampaignDraftInput,
+  CampaignExclusionInput,
+  CampaignExclusionOverview,
+  CampaignExclusionResult,
   CampaignListItem,
   CampaignRecipientSummary,
   CampaignRecipientsCleared,
+  CampaignRestoreInput,
   CampaignResumeInput,
   CompletePasswordRecoveryInput,
   CreateCampaignInput,
@@ -41,6 +45,7 @@ import type {
   EmailImageUploadUrl,
   EngagementSummary,
   Error,
+  GetCampaignExclusionsParams,
   HealthStatus,
   ImportUploadUrl,
   ImportValidationJob,
@@ -3330,4 +3335,271 @@ export function useGetCampaignImport<TData = Awaited<ReturnType<typeof getCampai
 
 
 
+
+export const getGetCampaignExclusionsUrl = (campaignId: string,
+    params?: GetCampaignExclusionsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/campaigns/${campaignId}/exclusions?${stringifiedParams}` : `/api/campaigns/${campaignId}/exclusions`
+}
+
+/**
+ * @summary Diagnóstico por provedor e exclusões reversíveis
+ */
+export const getCampaignExclusions = async (campaignId: string,
+    params?: GetCampaignExclusionsParams, options?: Parameters<typeof customFetch>[1]): Promise<CampaignExclusionOverview> => {
+
+  return customFetch<CampaignExclusionOverview>(getGetCampaignExclusionsUrl(campaignId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCampaignExclusionsQueryKey = (campaignId: string,
+    params?: GetCampaignExclusionsParams,) => {
+    return [
+    `/api/campaigns/${campaignId}/exclusions`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetCampaignExclusionsQueryOptions = <TData = Awaited<ReturnType<typeof getCampaignExclusions>>, TError = ErrorType<void>>(campaignId: string,
+    params?: GetCampaignExclusionsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCampaignExclusions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCampaignExclusionsQueryKey(campaignId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCampaignExclusions>>> = ({ signal }) => getCampaignExclusions(campaignId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: campaignId !== null && campaignId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCampaignExclusions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCampaignExclusionsQueryResult = NonNullable<Awaited<ReturnType<typeof getCampaignExclusions>>>
+export type GetCampaignExclusionsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Diagnóstico por provedor e exclusões reversíveis
+ */
+
+export function useGetCampaignExclusions<TData = Awaited<ReturnType<typeof getCampaignExclusions>>, TError = ErrorType<void>>(
+ campaignId: string,
+    params?: GetCampaignExclusionsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCampaignExclusions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCampaignExclusionsQueryOptions(campaignId,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExcludeCampaignRecipientsUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/exclusions`
+}
+
+/**
+ * @summary Exclui somente destinatários pendentes, sem suprimir ou apagar
+ */
+export const excludeCampaignRecipients = async (campaignId: string,
+    campaignExclusionInput: CampaignExclusionInput, options?: Parameters<typeof customFetch>[1]): Promise<CampaignExclusionResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<CampaignExclusionResult>(getExcludeCampaignRecipientsUrl(campaignId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(campaignExclusionInput)
+  }
+);}
+
+
+
+
+
+export const getExcludeCampaignRecipientsMutationKey = () => ['excludeCampaignRecipients'] as const;
+
+export const getExcludeCampaignRecipientsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof excludeCampaignRecipients>>, TError,ExcludeCampaignRecipientsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof excludeCampaignRecipients>>, TError,ExcludeCampaignRecipientsMutationVariables, TContext> => {
+
+const mutationKey = getExcludeCampaignRecipientsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof excludeCampaignRecipients>>, ExcludeCampaignRecipientsMutationVariables> = (props) => {
+          const {campaignId,data} = props ?? {};
+
+          return  excludeCampaignRecipients(campaignId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ExcludeCampaignRecipientsMutationResult = NonNullable<Awaited<ReturnType<typeof excludeCampaignRecipients>>>
+    export type ExcludeCampaignRecipientsMutationBody = BodyType<CampaignExclusionInput>
+    export type ExcludeCampaignRecipientsMutationError = ErrorType<void>
+    export type ExcludeCampaignRecipientsMutationVariables = {campaignId: string;data: BodyType<CampaignExclusionInput>}
+
+    /**
+ * @summary Exclui somente destinatários pendentes, sem suprimir ou apagar
+ */
+export const useExcludeCampaignRecipients = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof excludeCampaignRecipients>>, TError,ExcludeCampaignRecipientsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof excludeCampaignRecipients>>,
+        TError,
+        ExcludeCampaignRecipientsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getExcludeCampaignRecipientsMutationOptions(options));
+    }
+
+export const getRestoreCampaignRecipientsUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/exclusions/restore`
+}
+
+/**
+ * @summary Desfaz exclusões enquanto a campanha não terminou
+ */
+export const restoreCampaignRecipients = async (campaignId: string,
+    campaignRestoreInput: CampaignRestoreInput, options?: Parameters<typeof customFetch>[1]): Promise<CampaignExclusionResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<CampaignExclusionResult>(getRestoreCampaignRecipientsUrl(campaignId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(campaignRestoreInput)
+  }
+);}
+
+
+
+
+
+export const getRestoreCampaignRecipientsMutationKey = () => ['restoreCampaignRecipients'] as const;
+
+export const getRestoreCampaignRecipientsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreCampaignRecipients>>, TError,RestoreCampaignRecipientsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof restoreCampaignRecipients>>, TError,RestoreCampaignRecipientsMutationVariables, TContext> => {
+
+const mutationKey = getRestoreCampaignRecipientsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof restoreCampaignRecipients>>, RestoreCampaignRecipientsMutationVariables> = (props) => {
+          const {campaignId,data} = props ?? {};
+
+          return  restoreCampaignRecipients(campaignId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RestoreCampaignRecipientsMutationResult = NonNullable<Awaited<ReturnType<typeof restoreCampaignRecipients>>>
+    export type RestoreCampaignRecipientsMutationBody = BodyType<CampaignRestoreInput>
+    export type RestoreCampaignRecipientsMutationError = ErrorType<void>
+    export type RestoreCampaignRecipientsMutationVariables = {campaignId: string;data: BodyType<CampaignRestoreInput>}
+
+    /**
+ * @summary Desfaz exclusões enquanto a campanha não terminou
+ */
+export const useRestoreCampaignRecipients = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreCampaignRecipients>>, TError,RestoreCampaignRecipientsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof restoreCampaignRecipients>>,
+        TError,
+        RestoreCampaignRecipientsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRestoreCampaignRecipientsMutationOptions(options));
+    }
 
