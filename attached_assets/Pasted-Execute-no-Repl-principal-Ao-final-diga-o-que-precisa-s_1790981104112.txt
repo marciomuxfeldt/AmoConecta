@@ -1,0 +1,133 @@
+Execute no Repl principal. Ao final, diga o que precisa ser propagado para o Repl do worker.
+
+Este lote vem de uma campanha real em andamento: 5.187 destinatários de uma base antiga de São Miguel do Oeste. Com 900 enviados, 3,89% de bounce permanente, 2,22% de bounce temporário, zero reclamações e zero descadastros.
+
+A taxa por provedor, medida sobre esses 900: Gmail 1,94%, Microsoft 3,64%, Outros 10,71%, Yahoo 16,33%. Com 200 envios esses mesmos números eram 0,9%, 7,1%, 23% e 25% — ou seja, amostra pequena não serve para decidir, e a plataforma precisa mostrar a taxa estabilizando conforme o volume cresce.
+
+A campanha continua. A decisão sobre os grupos de pior taxa será tomada depois de passar a lista por um validador de e-mails externo, que entra em um lote futuro. O que falta hoje é a ferramenta: não existe como tirar alguém da fila sem destruir o registro de que estava lá.
+
+Os itens são independentes. O primeiro é o que bloqueia uma decisão operacional, e o quarto é o que impede uma campanha pausada de voltar a andar.
+
+1. Excluir destinatários da fila sem apagar o registro
+
+Hoje, para tirar alguém de uma campanha em andamento, as únicas saídas são apagar a linha ou marcá-la com um status que mente. As duas destroem a informação de que aquela pessoa estava na lista e por que não recebeu — que é justamente o que a exportação para BI precisa mostrar.
+
+Migração. Em destinatario:
+
+excluido_em timestamptz
+exclusao_motivo text
+excluido_por_id uuid, excluido_por_nome text, excluido_por_email text
+
+Índice parcial em (campanha_id) where excluido_em is null, porque é essa a consulta quente do worker.
+
+Comportamento.
+
+O worker ignora qualquer destinatário com excluido_em preenchido. A linha nunca entra na fila, mesmo estando pendente.
+A exclusão é reversível enquanto a campanha não terminou: desfazer limpa as colunas e a pessoa volta para a fila.
+Excluir não toca na tabela supressao. É uma decisão desta campanha, não um bloqueio permanente da pessoa. Esta distinção é o ponto central do item — se a implementação encostar em supressao, está errada.
+O status continua pendente. Quem explica a situação é excluido_em, não o status.
+
+Na tela da campanha. Um bloco de exclusão por provedor de e-mail, agrupando os domínios em Gmail, Microsoft (hotmail, outlook, live, msn), Yahoo e Outros — mostrando quantos destinatários há em cada grupo, quantos já receberam e, se já houver dados, a taxa de bounce apurada de cada um. O operador marca os grupos a excluir e confirma, informando o motivo.
+
+A tela precisa mostrar o número que embasa a decisão, no mesmo lugar onde a decisão é tomada. Esse painel por provedor tem valor mesmo quando ninguém exclui nada: é o diagnóstico que hoje só existe rodando consulta no banco.
+
+Também por lista. Além dos grupos de provedor, aceite a exclusão a partir de um arquivo de endereços — um CSV com uma coluna de e-mail. É por aí que vão entrar, num lote futuro, os resultados de um validador de e-mails externo: a lista dos endereços reprovados vira exclusão desta campanha, com o motivo registrando qual validação os reprovou.
+
+Deixe o campo de motivo livre, mas sugira valores (provedor, validacao, decisao do operador), para a exportação conseguir agrupar depois.
+
+No painel. Um cartão "Excluídos" junto dos demais status, para os cartões voltarem a somar o total da lista.
+
+Na exportação para BI. motivo_nao_envio passa a incluir excluido: <motivo>.
+
+2. Bounce precisa vencer "entregue"
+
+Na campanha real, jcdb@bol.com.br recebeu um bounce permanente e permaneceu com status entregue. O evento chegou, a supressão funcionou, mas o status do destinatário não mudou.
+
+A causa é a regra de progressão monotônica da Fase 5. Ela está certa para enviado → entregue → aberto → clicado, e errada aqui: entregue → bounce não é retrocesso.
+
+É o bounce assíncrono, e é comum: o servidor aceita a mensagem, responde entrega, e minutos ou horas depois devolve. O que vale é o desfecho, não a ordem de chegada.
+
+Corrija para que bounce seja terminal e sobreponha qualquer status anterior, inclusive entregue, aberto e clicado. A única coisa que bounce não sobrepõe é outro bounce.
+
+Verifique se o mesmo problema existe em outros pontos do processamento de eventos — se há mais algum caso em que um evento terminal perde para um estado anterior.
+
+Depois de corrigir, me entregue o SQL que reprocessa os destinatários já afetados a partir de evento_email, sem reenviar nada.
+
+3. Bounce temporário não é erro
+
+vz59dg97wb@privaterelay.appleid.com recebeu um bounce Transient e ficou com status erro, com a mensagem "Bounce temporário informado pelo Resend".
+
+A Fase 5 diz que soft bounce não suprime: registra o evento e segue. Marcar como erro exclui a pessoa de tudo — contadores, lembrete, campanhas futuras — por um problema momentâneo. No caso, um relay da Apple, onde Transient quase sempre é limitação de taxa.
+
+Bounce temporário registra o evento em evento_email e não altera o status do destinatário.
+Se quiser dar visibilidade, use um campo próprio (ultimo_soft_bounce_em), nunca o status.
+erro fica reservado para falha nossa no envio: recusa da API, endereço inválido, exceção.
+
+Me entregue o SQL que devolve ao estado correto quem foi marcado assim.
+
+4. A pausa automática precisa pegar catástrofe cedo
+
+Hoje a avaliação de reputação só começa a partir de 1.000 enviados. Com teto de 100 por hora, isso são dez horas de envio ruim antes de qualquer freio. A campanha real passou das 300 com 5,5% de bounce e seguiu enviando, porque o limiar não havia sido alcançado.
+
+O número 1.000 existe para não pausar por ruído estatístico, e isso continua válido perto do limite. Não é válido longe dele: com 200 enviados não dá para distinguir 2,1% de 1,9%, mas dá para distinguir 5% de 2% com folga.
+
+Implemente dois níveis:
+
+Gatilho	Mínimo de enviados	Bounce permanente	Reclamação
+Catástrofe	200	acima de 4%	acima de 0,5%
+Normal	1.000	acima de 2%	acima de 0,2%
+
+Qualquer um dos dois pausa. pausa_motivo diz qual gatilho foi, com a taxa apurada e o número de enviados na hora.
+
+Retomar depois de uma pausa por reputação
+
+Hoje a taxa é acumulada sobre a campanha inteira, e isso torna a retomada inútil.
+
+Uma campanha que pausou com 1.000 enviados e 55 bounces está em 5,5%. O operador exclui o segmento ruim e retoma. O worker manda mais 100 para o segmento bom, a conta vira 56 ÷ 1.100 = 5,09%, ainda acima do limite, e ela pausa de novo. Para diluir até 2% só com envio limpo seriam precisos 2.750 enviados — e o freio dispara muito antes. O resultado é um laço: retoma, manda cem, pausa.
+
+A correção é medir a partir do recomeço:
+
+Ao retomar, grave retomada_em, retomada_enviados_base (quantos já haviam sido enviados naquele instante) e quem retomou.
+A partir daí, a pausa automática avalia bounce e reclamação apenas sobre os envios posteriores a esse marco, usando os mesmos dois gatilhos da tabela acima.
+O painel mostra as duas taxas lado a lado: a acumulada da campanha e a da retomada atual. A acumulada continua sendo a verdade sobre a campanha; a da retomada é o que decide se continua.
+Toda pausa e toda retomada ficam registradas em evento_auditoria, com a taxa do momento e quem agiu. Se alguém retomar três vezes sem corrigir nada, isso precisa estar visível.
+
+Na tela de confirmação da retomada, mostre a taxa que causou a pausa e quantos destinatários restam na fila depois das exclusões. Se nenhuma exclusão foi feita desde a pausa, avise explicitamente que nada mudou e que a campanha provavelmente vai pausar de novo.
+
+Depois de implementar, me diga como testar os dois gatilhos e a retomada sem esperar uma campanha ruim acontecer.
+
+5. Avisar quando a lista não tem data da última compra
+
+Na campanha real, as 5.187 linhas vieram com data_ultima_compra nula. Isso desliga em silêncio duas coisas que o sistema promete: a ordenação por compra mais recente, que é o princípio da rampa de aquecimento, e a deduplicação por telefone, que usa a data para escolher qual linha fica.
+
+Nada falhou e nada avisou. O envio simplesmente saiu em ordem arbitrária.
+
+Ao concluir a importação, informe quantas linhas vieram sem data da última compra.
+Se forem mais de 20% da lista, mostre um aviso claro na tela da campanha, dizendo que a ordenação por recência não será aplicada e que a deduplicação por telefone fica prejudicada.
+O aviso não bloqueia o envio. Informa.
+6. Domínios com erro de digitação
+
+Três endereços da base real tinham o domínio escrito errado: gnail.com, outllok.com e gmail.com.br. São 0,06% da lista — não são a causa de nada, mas cada um é um bounce permanente garantido e uma pessoa que nunca vai receber.
+
+Na importação, detecte domínios que são variação de um dos grandes provedores por um caractere de diferença, e liste-os à parte no resumo como "possível erro de digitação", com o endereço e a sugestão de correção. Não corrija sozinho e não recuse: mostre, e deixe o operador decidir.
+
+7. O 502 na consulta de status da importação
+
+A importação conclui corretamente, mas a rota que o painel consulta para acompanhar o progresso responde 502 depois que ela termina. Hoje dá para contornar recarregando a página. Com dezenas de milhares de linhas, o operador vai olhar uma tela parada sem saber se importou, e vai importar de novo.
+
+Localize a causa e me diga qual era — não quero só o sintoma resolvido.
+
+Fora do escopo
+
+Não altere ENVIO_LIBERADO nem o modo de segurança. Não mexa na lógica de assinatura dos webhooks. Não implemente coordenação de limite de taxa entre processos.
+
+Critérios de aceite
+Um destinatário excluído não recebe, continua visível na campanha, aparece na exportação com o motivo, e não entra em supressao.
+Desfazer a exclusão devolve a pessoa à fila.
+Um bounce permanente que chega depois da entrega deixa o destinatário em bounce.
+Um bounce temporário não altera o status do destinatário.
+Uma campanha com 5% de bounce pausa sozinha antes dos 300 envios.
+A importação de uma lista sem data de última compra avisa na tela.
+Ao final
+
+SQL de toda migração nova em bloco de código, o SQL de reprocessamento dos itens 2 e 3, a lista do que preciso configurar à mão, e quais arquivos alterados são executados também pelo worker — em especial a seleção da fila, que muda com a exclusão, e a pausa automática.
