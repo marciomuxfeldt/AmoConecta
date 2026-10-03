@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import {
   ArrowLeft,
@@ -25,6 +26,8 @@ import {
   X,
 } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
+import { AccountReputationCard } from '../components/AccountReputationCard';
+import { ScrollConfirmation } from '../components/ScrollConfirmation';
 import {
   CampaignStatus,
   type Campaign,
@@ -543,6 +546,9 @@ export function CampaignsPage({ user }: { user: SessionUser }) {
           <div className="panel p-4"><span className="section-kicker">Em preparação</span><strong className="mt-3 block text-3xl font-extrabold tracking-[-.07em] text-[#263044]" data-testid="text-draft-count">{formatNumber(counts.drafts)}</strong><span className="mt-1 block text-xs text-[#7d7e87]">rascunhos em aberto</span></div>
           <div className="panel p-4"><span className="section-kicker">Próxima janela</span><strong className="mt-3 block text-3xl font-extrabold tracking-[-.07em] text-[#263044]" data-testid="text-scheduled-count">{formatNumber(counts.scheduled)}</strong><span className="mt-1 block text-xs text-[#7d7e87]">campanhas agendadas</span></div>
         </div>
+        <div className="mb-8">
+          <AccountReputationCard />
+        </div>
         <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div><h2 className="text-lg font-extrabold tracking-[-0.03em] text-[#263044]">Todas as campanhas</h2><p className="mt-1 text-xs text-[#85858b]">O ponto de partida para cada importação validada.</p></div>
           <Link href="/campaigns/new" className="action-button action-button-primary" data-testid="link-new-campaign"><span className="text-lg leading-none">+</span> Nova campanha <ArrowRight size={15} /></Link>
@@ -682,24 +688,53 @@ function reminderState(subject: string, blocks: EmailBlock[], mainSubject: strin
 function useUnsavedChangesGuard(isDirty: boolean) {
   const dirtyRef = useRef(isDirty);
   const currentUrlRef = useRef('');
+  const pendingRef = useRef<{ target: HTMLElement; kind: 'click' | 'history' } | null>(null);
+  const [pending, setPending] = useState<{ target: HTMLElement; kind: 'click' | 'history' } | null>(null);
+  const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     dirtyRef.current = isDirty;
+    if (!isDirty) {
+      pendingRef.current = null;
+      setPending(null);
+    }
   }, [isDirty]);
+
+  useEffect(() => {
+    setPortalHost(null);
+    if (!pending) return;
+    const host = document.createElement('div');
+    host.className = 'basis-full min-w-0';
+    if (pending.target === document.body) {
+      document.body.appendChild(host);
+    } else {
+      pending.target.insertAdjacentElement('afterend', host);
+    }
+    setPortalHost(host);
+    return () => {
+      host.remove();
+    };
+  }, [pending]);
 
   useEffect(() => {
     if (!isDirty) return;
     currentUrlRef.current = window.location.href;
-    const confirmLeave = () => window.confirm('Há alterações não salvas. Deseja sair sem salvá-las?');
+    const askBeforeLeaving = (target: HTMLElement, kind: 'click' | 'history') => {
+      if (pendingRef.current) return;
+      const next = { target, kind };
+      pendingRef.current = next;
+      setPending(next);
+    };
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       if (!dirtyRef.current) return;
       event.preventDefault();
       event.returnValue = '';
     };
     const onClickCapture = (event: MouseEvent) => {
+      if (!dirtyRef.current) return;
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const target = event.target instanceof Element ? event.target : null;
-      const logout = target?.closest('[data-testid="button-logout"]');
+      const logout = target?.closest<HTMLElement>('[data-testid="button-logout"]');
       const anchor = target?.closest<HTMLAnchorElement>('a[href]');
       if (!logout && (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download'))) return;
       if (anchor) {
@@ -710,21 +745,21 @@ function useUnsavedChangesGuard(isDirty: boolean) {
             `${window.location.pathname}${window.location.search}${window.location.hash}`
         ) return;
       }
-      if (confirmLeave()) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      askBeforeLeaving((anchor ?? logout) as HTMLElement, 'click');
     };
     const onPopState = (event: PopStateEvent) => {
       if (!dirtyRef.current) {
         currentUrlRef.current = window.location.href;
         return;
       }
-      if (confirmLeave()) {
-        currentUrlRef.current = window.location.href;
-        return;
-      }
       event.stopImmediatePropagation();
       window.history.pushState(window.history.state, '', currentUrlRef.current);
+      const saveButton = document.querySelector<HTMLElement>(
+        '[data-testid="button-save-campaign"], [data-testid="button-save-unsaved"]',
+      );
+      askBeforeLeaving(saveButton ?? document.body, 'history');
     };
 
     document.addEventListener('click', onClickCapture, true);
@@ -734,8 +769,31 @@ function useUnsavedChangesGuard(isDirty: boolean) {
       document.removeEventListener('click', onClickCapture, true);
       window.removeEventListener('beforeunload', onBeforeUnload);
       window.removeEventListener('popstate', onPopState, true);
+      pendingRef.current = null;
     };
   }, [isDirty]);
+
+  if (!pending || !portalHost) return null;
+  return createPortal(
+    <ScrollConfirmation className="w-full basis-full">
+      <div className="rounded-xl border-2 border-[#e8c56f] bg-[#fff9e9] px-4 py-3 text-xs leading-5 text-[#74561c]" role="alertdialog" aria-labelledby="unsaved-navigation-title" data-testid="dialog-unsaved-navigation">
+        <p id="unsaved-navigation-title" className="font-extrabold">Há alterações não salvas.</p>
+        <p className="mt-1">Deseja sair sem salvá-las? As alterações desta tela serão perdidas.</p>
+        <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" onClick={() => { pendingRef.current = null; setPending(null); }} className="action-button action-button-secondary" data-testid="button-cancel-unsaved-navigation">Continuar editando</button>
+          <button type="button" onClick={() => {
+            const next = pendingRef.current;
+            pendingRef.current = null;
+            setPending(null);
+            dirtyRef.current = false;
+            if (next?.kind === 'history') window.history.back();
+            else next?.target.click();
+          }} className="action-button action-button-danger" data-testid="button-confirm-unsaved-navigation">Sair sem salvar</button>
+        </div>
+      </div>
+    </ScrollConfirmation>,
+    portalHost,
+  );
 }
 
 function CampaignForm({
@@ -755,6 +813,7 @@ function CampaignForm({
   operationSuccess,
   onClearOperationMessage,
   scheduleConfirmationPanel,
+  resumeConfirmationPanel,
   sendQuotaPanel,
   recipientSection,
   onCancel,
@@ -778,6 +837,7 @@ function CampaignForm({
   operationSuccess?: string | null;
   onClearOperationMessage?: () => void;
   scheduleConfirmationPanel?: ReactNode;
+  resumeConfirmationPanel?: ReactNode;
   sendQuotaPanel?: ReactNode;
   recipientSection?: ReactNode;
   onCancel?: () => void;
@@ -832,7 +892,7 @@ function CampaignForm({
   const isDirty = form.formState.isDirty;
   const currentReminderState = reminderState(reminderSubject, reminderBlocks, emailSubject);
   const buttonColor = campaign?.cor_botao_snapshot ?? defaultsQuery.data?.cor_botao_email ?? '#e96527';
-  useUnsavedChangesGuard(isDirty);
+  const unsavedNavigationConfirmation = useUnsavedChangesGuard(isDirty);
   const [uploadingBlockIds, setUploadingBlockIds] = useState<Set<string>>(() => new Set());
   const isUploadPending = uploadingBlockIds.size > 0;
 
@@ -1166,6 +1226,7 @@ function CampaignForm({
              {campaign.status === 'pausada' && onResume && <button type="button" onClick={onResume} disabled={transitionPending} className="action-button action-button-primary" data-testid="button-resume-campaign">{transitionPending ? <LoaderCircle size={15} className="animate-spin" /> : <Play size={15} />} Retomar envio</button>}
            </div>
          )}
+          {resumeConfirmationPanel}
           {campaign && ['agendada', 'enviando', 'pausada'].includes(campaign.status) && onCancel && (
             <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[#eee7dc] pt-5" data-testid="campaign-cancel-control">
                <div><p className="text-xs font-extrabold text-[#263044]">Cancelar campanha</p><p className="mt-1 text-[11px] text-[#777984]">Sem envios, volta para rascunho. Com algum envio, fica terminal; um lote ativo pode concluir.</p></div>
@@ -1209,6 +1270,7 @@ function CampaignForm({
          )}
          {operationError && <div className="mt-5 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" role="alert" data-testid="status-campaign-operation-error"><div className="flex items-start gap-3"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{operationError}</span></div></div>}
          {operationSuccess && <div className="mt-5 rounded-xl border border-[#b9d9bc] bg-[#eef7ee] px-4 py-3 text-sm leading-5 text-[#3f7b46]" role="status" data-testid="status-campaign-operation-success"><div className="flex items-start gap-3"><CheckCircle2 size={17} className="mt-0.5 shrink-0" /><span>{operationSuccess}</span></div></div>}
+         {unsavedNavigationConfirmation}
          {scheduleConfirmationPanel}
       </section>
 
@@ -1669,9 +1731,35 @@ export function RecipientSummaryPanel({
             <span className="block font-mono text-[9px] uppercase tracking-[.1em] text-[#417846]">Receberão de fato</span>
             <strong className="mt-1 block text-3xl font-extrabold tabular-nums tracking-[-.07em] text-[#247b79]" data-testid="text-recipient-total">{loading ? '…' : error ? '—' : formatNumber(summary?.receberao_de_fato)}</strong>
           </div>
-          <button type="button" onClick={onClear} disabled={clearPending || loading || !canClear || !summary?.total_na_lista} className="action-button action-button-secondary !px-3 !text-[#a64220] disabled:opacity-50" title={canClear ? 'Limpar destinatários' : 'A campanha está em operação'} data-testid="button-clear-recipients"><Trash2 size={15} /> <span className="hidden sm:inline">{confirmClear ? 'Confirmar limpeza' : 'Limpar lista'}</span></button>
+          <button type="button" onClick={onClear} aria-describedby={confirmClear ? 'clear-recipients-confirmation' : undefined} disabled={clearPending || loading || !canClear || !summary?.total_na_lista} className="action-button action-button-secondary !px-3 !text-[#a64220] disabled:opacity-50" title={canClear ? 'Limpar destinatários' : 'A campanha está em operação'} data-testid="button-clear-recipients"><Trash2 size={15} /> <span className="hidden sm:inline">{confirmClear ? 'Confirmar limpeza' : 'Limpar lista'}</span></button>
+          {confirmClear && (
+            <ScrollConfirmation className="mt-3 basis-full">
+              <div className="rounded-xl border-2 border-[#efc9ba] bg-[#fff3ee] px-4 py-4 text-xs leading-5 text-[#8e3a20]" role="alertdialog" aria-labelledby="clear-recipients-confirmation-title" id="clear-recipients-confirmation" data-testid="status-clear-recipients-confirmation">
+                <p id="clear-recipients-confirmation-title"><strong>Remover os {formatNumber(summary?.total)} destinatários desta campanha?</strong> Esta ação não pode ser desfeita. Use “Confirmar limpeza” para continuar.</p>
+                <button type="button" onClick={onCancelClear} className="action-button action-button-secondary mt-3 !px-3" data-testid="button-cancel-clear-recipients">Cancelar</button>
+              </div>
+            </ScrollConfirmation>
+          )}
         </div>
       </div>
+      {summary?.reputacao_avaliacao?.aviso_ativo && (
+        <div
+          className="mt-5 rounded-xl border-2 border-[#e8c56f] bg-[#fff9e9] px-4 py-3 text-xs leading-5 text-[#74561c]"
+          role="status"
+          data-testid="status-campaign-reputation-warning"
+        >
+          <p className="font-extrabold text-[#74561c]">Atenção à reputação desta campanha</p>
+          <p className="mt-1">
+            Avaliação {summary.reputacao_avaliacao.periodo_inicio
+              ? `desde a retomada em ${formatDate(summary.reputacao_avaliacao.periodo_inicio)}`
+              : 'desde o início da campanha'}; este aviso não pausa o envio.
+          </p>
+          <p className="mt-2 font-mono text-[10px]">
+            Bounce permanente: {formatNumber(summary.reputacao_avaliacao.bounce.quantidade)}/{formatNumber(summary.reputacao_avaliacao.total_enviado)} ({formatPercentage(summary.reputacao_avaliacao.bounce.percentual)}; alerta a partir de 2%).
+            {' '}Reclamações: {formatNumber(summary.reputacao_avaliacao.reclamacao.quantidade)}/{formatNumber(summary.reputacao_avaliacao.total_entregue)} entregues ({formatPercentage(summary.reputacao_avaliacao.reclamacao.percentual)}; alerta a partir de 0,1%).
+          </p>
+        </div>
+      )}
       {error ? (
         <div className="mt-5 flex items-start gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-recipient-summary-error"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{error}</span></div>
       ) : loading ? (
@@ -1728,7 +1816,7 @@ export function RecipientSummaryPanel({
              <div className="flex items-start justify-between gap-3">
                <div>
                  <h3 className="text-sm font-extrabold text-[#263044]">Sinais de reputação</h3>
-                  <p className="mt-1 text-xs text-[#7d7e87]">Bounce permanente é calculado sobre enviados; reclamações, sobre entregues. Estes são os números acumulados da campanha. Após uma retomada, a pausa automática avalia o período atual, não o acumulado; compare os dois no painel de provedores e exclusões.</p>
+                   <p className="mt-1 text-xs leading-5 text-[#7d7e87]">Bounce permanente é calculado sobre enviados; reclamações, sobre entregues. Estes números são acumulados. O alerta local começa em 2% / 0,1%; após uma retomada, a pausa automática avalia só o período atual. Referências da SES: revisão a partir de 5% / 0,1% e pausa possível a partir de 10% / 0,5%; a SES usa uma janela dinâmica própria.</p>
                </div>
                <ShieldCheck size={16} className="text-[#247b79]" />
              </div>
@@ -1746,7 +1834,7 @@ export function RecipientSummaryPanel({
                          <span className="text-xs font-extrabold text-[#263044]">{item.label}</span>
                          <p className="mt-1 text-[11px] leading-4 text-[#6d7180]">{item.description}</p>
                        </div>
-                       <span className="shrink-0 rounded-full bg-[#263044] px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-[.08em] text-[#fffaf6]">limite {formatPercentage(item.metric.limite_percentual)}</span>
+                        <span className="shrink-0 rounded-full bg-[#263044] px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-[.08em] text-[#fffaf6]">alerta local {formatPercentage(item.metric.limite_percentual)}</span>
                      </div>
                      <div className="mt-4 flex items-end justify-between gap-3">
                        <div>
@@ -1774,12 +1862,6 @@ export function RecipientSummaryPanel({
         </>
       )}
       {clearError && <div className="mt-4 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-xs text-[#a64220]" data-testid="status-clear-recipients-error">{clearError}</div>}
-      {confirmClear && (
-        <div className="mt-4 flex flex-col gap-3 rounded-xl border-2 border-[#efc9ba] bg-[#fff3ee] px-4 py-4 text-xs leading-5 text-[#8e3a20] sm:flex-row sm:items-center sm:justify-between" role="alert" data-testid="status-clear-recipients-confirmation">
-          <p><strong>Remover os {formatNumber(summary?.total)} destinatários desta campanha?</strong> Esta ação não pode ser desfeita.</p>
-          <button type="button" onClick={onCancelClear} className="action-button action-button-secondary shrink-0 !px-3" data-testid="button-cancel-clear-recipients">Cancelar</button>
-        </div>
-      )}
     </section>
   );
 }
@@ -2254,8 +2336,11 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
     query: {
       enabled: Boolean(campaignId),
       queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId),
-      refetchInterval: () =>
-        campaignQuery.data?.status === CampaignStatus.enviando ? 15000 : false,
+      refetchInterval: () => {
+        if (campaignQuery.data?.status === CampaignStatus.enviando) return 15000;
+        if (campaignQuery.data?.status === CampaignStatus.pausada) return 60000;
+        return false;
+      },
     },
   });
   const [exclusionOffset, setExclusionOffset] = useState(0);
@@ -2517,48 +2602,50 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
     </div>
   );
   const reputationResumePanel = confirmReputationResume && isReputationPause && campaign && (
-    <section
-      className="rounded-2xl border-2 border-[#bd4f26] bg-[#fff3ee] p-5 sm:p-6"
-      role="alertdialog"
-      aria-labelledby="reputation-resume-title"
-      data-testid="dialog-reputation-resume-confirmation"
-    >
-      <p className="section-kicker text-[#a64220]">Confirmação obrigatória</p>
-      <h3 id="reputation-resume-title" className="mt-2 text-lg font-extrabold text-[#263044]">
-        Esta campanha foi pausada por reputação.
-      </h3>
-      <p className="mt-2 text-sm leading-6 text-[#6d7180]">{campaign.pausa_motivo}</p>
-      <ResumeDiagnostics
-        rates={{ bounce: campaign.pausa_taxa_bounce, complaint: campaign.pausa_taxa_reclamacao }}
-        reason={null}
-        overview={exclusionQuery.data}
-        loading={exclusionQuery.isLoading}
-        error={exclusionQuery.isError}
-        onRetry={() => { void exclusionQuery.refetch(); }}
-      />
-      <p className="mt-4 text-xs leading-5 text-[#7d6c6c]">
-        Só retome depois de investigar a causa. Ao confirmar, o worker voltará a enviar para os destinatários pendentes.
-      </p>
-      <div className="mt-5 flex flex-col-reverse justify-end gap-3 sm:flex-row">
-        <button
-          type="button"
-          onClick={() => setConfirmReputationResume(false)}
-          className="action-button action-button-secondary"
-          data-testid="button-cancel-reputation-resume"
-        >
-          Voltar
-        </button>
-        <button
-          type="button"
-          onClick={() => changeCampaignStatus('enviando', true)}
-          disabled={resumeCampaign.isPending || exclusionQuery.isError || exclusionQuery.isFetching || !exclusionQuery.data}
-          className="action-button action-button-danger disabled:opacity-50"
-          data-testid="button-confirm-reputation-resume"
-        >
-          {resumeCampaign.isPending ? <><LoaderCircle size={15} className="animate-spin" /> Retomando...</> : 'Confirmar retomada'}
-        </button>
-      </div>
-    </section>
+    <ScrollConfirmation className="mt-5">
+      <section
+        className="rounded-2xl border-2 border-[#bd4f26] bg-[#fff3ee] p-5 sm:p-6"
+        role="alertdialog"
+        aria-labelledby="reputation-resume-title"
+        data-testid="dialog-reputation-resume-confirmation"
+      >
+        <p className="section-kicker text-[#a64220]">Confirmação obrigatória</p>
+        <h3 id="reputation-resume-title" className="mt-2 text-lg font-extrabold text-[#263044]">
+          Esta campanha foi pausada por reputação.
+        </h3>
+        <p className="mt-2 text-sm leading-6 text-[#6d7180]">{campaign.pausa_motivo}</p>
+        <ResumeDiagnostics
+          rates={{ bounce: campaign.pausa_taxa_bounce, complaint: campaign.pausa_taxa_reclamacao }}
+          reason={null}
+          overview={exclusionQuery.data}
+          loading={exclusionQuery.isLoading}
+          error={exclusionQuery.isError}
+          onRetry={() => { void exclusionQuery.refetch(); }}
+        />
+        <p className="mt-4 text-xs leading-5 text-[#7d6c6c]">
+          Só retome depois de investigar a causa. Ao confirmar, o worker voltará a enviar para os destinatários pendentes.
+        </p>
+        <div className="mt-5 flex flex-col-reverse justify-end gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => setConfirmReputationResume(false)}
+            className="action-button action-button-secondary"
+            data-testid="button-cancel-reputation-resume"
+          >
+            Voltar
+          </button>
+          <button
+            type="button"
+            onClick={() => changeCampaignStatus('enviando', true)}
+            disabled={resumeCampaign.isPending || exclusionQuery.isError || exclusionQuery.isFetching || !exclusionQuery.data}
+            className="action-button action-button-danger disabled:opacity-50"
+            data-testid="button-confirm-reputation-resume"
+          >
+            {resumeCampaign.isPending ? <><LoaderCircle size={15} className="animate-spin" /> Retomando...</> : 'Confirmar retomada'}
+          </button>
+        </div>
+      </section>
+    </ScrollConfirmation>
   );
 
   if (campaignQuery.isLoading) {
@@ -2572,8 +2659,22 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
       <div className="animate-rise-in-delay mx-auto max-w-5xl space-y-5">
          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div className="flex items-center gap-3"><Link href="/" className="action-button action-button-secondary !px-3" data-testid="link-back-campaign-list"><ArrowLeft size={15} /></Link><div><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#92939a]">ID {campaign.id}</p><div className="mt-1 flex items-center gap-2"><StatusPill status={campaign.status} /><span className="text-xs text-[#777984]">{statusDescriptions[campaign.status]}</span></div></div></div>
-           <div className="flex flex-wrap items-center justify-end gap-2">
-             <div className="relative"><button onClick={() => setConfirmDelete((open) => !open)} className="action-button action-button-danger" data-testid="button-delete-campaign"><Trash2 size={15} /> Excluir campanha</button>{confirmDelete && <div className="absolute right-0 top-12 z-10 w-72 rounded-xl border border-[#efc9ba] bg-[#fffaf6] p-4 text-left shadow-[0_18px_45px_rgba(38,48,68,.14)]"><p className="text-sm font-extrabold text-[#263044]">Excluir esta campanha?</p><p className="mt-1 text-xs leading-5 text-[#7d6c6c]">Esta ação remove os metadados da campanha.</p><div className="mt-4 flex justify-end gap-2"><button onClick={() => setConfirmDelete(false)} className="action-button action-button-secondary !px-3" data-testid="button-cancel-delete">Cancelar</button><button onClick={deleteCurrent} disabled={deleteCampaign.isPending} className="action-button action-button-danger !px-3" data-testid="button-confirm-delete">{deleteCampaign.isPending ? <LoaderCircle size={14} className="animate-spin" /> : 'Excluir'}</button></div></div>}</div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="relative">
+                <button onClick={() => setConfirmDelete((open) => !open)} className="action-button action-button-danger" data-testid="button-delete-campaign"><Trash2 size={15} /> Excluir campanha</button>
+                {confirmDelete && (
+                  <ScrollConfirmation className="absolute right-0 top-12 z-10 w-72 max-w-[calc(100vw-2rem)]">
+                    <div className="rounded-xl border border-[#efc9ba] bg-[#fffaf6] p-4 text-left shadow-[0_18px_45px_rgba(38,48,68,.14)]" role="alertdialog" aria-labelledby="delete-campaign-title" data-testid="dialog-delete-campaign">
+                      <p id="delete-campaign-title" className="text-sm font-extrabold text-[#263044]">Excluir esta campanha?</p>
+                      <p className="mt-1 text-xs leading-5 text-[#7d6c6c]">Esta ação remove os metadados da campanha.</p>
+                      <div className="mt-4 flex justify-end gap-2">
+                        <button onClick={() => setConfirmDelete(false)} className="action-button action-button-secondary !px-3" data-testid="button-cancel-delete">Cancelar</button>
+                        <button onClick={deleteCurrent} disabled={deleteCampaign.isPending} className="action-button action-button-danger !px-3" data-testid="button-confirm-delete">{deleteCampaign.isPending ? <LoaderCircle size={14} className="animate-spin" /> : 'Excluir'}</button>
+                      </div>
+                    </div>
+                  </ScrollConfirmation>
+                )}
+              </div>
            </div>
         </div>
         {deleteCampaign.isError && <div className="rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm text-[#a64220]" data-testid="status-delete-error">Não foi possível excluir a campanha. Tente novamente.</div>}
@@ -2588,7 +2689,6 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
              error={auditQuery.isError}
              onRetry={() => { void auditQuery.refetch(); }}
            />
-          {reputationResumePanel}
           {campaign.retomada_em && (
             <p className="rounded-xl border border-[#e5ddd0] bg-[#fbf9f5] px-4 py-3 text-xs text-[#6d7180]" data-testid="text-campaign-resumed-by">
               Retomada em {formatDate(campaign.retomada_em)}
@@ -2645,6 +2745,7 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
              operationSuccess={operationSuccess}
              onClearOperationMessage={() => { setOperationError(null); setOperationSuccess(null); }}
              scheduleConfirmationPanel={scheduleConfirmationPanel}
+             resumeConfirmationPanel={reputationResumePanel}
              sendQuotaPanel={(campaign.status === 'enviando' || campaign.status === 'pausada') ? <SendQuotaPanel campaign={campaign} /> : null}
               onCancel={cancelCurrentCampaign}
               cancelPending={cancelCampaign.isPending}

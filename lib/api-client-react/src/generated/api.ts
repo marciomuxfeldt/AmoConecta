@@ -43,6 +43,7 @@ import type {
   EmailBranding,
   EmailBrandingUpdate,
   EmailImageUploadUrl,
+  EngagementReputation,
   EngagementSummary,
   Error,
   GetCampaignExclusionsParams,
@@ -645,6 +646,84 @@ export function useGetEngagementSummary<TData = Awaited<ReturnType<typeof getEng
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetEngagementSummaryQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetEngagementReputationUrl = () => {
+
+
+
+
+  return `/api/engagement/reputation`
+}
+
+/**
+ * Inclui envios principais e lembretes de campanhas; não substitui as métricas oficiais da conta Amazon SES.
+ * @summary Retorna uma estimativa de reputação das campanhas nos últimos 14 dias
+ */
+export const getEngagementReputation = async ( options?: Parameters<typeof customFetch>[1]): Promise<EngagementReputation> => {
+
+  return customFetch<EngagementReputation>(getGetEngagementReputationUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEngagementReputationQueryKey = () => {
+    return [
+    `/api/engagement/reputation`
+    ] as const;
+    }
+
+
+export const getGetEngagementReputationQueryOptions = <TData = Awaited<ReturnType<typeof getEngagementReputation>>, TError = ErrorType<Error>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEngagementReputation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEngagementReputationQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEngagementReputation>>> = ({ signal }) => getEngagementReputation({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEngagementReputation>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetEngagementReputationQueryResult = NonNullable<Awaited<ReturnType<typeof getEngagementReputation>>>
+export type GetEngagementReputationQueryError = ErrorType<Error>
+
+
+/**
+ * @summary Retorna uma estimativa de reputação das campanhas nos últimos 14 dias
+ */
+
+export function useGetEngagementReputation<TData = Awaited<ReturnType<typeof getEngagementReputation>>, TError = ErrorType<Error>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEngagementReputation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetEngagementReputationQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

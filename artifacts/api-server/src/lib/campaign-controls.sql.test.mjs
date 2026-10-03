@@ -48,6 +48,7 @@ before(async () => {
   await db.exec(await sqlFile("migrations/202610020016_campaign_exclusions_reputation.sql"));
   await db.exec(await sqlFile("migrations/202610020017_bounce_terminal_semantics.sql"));
   await db.exec(await sqlFile("migrations/202610030018_bounded_event_matching.sql"));
+  await db.exec(await sqlFile("migrations/202610030019_account_campaign_reputation_14d.sql"));
 });
 after(() => db.close());
 
@@ -75,6 +76,63 @@ test("known test messages leave the retry queue immediately, including old high-
     assert.equal((await row("SELECT count(*) AS n FROM destinatario WHERE resend_email_id=$1", [providerId])).n, 0);
     assert.equal((await row("SELECT process_resend_email_event($1) AS value", [id])).value.duplicate, true);
   }
+});
+
+test("14-day account estimate combines campaign sends and reminders and ignores older sends", async () => {
+  const main = await recipient("account-main@example.test");
+  const reminder = await recipient("account-reminder@example.test", "entregue", true);
+  const secondCampaign = await row(
+    `INSERT INTO destinatario(campanha_id,email,status,is_lembrete,enviado_em,entregue_em)
+      VALUES($1,'account-second@example.test','entregue',false,now(),now()) RETURNING id`,
+    [other],
+  );
+  const old = await recipient("account-old@example.test");
+
+  await db.query(
+    `UPDATE destinatario SET enviado_em=now(),entregue_em=now(),resend_email_id=id::text
+      WHERE id=$1`,
+    [main],
+  );
+  await db.query(
+    `UPDATE destinatario SET enviado_em=now(),entregue_em=now(),resend_email_id=id::text
+      WHERE id=$1`,
+    [reminder],
+  );
+  await db.query(
+    `UPDATE destinatario SET enviado_em=now()-interval '15 days',
+      entregue_em=now()-interval '15 days',resend_email_id=id::text WHERE id=$1`,
+    [old],
+  );
+  await db.query(
+    `INSERT INTO evento_email(destinatario_id,resend_email_id,tipo,bounce_permanente,ocorrido_em)
+      VALUES($1,$2,'email.bounced',true,now())`,
+    [main, main],
+  );
+  await db.query(
+    `INSERT INTO evento_email(destinatario_id,resend_email_id,tipo,ocorrido_em)
+      VALUES($1,$2,'email.complained',now())`,
+    [reminder, reminder],
+  );
+  await db.query(
+    `INSERT INTO evento_email(destinatario_id,resend_email_id,tipo,bounce_permanente,ocorrido_em)
+      VALUES($1,$2,'email.bounced',true,now()-interval '15 days')`,
+    [old, old],
+  );
+
+  const { value } = await row(
+    "SELECT account_campaign_reputation_counts_14d() AS value",
+  );
+  assert.equal(value.total_enviado, 3);
+  assert.equal(value.total_entregue, 3);
+  assert.equal(value.bounces_permanentes, 1);
+  assert.equal(value.reclamacoes, 1);
+  assert.ok(Date.parse(value.periodo_fim) > Date.parse(value.periodo_inicio));
+  await db.query("DELETE FROM evento_email WHERE destinatario_id = ANY($1::uuid[])", [
+    [main, reminder, secondCampaign.id, old],
+  ]);
+  await db.query("DELETE FROM destinatario WHERE id = ANY($1::uuid[])", [
+    [main, reminder, secondCampaign.id, old],
+  ]);
 });
 
 test("unknown IDs retry briefly, and attempt 10 ends with audit reason, never technical error", async () => {

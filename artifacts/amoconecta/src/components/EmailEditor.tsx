@@ -16,6 +16,7 @@ import {
   Trash2,
   Type,
 } from "lucide-react";
+import { ScrollConfirmation } from "./ScrollConfirmation";
 import {
   type EmailBlock,
   interpolateEmailText,
@@ -317,13 +318,10 @@ function insertLink() {
       window.alert("Informe uma URL válida começando com https://.");
       return null;
     }
-    if (!window.confirm(`Você quis dizer ${suggestion}? Confirme para aplicar o complemento https://.`)) {
-      return null;
-    }
-    href = suggestion;
+    return { suggestion };
   }
   document.execCommand("createLink", false, href);
-  return href;
+  return { href };
 }
 
 function RichTextBlock({
@@ -336,10 +334,12 @@ function RichTextBlock({
   disabled?: boolean;
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
+  const selectionRef = useRef<Range | null>(null);
   const initialHtmlRef = useRef(sanitizeRichTextHtml(block.html));
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const initializedRef = useRef(false);
+  const [pendingLinkSuggestion, setPendingLinkSuggestion] = useState<string | null>(null);
   const setEditorRef = (node: HTMLDivElement | null) => {
     editorRef.current = node;
     if (node && !initializedRef.current) {
@@ -358,6 +358,20 @@ function RichTextBlock({
     document.execCommand(name, false, value);
     syncState();
   };
+  const acceptSuggestedLink = () => {
+    if (!pendingLinkSuggestion || !editorRef.current) return;
+    editorRef.current.focus();
+    const selection = window.getSelection();
+    const savedRange = selectionRef.current;
+    if (selection && savedRange && editorRef.current.contains(savedRange.commonAncestorContainer)) {
+      selection.removeAllRanges();
+      selection.addRange(savedRange);
+    }
+    document.execCommand("createLink", false, pendingLinkSuggestion);
+    syncState();
+    selectionRef.current = null;
+    setPendingLinkSuggestion(null);
+  };
 
   return (
     <div className="overflow-hidden rounded-[1rem] border border-[#ded5c8] bg-[#fffdf9] shadow-[0_5px_16px_rgba(38,48,68,.035)]">
@@ -365,9 +379,30 @@ function RichTextBlock({
         <span className="mr-1 px-1.5 font-mono text-[9px] uppercase tracking-[.14em] text-[#99959a]">Formatação</span>
         <button type="button" disabled={disabled} onMouseDown={(event) => { event.preventDefault(); command("bold"); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Aplicar negrito" title="Negrito" data-testid={`button-bold-${block.id}`}><Bold size={14} /></button>
         <button type="button" disabled={disabled} onMouseDown={(event) => { event.preventDefault(); command("italic"); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Aplicar itálico" title="Itálico" data-testid={`button-italic-${block.id}`}><Italic size={14} /></button>
-         <button type="button" disabled={disabled} onMouseDown={(event) => { event.preventDefault(); const inserted = insertLink(); if (inserted && editorRef.current) onChange(sanitizeRichTextHtml(editorRef.current.innerHTML)); }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Adicionar link ao texto" title="Adicionar link" data-testid={`button-link-${block.id}`}><Link2 size={14} /></button>
+        <button type="button" disabled={disabled} onMouseDown={(event) => {
+          event.preventDefault();
+          const selection = window.getSelection();
+          selectionRef.current = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+          const result = insertLink();
+          if (result?.suggestion) setPendingLinkSuggestion(result.suggestion);
+          else if (result?.href && editorRef.current) onChange(sanitizeRichTextHtml(editorRef.current.innerHTML));
+        }} className="focus-ring rounded-lg p-2 text-[#42495b] transition-colors hover:bg-[#ebe3d8] hover:text-[#263044] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Adicionar link ao texto" title="Adicionar link" data-testid={`button-link-${block.id}`}><Link2 size={14} /></button>
         <span className="ml-auto font-mono text-[9px] uppercase tracking-[.1em] text-[#99959a]">Use {"{{nome}}"} na saudação</span>
       </div>
+      {pendingLinkSuggestion && (
+        <ScrollConfirmation className="border-b border-[#e8c56f] bg-[#fff9e9] px-4 py-3">
+          <div className="flex flex-col gap-3 text-xs leading-5 text-[#74561c] sm:flex-row sm:items-center sm:justify-between" role="alertdialog" aria-labelledby={`link-suggestion-title-${block.id}`} data-testid={`dialog-link-url-confirmation-${block.id}`}>
+            <div>
+              <p id={`link-suggestion-title-${block.id}`} className="font-extrabold">Confirmar correção do endereço?</p>
+              <p className="mt-1">Aplicar <span className="font-mono">{pendingLinkSuggestion}</span> como destino seguro.</p>
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <button type="button" onClick={() => { selectionRef.current = null; setPendingLinkSuggestion(null); }} className="action-button action-button-secondary !px-3" data-testid={`button-cancel-link-url-${block.id}`}>Voltar</button>
+              <button type="button" onClick={acceptSuggestedLink} className="action-button action-button-primary !px-3" data-testid={`button-confirm-link-url-${block.id}`}>Aplicar https://</button>
+            </div>
+          </div>
+        </ScrollConfirmation>
+      )}
       <div
         ref={setEditorRef}
         contentEditable={!disabled}

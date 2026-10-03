@@ -6,6 +6,7 @@ import {
   GetBiExportParams,
   GetBiExportResponse,
   GetEmailBrandingResponse,
+  GetEngagementReputationResponse,
   GetEngagementSummaryResponse,
   ListBiExportsResponse,
   UpdateEmailBrandingBody,
@@ -171,6 +172,61 @@ router.get("/engagement/summary", async (req, res): Promise<void> => {
     reportError(req, "Engagement summary could not be loaded", error);
     res.status(503).json({
       error: "Aplique a migração final do AmoConecta para carregar o resumo de engajamento.",
+    });
+  }
+});
+
+router.get("/engagement/reputation", async (req, res): Promise<void> => {
+  if (!(await requireSession(req, res))) return;
+  try {
+    const { data, error } = await supabaseAdminClient().rpc(
+      "account_campaign_reputation_counts_14d",
+    );
+    if (error) throw error;
+    if (!data || typeof data !== "object") {
+      throw new Error("A RPC de reputação consolidada retornou um resultado inválido.");
+    }
+    const counts = data as Record<string, unknown>;
+    const totalSent = counts.total_enviado;
+    const totalDelivered = counts.total_entregue;
+    const hardBounces = counts.bounces_permanentes;
+    const complaints = counts.reclamacoes;
+    if (
+      typeof counts.periodo_inicio !== "string" ||
+      typeof counts.periodo_fim !== "string" ||
+      typeof totalSent !== "number" ||
+      typeof totalDelivered !== "number" ||
+      typeof hardBounces !== "number" ||
+      typeof complaints !== "number"
+    ) {
+      throw new Error("A RPC de reputação consolidada retornou campos inválidos.");
+    }
+
+    res.json(
+      GetEngagementReputationResponse.parse({
+        periodo_inicio: counts.periodo_inicio,
+        periodo_fim: counts.periodo_fim,
+        total_enviado: totalSent,
+        total_entregue: totalDelivered,
+        bounce: {
+          quantidade: hardBounces,
+          percentual: totalSent > 0 ? (hardBounces / totalSent) * 100 : 0,
+          limite_revisao_percentual: 5,
+          limite_pausa_percentual: 10,
+        },
+        reclamacao: {
+          quantidade: complaints,
+          percentual:
+            totalDelivered > 0 ? (complaints / totalDelivered) * 100 : 0,
+          limite_revisao_percentual: 0.1,
+          limite_pausa_percentual: 0.5,
+        },
+      }),
+    );
+  } catch (error) {
+    reportError(req, "Engagement reputation estimate could not be loaded", error);
+    res.status(503).json({
+      error: "Não foi possível carregar a estimativa de reputação dos últimos 14 dias.",
     });
   }
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { CircleAlert, Clock3, MailPlus, RefreshCw, RotateCw, Send, ShieldCheck, UserMinus, Users, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -15,6 +15,7 @@ import {
   type TeamInvitation,
 } from '@workspace/api-client-react';
 import { Shell, type SessionUser } from './campaigns';
+import { ScrollConfirmation } from '../components/ScrollConfirmation';
 
 const inviteSchema = z.object({
   email: z.string()
@@ -50,12 +51,14 @@ function MemberRow({
   pending,
   currentUserEmail,
   activeCount,
+  confirmation,
 }: {
   member: TeamMember;
   onDeactivate: (member: TeamMember) => void;
   pending: boolean;
   currentUserEmail: string;
   activeCount: number;
+  confirmation?: ReactNode;
 }) {
   const initials = member.nome.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
   const protectedLabel = member.email.toLowerCase() === currentUserEmail.toLowerCase()
@@ -74,6 +77,7 @@ function MemberRow({
           ? <span className="status-pill bg-[#eee9e1] text-[#8a8790]" data-testid={`status-team-member-protected-${member.user_id}`}><ShieldCheck size={12} /> {protectedLabel}</span>
           : <button type="button" onClick={() => onDeactivate(member)} disabled={pending} className="action-button action-button-danger self-start !px-3 sm:self-auto" data-testid={`button-deactivate-member-${member.user_id}`}><UserMinus size={14} /> Desativar</button>
         : <span className="status-pill bg-[#eee9e1] text-[#8a8790]" data-testid={`status-team-member-inactive-${member.user_id}`}><span className="status-dot" /> Inativo</span>}
+      {confirmation && <ScrollConfirmation className="basis-full">{confirmation}</ScrollConfirmation>}
     </div>
   );
 }
@@ -135,6 +139,17 @@ export default function TeamPage({ user }: { user: SessionUser }) {
                   pending={deactivate.isPending}
                   currentUserEmail={user?.email ?? ''}
                   activeCount={activeCount}
+                  confirmation={confirmMember?.user_id === member.user_id ? (
+                    <section className="rounded-xl border-2 border-[#bd4f26] bg-[#fff8f3] p-4" role="alertdialog" aria-labelledby="deactivate-title" data-testid="dialog-deactivate-member">
+                      <p className="section-kicker">Revisar alteração</p>
+                      <h2 id="deactivate-title" className="mt-2 text-base font-extrabold text-[#263044]">Desativar {member.nome}?</h2>
+                      <p className="mt-2 text-sm leading-6 text-[#6d7180]">O histórico de campanhas permanece, mas esta pessoa perde o acesso ao console.</p>
+                      <div className="mt-4 flex flex-col-reverse justify-end gap-2 sm:flex-row">
+                        <button type="button" onClick={() => setConfirmMember(null)} className="action-button action-button-secondary" data-testid="button-cancel-deactivate-member">Voltar</button>
+                        <button type="button" onClick={deactivateMember} disabled={deactivate.isPending} className="action-button action-button-danger" data-testid="button-confirm-deactivate-member">{deactivate.isPending ? <RefreshCw size={15} className="animate-spin" /> : <UserMinus size={15} />} Desativar acesso</button>
+                      </div>
+                    </section>
+                  ) : null}
                 />
               ))}
             </div>
@@ -147,6 +162,5 @@ export default function TeamPage({ user }: { user: SessionUser }) {
       </div>
       <section className="panel p-6 sm:p-8" data-testid="panel-pending-invites"><div className="flex items-end justify-between gap-4"><div><p className="section-kicker">Aguardando aceite</p><h2 className="mt-2 text-2xl font-extrabold tracking-[-.06em] text-[#263044]">Convites pendentes</h2></div><span className="font-mono text-[10px] uppercase tracking-[.12em] text-[#979198]">{team?.convites.length ?? 0} registros</span></div>{team?.convites.length ? <div className="mt-4">{team.convites.map((invite) => <InviteRow key={invite.id} invite={invite} onCancel={(item) => runAction('cancel', item)} onResend={(item) => runAction('resend', item)} pending={resendInvite.isPending || cancelInvite.isPending} />)}</div> : <div className="mt-6 rounded-xl border border-dashed border-[#cdbfae] bg-[#f8f3ec] px-5 py-8 text-center text-sm text-[#7d7e87]" data-testid="empty-team-invites">Nenhum convite pendente.</div>}</section>
     </div>}
-    {confirmMember && <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#263044]/35 px-5 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="deactivate-title" data-testid="dialog-deactivate-member"><div className="w-full max-w-md rounded-2xl border border-[#e3dbcf] bg-[#fbf9f5] p-6 shadow-[0_22px_60px_rgba(38,48,68,.2)]"><p className="section-kicker">Revisar alteração</p><h2 id="deactivate-title" className="mt-2 text-xl font-extrabold text-[#263044]">Desativar {confirmMember.nome}?</h2><p className="mt-2 text-sm leading-6 text-[#6d7180]">O histórico de campanhas permanece, mas esta pessoa perde o acesso ao console.</p><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setConfirmMember(null)} className="action-button action-button-secondary" data-testid="button-cancel-deactivate-member">Voltar</button><button type="button" onClick={deactivateMember} disabled={deactivate.isPending} className="action-button action-button-danger" data-testid="button-confirm-deactivate-member">{deactivate.isPending ? <RefreshCw size={15} className="animate-spin" /> : <UserMinus size={15} />} Desativar acesso</button></div></div></div>}
   </Shell>;
 }

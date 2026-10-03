@@ -50,6 +50,31 @@ export interface EngagementSummary {
   calculado_em: string | null;
 }
 
+export interface EngagementReputationMetric {
+  /** @minimum 0 */
+  quantidade: number;
+  /** @minimum 0 */
+  percentual: number;
+  /** @minimum 0 */
+  limite_revisao_percentual: number;
+  /** @minimum 0 */
+  limite_pausa_percentual: number;
+}
+
+/**
+ * Approximation based on campaign recipients recorded locally, not the account-level SES reputation calculation.
+ */
+export interface EngagementReputation {
+  periodo_inicio: string;
+  periodo_fim: string;
+  /** @minimum 0 */
+  total_enviado: number;
+  /** @minimum 0 */
+  total_entregue: number;
+  bounce: EngagementReputationMetric;
+  reclamacao: EngagementReputationMetric;
+}
+
 export type BiExportFilter = typeof BiExportFilter[keyof typeof BiExportFilter];
 
 
@@ -222,6 +247,21 @@ export interface RecipientReputationSummary {
   reclamacao: RecipientReputationMetric;
 }
 
+export interface CampaignReputationEvaluation {
+  /**
+     * Marco da última retomada; null quando ainda não houve retomada.
+     * @nullable
+     */
+  periodo_inicio: string | null;
+  /** @minimum 0 */
+  total_enviado: number;
+  /** @minimum 0 */
+  total_entregue: number;
+  bounce: RecipientReputationMetric;
+  reclamacao: RecipientReputationMetric;
+  aviso_ativo: boolean;
+}
+
 export interface RecipientEmailMetric {
   /** @minimum 0 */
   quantidade: number;
@@ -284,6 +324,7 @@ export interface CampaignRecipientSummary {
   receberao_de_fato: number;
   status: RecipientStatusSummary;
   reputacao: RecipientReputationSummary;
+  reputacao_avaliacao: CampaignReputationEvaluation;
   metricas_email: CampaignEmailMetrics;
   status_lembrete: RecipientStatusSummary;
   metricas_email_lembrete: CampaignEmailMetrics;

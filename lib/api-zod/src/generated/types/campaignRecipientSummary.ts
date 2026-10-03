@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CampaignEmailMetrics } from './campaignEmailMetrics';
+import type { CampaignReputationEvaluation } from './campaignReputationEvaluation';
 import type { RecipientRecencyBucket } from './recipientRecencyBucket';
 import type { RecipientReputationSummary } from './recipientReputationSummary';
 import type { RecipientStatusSummary } from './recipientStatusSummary';
@@ -43,6 +44,7 @@ export interface CampaignRecipientSummary {
   receberao_de_fato: number;
   status: RecipientStatusSummary;
   reputacao: RecipientReputationSummary;
+  reputacao_avaliacao: CampaignReputationEvaluation;
   metricas_email: CampaignEmailMetrics;
   status_lembrete: RecipientStatusSummary;
   metricas_email_lembrete: CampaignEmailMetrics;

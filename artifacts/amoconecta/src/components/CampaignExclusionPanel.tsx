@@ -23,6 +23,7 @@ import {
   useExcludeCampaignRecipients,
   useRestoreCampaignRecipients,
 } from '@workspace/api-client-react';
+import { ScrollConfirmation } from './ScrollConfirmation';
 
 export const EXCLUSION_PAGE_SIZE = 20;
 export const EXCLUSION_CSV_MAX_BYTES = 5_000_000;
@@ -455,20 +456,22 @@ export function CampaignExclusionPanel({
         </fieldset>
         {formError && <Notice tone="error" testId="status-exclude-error">{formError}</Notice>}
         {confirming && (
-          <div className="mt-4 rounded-xl border-2 border-[#d35f2a] bg-[#fff8ef] p-4 text-xs leading-5 text-[#6d4a2a]" role="alertdialog" data-testid="dialog-exclude-confirmation">
-            <strong className="text-sm text-[#263044]">Confirmar exclusão da fila?</strong>
-            <p className="mt-1">
-              {providers.length > 0 && <>Provedores: {providers.map((p) => providerLabels[p]).join(', ')}. </>}
-              {csvName && <>CSV: {csvName}. </>}
-              {emails.length > 0 && <>{nf(emails.length)} endereços informados. </>}
-              Motivo: {motivo.trim()}
-            </p>
-            <p className="mt-2 font-bold text-[#a64220]" data-testid="text-exclude-processing-warning">Envios que já estão em processamento não são cancelados e podem ser entregues mesmo após a exclusão.</p>
-            <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button type="button" onClick={() => setConfirming(false)} className="action-button action-button-secondary" data-testid="button-exclude-cancel">Voltar</button>
-              <button type="button" onClick={submitExclusion} disabled={exclude.isPending} className="action-button action-button-danger" data-testid="button-exclude-confirm">{exclude.isPending ? <><LoaderCircle size={14} className="animate-spin" /> Excluindo...</> : 'Confirmar exclusão'}</button>
+          <ScrollConfirmation className="mt-4">
+            <div className="rounded-xl border-2 border-[#d35f2a] bg-[#fff8ef] p-4 text-xs leading-5 text-[#6d4a2a]" role="alertdialog" data-testid="dialog-exclude-confirmation">
+              <strong className="text-sm text-[#263044]">Confirmar exclusão da fila?</strong>
+              <p className="mt-1">
+                {providers.length > 0 && <>Provedores: {providers.map((p) => providerLabels[p]).join(', ')}. </>}
+                {csvName && <>CSV: {csvName}. </>}
+                {emails.length > 0 && <>{nf(emails.length)} endereços informados. </>}
+                Motivo: {motivo.trim()}
+              </p>
+              <p className="mt-2 font-bold text-[#a64220]" data-testid="text-exclude-processing-warning">Envios que já estão em processamento não são cancelados e podem ser entregues mesmo após a exclusão.</p>
+              <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button type="button" onClick={() => setConfirming(false)} className="action-button action-button-secondary" data-testid="button-exclude-cancel">Voltar</button>
+                <button type="button" onClick={submitExclusion} disabled={exclude.isPending} className="action-button action-button-danger" data-testid="button-exclude-confirm">{exclude.isPending ? <><LoaderCircle size={14} className="animate-spin" /> Excluindo...</> : 'Confirmar exclusão'}</button>
+              </div>
             </div>
-          </div>
+          </ScrollConfirmation>
         )}
         {result && (
           <Notice tone="ok" testId="status-exclude-result">
@@ -484,26 +487,39 @@ export function CampaignExclusionPanel({
         </div>
         {restoreMessage && <Notice tone="ok" testId="status-restore-success">{restoreMessage}</Notice>}
         {restore.isError && <Notice tone="error" testId="status-restore-error">{errText(restore.error, 'Não foi possível restaurar.')}</Notice>}
-        {restoreTarget && (
-          <div className="mt-3 flex flex-col gap-3 rounded-xl border-2 border-[#e8c56f] bg-[#fff9e9] px-4 py-3 text-xs text-[#74561c] sm:flex-row sm:items-center sm:justify-between" role="alertdialog" data-testid="dialog-restore-confirmation">
-            <p><strong>{restoreTarget === 'all' ? `Restaurar os ${nf(total)} excluídos?` : 'Restaurar este destinatário?'}</strong> Eles voltam à fila de envio.</p>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setRestoreTarget(null)} className="action-button action-button-secondary !px-3" data-testid="button-restore-cancel">Cancelar</button>
-              <button type="button" onClick={submitRestore} disabled={restore.isPending} className="action-button action-button-primary !px-3" data-testid="button-restore-confirm">{restore.isPending ? 'Restaurando...' : 'Confirmar restauração'}</button>
+        {restoreTarget === 'all' && (
+          <ScrollConfirmation className="mt-3">
+            <div className="flex flex-col gap-3 rounded-xl border-2 border-[#e8c56f] bg-[#fff9e9] px-4 py-3 text-xs text-[#74561c] sm:flex-row sm:items-center sm:justify-between" role="alertdialog" data-testid="dialog-restore-confirmation">
+              <p><strong>Restaurar os {nf(total)} excluídos?</strong> Eles voltam à fila de envio.</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setRestoreTarget(null)} className="action-button action-button-secondary !px-3" data-testid="button-restore-cancel">Cancelar</button>
+                <button type="button" onClick={submitRestore} disabled={restore.isPending} className="action-button action-button-primary !px-3" data-testid="button-restore-confirm">{restore.isPending ? 'Restaurando...' : 'Confirmar restauração'}</button>
+              </div>
             </div>
-          </div>
+          </ScrollConfirmation>
         )}
         {overview && overview.excluidos.length === 0 ? (
           <div className="mt-3 rounded-xl border border-dashed border-[#cdbfae] bg-[#f8f3ec] px-5 py-8 text-center text-sm text-[#7d7e87]" data-testid="empty-excluded-recipients">Nenhum destinatário excluído desta campanha.</div>
         ) : overview ? (
           <ul className="mt-3 divide-y divide-[#eee7dc] rounded-xl border border-[#e5ddd0] bg-[#fffdf9]">
             {overview.excluidos.map((r) => (
-              <li key={r.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between" data-testid={`row-excluded-${r.id}`}>
+              <li key={r.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between" data-testid={`row-excluded-${r.id}`}>
                 <div className="min-w-0 text-xs">
                   <p className="truncate font-extrabold text-[#263044]">{r.email}{r.nome ? <span className="font-medium text-[#7d7e87]"> · {r.nome}</span> : null}</p>
                   <p className="mt-0.5 text-[#6d7180]">{r.exclusao_motivo} · {fmtDate(r.excluido_em)} · por {r.excluido_por_nome ?? r.excluido_por_email ?? 'Equipe Amo'} · status {r.status}</p>
                 </div>
                 <button type="button" disabled={locked || restore.isPending} onClick={() => { setRestoreMessage(null); setRestoreTarget(r.id); }} className="action-button action-button-secondary !px-3 shrink-0 disabled:opacity-50" data-testid={`button-restore-${r.id}`}><RotateCcw size={13} /> Restaurar</button>
+                {restoreTarget === r.id && (
+                  <ScrollConfirmation className="basis-full">
+                    <div className="rounded-xl border-2 border-[#e8c56f] bg-[#fff9e9] px-4 py-3 text-xs text-[#74561c]" role="alertdialog" data-testid="dialog-restore-confirmation">
+                      <p><strong>Restaurar {r.email}?</strong> O destinatário volta à fila de envio.</p>
+                      <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                        <button type="button" onClick={() => setRestoreTarget(null)} className="action-button action-button-secondary !px-3" data-testid="button-restore-cancel">Cancelar</button>
+                        <button type="button" onClick={submitRestore} disabled={restore.isPending} className="action-button action-button-primary !px-3" data-testid="button-restore-confirm">{restore.isPending ? 'Restaurando...' : 'Confirmar restauração'}</button>
+                      </div>
+                    </div>
+                  </ScrollConfirmation>
+                )}
               </li>
             ))}
           </ul>

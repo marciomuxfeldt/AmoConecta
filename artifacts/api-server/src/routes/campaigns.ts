@@ -51,7 +51,11 @@ import {
   noEligibleRecipientsScheduleMessage,
 } from "../lib/campaign-schedule-policy";
 import { recipientDeliveryProjection } from "../lib/recipient-delivery-projection";
-import { loadReputationCounts, reputationPeriod } from "../lib/campaign-reputation";
+import {
+  hasCampaignReputationWarning,
+  loadReputationCounts,
+  reputationPeriod,
+} from "../lib/campaign-reputation";
 import {
   applyConfiguredReplyTo,
   configuredSenderEmail,
@@ -576,7 +580,7 @@ function dateOnlyDaysAgo(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-async function recipientSummary(campaignId: string) {
+async function recipientSummary(campaignId: string, resumedAt: string | null) {
   const today = dateOnlyDaysAgo(0);
   const statusQueries = [
     ["pendente", ["pendente", "processando"]],
@@ -629,6 +633,12 @@ async function recipientSummary(campaignId: string) {
     totalSent > 0 ? (email.bouncesPermanentes / totalSent) * 100 : 0;
   const complaintRate =
     totalDelivered > 0 ? (email.reclamacoes / totalDelivered) * 100 : 0;
+  const evaluationCounts = await loadReputationCounts(
+    supabaseAdminClient(),
+    campaignId,
+    resumedAt,
+  );
+  const evaluationRates = reputationPeriod(evaluationCounts);
 
   return GetCampaignRecipientSummaryResponse.parse({
     campanha_id: campaignId,
@@ -674,8 +684,24 @@ async function recipientSummary(campaignId: string) {
       reclamacao: {
         quantidade: email.reclamacoes,
         percentual: complaintRate,
-        limite_percentual: 0.2,
+        limite_percentual: 0.1,
       },
+    },
+    reputacao_avaliacao: {
+      periodo_inicio: resumedAt,
+      total_enviado: evaluationCounts.enviados,
+      total_entregue: evaluationCounts.entregues,
+      bounce: {
+        quantidade: evaluationCounts.bounces_permanentes,
+        percentual: evaluationRates.taxa_bounce * 100,
+        limite_percentual: 2,
+      },
+      reclamacao: {
+        quantidade: evaluationCounts.reclamacoes,
+        percentual: evaluationRates.taxa_reclamacao * 100,
+        limite_percentual: 0.1,
+      },
+      aviso_ativo: hasCampaignReputationWarning(evaluationCounts),
     },
     metricas_email: {
       ...buildCampaignEmailMetrics(email, deliveryProjection.total_na_lista),
@@ -991,7 +1017,7 @@ router.get("/campaigns/:campaignId/recipients/summary", async (req, res) => {
       res.status(404).json({ error: "Campanha não encontrada." });
       return;
     }
-    res.json(await recipientSummary(params.data.campaignId));
+    res.json(await recipientSummary(params.data.campaignId, campaign.retomada_em));
   } catch (error) {
     logSupabaseError(req, "Campaign recipient summary failed", error);
     res.status(502).json({ error: "Não foi possível consultar os destinatários." });

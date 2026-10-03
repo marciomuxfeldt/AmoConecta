@@ -5,7 +5,7 @@ import { loadWorkerCampaign, maybePauseWorkerCampaign } from "./worker-campaign"
 import type { ReputationCounts } from "./campaign-reputation";
 
 const zero: ReputationCounts = { enviados: 0, entregues: 0, bounces_permanentes: 0, reclamacoes: 0 };
-const historical: ReputationCounts = { enviados: 1000, entregues: 909, bounces_permanentes: 40, reclamacoes: 0 };
+const historical: ReputationCounts = { enviados: 1000, entregues: 909, bounces_permanentes: 51, reclamacoes: 0 };
 const marker = "2026-10-03T12:26:14.040061Z";
 
 function fixture(options: {
@@ -68,7 +68,7 @@ test("an omitted/invalid resume field fails closed, never falls back to cumulati
 });
 
 test("a new catastrophe logs denominators, limits and the applied marker after the audit commits", async () => {
-  const f = fixture({ counts: { enviados: 200, entregues: 190, bounces_permanentes: 10, reclamacoes: 0 } });
+  const f = fixture({ counts: { enviados: 200, entregues: 190, bounces_permanentes: 17, reclamacoes: 0 } });
   assert.equal(await maybePauseWorkerCampaign(f.client, "campaign", f.log), true);
   const transition = f.calls.find((call) => call.name === "transition_campaign_with_audit")!;
   assert.equal((transition.params.p_metadata as Record<string, unknown>).marco_retomada, marker);
@@ -76,8 +76,8 @@ test("a new catastrophe logs denominators, limits and the applied marker after t
   assert.equal(f.logs[0].trigger, "catastrofe");
   assert.equal(f.logs[0].resumeMarkerApplied, true);
   assert.equal(f.logs[0].minimumSends, 200);
-  assert.deepEqual(f.logs[0].bounce, { numerator: 10, denominator: 200, rate: 0.05, limit: 0.04 });
-  assert.deepEqual(f.logs[0].complaint, { numerator: 0, denominator: 190, rate: 0, limit: 0.005 });
+  assert.deepEqual(f.logs[0].bounce, { numerator: 17, denominator: 200, rate: 0.085, limit: 0.08 });
+  assert.deepEqual(f.logs[0].complaint, { numerator: 0, denominator: 190, rate: 0, limit: 0.003 });
 });
 
 test("never-resumed campaigns still use cumulative counts and the normal trigger", async () => {

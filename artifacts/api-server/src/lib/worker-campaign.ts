@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { evaluateReputation, loadReputationCounts, reputationPeriod } from "./campaign-reputation";
+import {
+  CAMPAIGN_REPUTATION_THRESHOLDS,
+  evaluateReputation,
+  loadReputationCounts,
+  reputationPeriod,
+} from "./campaign-reputation";
 
 export type WorkerCampaign = {
   id: string;
@@ -72,6 +77,9 @@ export async function maybePauseWorkerCampaign(
     throw new Error("A RPC de pausa retornou um resultado inválido.");
   }
   const catastrophe = decision.gatilho === "catastrofe";
+  const triggerPolicy = catastrophe
+    ? CAMPAIGN_REPUTATION_THRESHOLDS.catastrophe
+    : CAMPAIGN_REPUTATION_THRESHOLDS.normal;
   log.info({
     campaignId,
     trigger: decision.gatilho,
@@ -79,15 +87,15 @@ export async function maybePauseWorkerCampaign(
     resumeMarker: campaign.retomada_em,
     resumeMarkerApplied: campaign.retomada_em !== null,
     resumeSendBaseline: campaign.retomada_enviados_base,
-    minimumSends: catastrophe ? 200 : 1000,
+    minimumSends: triggerPolicy.minSends,
     cohortSends: counts.enviados,
     bounce: {
       numerator: counts.bounces_permanentes, denominator: counts.enviados,
-      rate: decision.taxa_bounce, limit: catastrophe ? 0.04 : 0.02,
+      rate: decision.taxa_bounce, limit: triggerPolicy.bounce,
     },
     complaint: {
       numerator: counts.reclamacoes, denominator: counts.entregues,
-      rate: decision.taxa_reclamacao, limit: catastrophe ? 0.005 : 0.002,
+      rate: decision.taxa_reclamacao, limit: triggerPolicy.complaint,
     },
     cumulative,
     pauseApplied: data !== null,
