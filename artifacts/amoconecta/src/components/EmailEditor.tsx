@@ -30,6 +30,7 @@ import {
   RequestEmailImageUploadInputMimeType,
   useRequestCampaignAssetUploadUrl,
 } from "@workspace/api-client-react";
+import { creditContentWarning as getCreditContentWarning } from "../lib/credit-content-warning";
 
 type EmailEditorProps = {
   blocks: EmailBlock[];
@@ -703,14 +704,23 @@ export function EmailEditor({
     [activePreviewBlocks, previewName, valorCredito, validadeCredito, buttonColor],
   );
   const missingVariables = useMemo(() => {
-    const source = `${activePreviewSubject}\n${activePreviewBlocks.map((block) => (
+    const bodySource = activePreviewBlocks.map((block) => (
       block.type === "text" ? block.html : block.type === "button" ? block.label : block.type === "image" ? block.alt : ""
-    )).join("\n")}`;
+    )).join("\n");
+    const source = `${activePreviewSubject}\n${bodySource}`;
     return [
-      source.match(/\{\{\s*valor_credito\s*\}\}/iu) && valorCredito == null ? "valor do crédito" : null,
+      activePreviewSubject.match(/\{\{\s*valor_credito\s*\}\}/iu) &&
+        !bodySource.match(/\{\{\s*valor_credito\s*\}\}/iu) &&
+        valorCredito == null
+        ? "valor do crédito"
+        : null,
       source.match(/\{\{\s*validade_credito\s*\}\}/iu) && !validadeCredito ? "validade do crédito" : null,
     ].filter((value): value is string => Boolean(value));
   }, [activePreviewBlocks, activePreviewSubject, valorCredito, validadeCredito]);
+  const creditWarning = useMemo(
+    () => getCreditContentWarning(activePreviewBlocks, valorCredito),
+    [activePreviewBlocks, valorCredito],
+  );
   const editorSessionKey = campaignId ?? "new-campaign";
 
   const addBlock = (type: EmailBlock["type"]) => {
@@ -758,6 +768,7 @@ export function EmailEditor({
           </div>
            <p className="mt-3 flex items-start gap-2 text-[10px] leading-5 text-[#92939a]"><span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[#d7ef56]" /> <span>Variáveis disponíveis: <code>{'{{nome}}'}</code>, <code>{'{{valor_credito}}'}</code> e <code>{'{{validade_credito}}'}</code>. O rodapé é automático.</span></p>
            {missingVariables.length > 0 && <p className="mt-2 rounded-xl border border-[#e8c56f] bg-[#fff7dc] px-3 py-2 text-[10px] leading-5 text-[#74561c]" role="status" data-testid="warning-missing-email-variables">Preencha {missingVariables.join(' e ')} antes de enviar para que as variáveis apareçam corretamente.</p>}
+            {creditWarning && <p className="mt-2 rounded-xl border border-[#e8c56f] bg-[#fff7dc] px-3 py-2 text-[10px] leading-5 text-[#74561c]" role="status" data-testid="warning-credit-content-mismatch">{creditWarning}</p>}
         </div>
       </div>
     </section>

@@ -845,6 +845,18 @@ export interface CampaignExcludedRecipient {
   excluido_por_email: string | null;
 }
 
+export interface CampaignReputationPauseRule {
+  envios_minimos: number;
+  bounce_percentual: number;
+  reclamacao_percentual: number;
+  reclamacoes_minimas: number;
+}
+
+export interface CampaignReputationPauseLimits {
+  catastrofe: CampaignReputationPauseRule;
+  normal: CampaignReputationPauseRule;
+}
+
 export interface CampaignExclusionOverview {
   provedores: ProviderRecipientDiagnostic[];
   excluidos: CampaignExcludedRecipient[];
@@ -857,6 +869,7 @@ export interface CampaignExclusionOverview {
   retomada_enviados_base: number | null;
   acumulada: CampaignReputationPeriod;
   periodo_atual: CampaignReputationPeriod;
+  limites_pausa: CampaignReputationPauseLimits;
 }
 
 export interface TeamInvitationInput {

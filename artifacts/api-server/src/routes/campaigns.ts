@@ -52,6 +52,7 @@ import {
 } from "../lib/campaign-schedule-policy";
 import { recipientDeliveryProjection } from "../lib/recipient-delivery-projection";
 import {
+  CAMPAIGN_REPUTATION_THRESHOLDS,
   hasCampaignReputationWarning,
   loadReputationCounts,
   reputationPeriod,
@@ -679,12 +680,12 @@ async function recipientSummary(campaignId: string, resumedAt: string | null) {
       bounce: {
         quantidade: email.bouncesPermanentes,
         percentual: bounceRate,
-        limite_percentual: 2,
+        limite_percentual: CAMPAIGN_REPUTATION_THRESHOLDS.warning.bounce * 100,
       },
       reclamacao: {
         quantidade: email.reclamacoes,
         percentual: complaintRate,
-        limite_percentual: 0.1,
+        limite_percentual: CAMPAIGN_REPUTATION_THRESHOLDS.warning.complaint * 100,
       },
     },
     reputacao_avaliacao: {
@@ -694,12 +695,12 @@ async function recipientSummary(campaignId: string, resumedAt: string | null) {
       bounce: {
         quantidade: evaluationCounts.bounces_permanentes,
         percentual: evaluationRates.taxa_bounce * 100,
-        limite_percentual: 2,
+        limite_percentual: CAMPAIGN_REPUTATION_THRESHOLDS.warning.bounce * 100,
       },
       reclamacao: {
         quantidade: evaluationCounts.reclamacoes,
         percentual: evaluationRates.taxa_reclamacao * 100,
-        limite_percentual: 0.1,
+        limite_percentual: CAMPAIGN_REPUTATION_THRESHOLDS.warning.complaint * 100,
       },
       aviso_ativo: hasCampaignReputationWarning(evaluationCounts),
     },

@@ -2571,6 +2571,20 @@ components:
         excluido_por_nome: { type: ["string", "null"] }
         excluido_por_email: { type: ["string", "null"] }
       required: [id, email, nome, status, excluido_em, exclusao_motivo, excluido_por_nome, excluido_por_email]
+    CampaignReputationPauseRule:
+      type: object
+      properties:
+        envios_minimos: { type: integer }
+        bounce_percentual: { type: number }
+        reclamacao_percentual: { type: number }
+        reclamacoes_minimas: { type: integer }
+      required: [envios_minimos, bounce_percentual, reclamacao_percentual, reclamacoes_minimas]
+    CampaignReputationPauseLimits:
+      type: object
+      properties:
+        catastrofe: { $ref: "#/components/schemas/CampaignReputationPauseRule" }
+        normal: { $ref: "#/components/schemas/CampaignReputationPauseRule" }
+      required: [catastrofe, normal]
     CampaignExclusionOverview:
       type: object
       properties:
@@ -2587,7 +2601,8 @@ components:
         retomada_enviados_base: { type: ["integer", "null"] }
         acumulada: { $ref: "#/components/schemas/CampaignReputationPeriod" }
         periodo_atual: { $ref: "#/components/schemas/CampaignReputationPeriod" }
-      required: [provedores, excluidos, total_excluidos, pendentes_na_fila, exclusoes_desde_pausa, retomada_em, retomada_enviados_base, acumulada, periodo_atual]
+        limites_pausa: { $ref: "#/components/schemas/CampaignReputationPauseLimits" }
+      required: [provedores, excluidos, total_excluidos, pendentes_na_fila, exclusoes_desde_pausa, retomada_em, retomada_enviados_base, acumulada, periodo_atual, limites_pausa]
     TeamInvitationInput:
       type: object
       properties:

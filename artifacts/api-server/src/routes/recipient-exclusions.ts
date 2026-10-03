@@ -6,7 +6,11 @@ import {
 } from "@workspace/api-zod";
 import { getSupabaseUser } from "./auth";
 import { supabaseAdminClient } from "../lib/supabase";
-import { loadReputationCounts, reputationPeriod } from "../lib/campaign-reputation";
+import {
+  CAMPAIGN_REPUTATION_THRESHOLDS,
+  loadReputationCounts,
+  reputationPeriod,
+} from "../lib/campaign-reputation";
 import { emailsFromExclusionCsv } from "../lib/recipient-exclusions";
 import { ImportValidationError, normalizeEmail } from "../lib/csv-import";
 import { getTechnicalError } from "../lib/technical-error";
@@ -50,6 +54,20 @@ router.get("/campaigns/:campaignId/exclusions", async (req, res) => {
       pendentes_na_fila: queue.count ?? 0, exclusoes_desde_pausa: changed.count ?? 0,
       retomada_em: campaign.retomada_em, retomada_enviados_base: campaign.retomada_enviados_base,
       acumulada: reputationPeriod(cumulative), periodo_atual: reputationPeriod(current),
+      limites_pausa: {
+        catastrofe: {
+          envios_minimos: CAMPAIGN_REPUTATION_THRESHOLDS.catastrophe.minSends,
+          bounce_percentual: CAMPAIGN_REPUTATION_THRESHOLDS.catastrophe.bounce * 100,
+          reclamacao_percentual: CAMPAIGN_REPUTATION_THRESHOLDS.catastrophe.complaint * 100,
+          reclamacoes_minimas: CAMPAIGN_REPUTATION_THRESHOLDS.catastrophe.minComplaints,
+        },
+        normal: {
+          envios_minimos: CAMPAIGN_REPUTATION_THRESHOLDS.normal.minSends,
+          bounce_percentual: CAMPAIGN_REPUTATION_THRESHOLDS.normal.bounce * 100,
+          reclamacao_percentual: CAMPAIGN_REPUTATION_THRESHOLDS.catastrophe.complaint * 100,
+          reclamacoes_minimas: CAMPAIGN_REPUTATION_THRESHOLDS.catastrophe.minComplaints,
+        },
+      },
     }));
   } catch (error) {
     req.log.error({ technicalError: getTechnicalError(error) }, "Campaign exclusion diagnostics failed");

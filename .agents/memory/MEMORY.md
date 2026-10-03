@@ -15,3 +15,4 @@
 - [Chronic disengagement state](chronic-disengagement-state.md) — keep one normalized row per e-mail and refresh it in cursor-based batches, never flags per delivery.
 - [TypeScript API tests](typescript-api-tests.md) — Node's built-in TypeScript stripping does not resolve the API test suites' extensionless ESM imports.
 - [Campaign operational scope](campaign-operational-policy.md) — exclusions are campaign-only; resumed sends drive the next pause; external validation stays out of this batch.
+- [Campaign pause policy copy](campaign-pause-policy-copy.md) — display pause thresholds from the server policy through the API contract, never as duplicate frontend constants.

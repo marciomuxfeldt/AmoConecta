@@ -1672,7 +1672,7 @@ export function RecipientSummaryPanel({
   const statusRows = [
     { key: 'pendente', label: 'Pendente', tone: 'text-[#9b6b17]', dot: 'bg-[#d5a42e]' },
     { key: 'enviado', label: 'Enviado', tone: 'text-[#247b79]', dot: 'bg-[#247b79]' },
-    { key: 'entregue', label: 'Entregue', tone: 'text-[#417846]', dot: 'bg-[#63a76f]' },
+    { key: 'entregue', label: 'Status atual: entregue', tone: 'text-[#417846]', dot: 'bg-[#63a76f]' },
     { key: 'bounce', label: 'Bounce', tone: 'text-[#a64220]', dot: 'bg-[#bd4f26]' },
     { key: 'bloqueado', label: 'Bloqueado', tone: 'text-[#8e3a20]', dot: 'bg-[#d35f2a]' },
     { key: 'suprimido', label: 'Suprimido (processado)', tone: 'text-[#6d7180]', dot: 'bg-[#8f9299]' },
@@ -1698,7 +1698,7 @@ export function RecipientSummaryPanel({
   const emailMetrics = summary?.metricas_email
     ? [
         { key: 'enviados', label: 'Enviados', base: 'lista', metric: summary.metricas_email.enviados },
-        { key: 'entregues', label: 'Entregues', base: 'enviados', metric: summary.metricas_email.entregues },
+        { key: 'entregues', label: 'Entrega confirmada em algum momento', base: 'enviados', metric: summary.metricas_email.entregues },
         { key: 'aberturas', label: 'Aberturas únicas', base: 'entregues', metric: summary.metricas_email.aberturas },
         { key: 'cliques', label: 'Cliques únicos', base: 'entregues', metric: summary.metricas_email.cliques },
         { key: 'bounces', label: 'Bounces totais', base: 'enviados', metric: summary.metricas_email.bounces },
@@ -1755,8 +1755,8 @@ export function RecipientSummaryPanel({
               : 'desde o início da campanha'}; este aviso não pausa o envio.
           </p>
           <p className="mt-2 font-mono text-[10px]">
-            Bounce permanente: {formatNumber(summary.reputacao_avaliacao.bounce.quantidade)}/{formatNumber(summary.reputacao_avaliacao.total_enviado)} ({formatPercentage(summary.reputacao_avaliacao.bounce.percentual)}; alerta a partir de 2%).
-            {' '}Reclamações: {formatNumber(summary.reputacao_avaliacao.reclamacao.quantidade)}/{formatNumber(summary.reputacao_avaliacao.total_entregue)} entregues ({formatPercentage(summary.reputacao_avaliacao.reclamacao.percentual)}; alerta a partir de 0,1%).
+            Bounce permanente: {formatNumber(summary.reputacao_avaliacao.bounce.quantidade)}/{formatNumber(summary.reputacao_avaliacao.total_enviado)} ({formatPercentage(summary.reputacao_avaliacao.bounce.percentual)}; alerta a partir de {formatPercentage(summary.reputacao_avaliacao.bounce.limite_percentual)}).
+            {' '}Reclamações: {formatNumber(summary.reputacao_avaliacao.reclamacao.quantidade)}/{formatNumber(summary.reputacao_avaliacao.total_entregue)} entregues ({formatPercentage(summary.reputacao_avaliacao.reclamacao.percentual)}; alerta a partir de {formatPercentage(summary.reputacao_avaliacao.reclamacao.limite_percentual)}).
           </p>
         </div>
       )}
@@ -1784,6 +1784,7 @@ export function RecipientSummaryPanel({
               <div>
                 <h3 className="text-sm font-extrabold text-[#263044]">Resultados do envio</h3>
                 <p className="mt-1 text-xs text-[#7d7e87]">Enviados usam o total da lista; entregues e bounces usam enviados; abertura, clique, reclamação e descadastro usam entregues.</p>
+                <p className="mt-1 text-xs text-[#7d7e87]">O status atual mostra a situação de agora; a entrega confirmada em algum momento inclui quem recebeu a mensagem antes de mudar para bounce.</p>
               </div>
             </div>
             {emailMetrics.length > 0 && (
@@ -1816,7 +1817,7 @@ export function RecipientSummaryPanel({
              <div className="flex items-start justify-between gap-3">
                <div>
                  <h3 className="text-sm font-extrabold text-[#263044]">Sinais de reputação</h3>
-                   <p className="mt-1 text-xs leading-5 text-[#7d7e87]">Bounce permanente é calculado sobre enviados; reclamações, sobre entregues. Estes números são acumulados. O alerta local começa em 2% / 0,1%; após uma retomada, a pausa automática avalia só o período atual. Referências da SES: revisão a partir de 5% / 0,1% e pausa possível a partir de 10% / 0,5%; a SES usa uma janela dinâmica própria.</p>
+                    <p className="mt-1 text-xs leading-5 text-[#7d7e87]">Bounce permanente é calculado sobre enviados; reclamações, sobre entregas confirmadas. Estes números são acumulados; os limites do alerta local aparecem em cada cartão. Após uma retomada, a pausa automática avalia só o período atual. Referências externas atribuídas à SES: revisão a partir de 5% / 0,1% e pausa possível a partir de 10% / 0,5%; a SES usa uma janela dinâmica própria.</p>
                </div>
                <ShieldCheck size={16} className="text-[#247b79]" />
              </div>

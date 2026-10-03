@@ -28,8 +28,6 @@ import { ScrollConfirmation } from './ScrollConfirmation';
 export const EXCLUSION_PAGE_SIZE = 20;
 export const EXCLUSION_CSV_MAX_BYTES = 5_000_000;
 export const MISSING_DATE_WARNING_PERCENT = 20;
-export const CATASTROPHE_MIN_SENT = 200;
-export const NORMAL_MIN_SENT = 1000;
 
 type ProviderKey = 'gmail' | 'microsoft' | 'yahoo' | 'outros';
 const providerLabels: Record<ProviderKey, string> = {
@@ -165,15 +163,15 @@ export function ReputationComparison({ overview }: { overview: CampaignExclusion
         />
       </div>
       <p className="mt-3 text-xs leading-5 text-[#6d7180]" data-testid="text-reputation-triggers">
-        Dois gatilhos pausam o envio: <strong>catastrófico</strong>, a partir de {nf(CATASTROPHE_MIN_SENT)} envios, com mais de 4% de bounce permanente ou mais de 0,5% de reclamações sobre entregues; e <strong>normal</strong>, a partir de {nf(NORMAL_MIN_SENT)} envios, com mais de 2% de bounce permanente ou mais de 0,2% de reclamações. Abaixo de {nf(CATASTROPHE_MIN_SENT)} envios nenhuma avaliação é feita. Após uma retomada, a avaliação considera o período atual.
+        Dois gatilhos pausam o envio: <strong>catastrófico</strong>, a partir de {nf(overview.limites_pausa.catastrofe.envios_minimos)} envios, com bounce permanente acima de {rateToPercent(overview.limites_pausa.catastrofe.bounce_percentual / 100)} dos enviados ou reclamações acima de {rateToPercent(overview.limites_pausa.catastrofe.reclamacao_percentual / 100)} das entregas confirmadas, com pelo menos {nf(overview.limites_pausa.catastrofe.reclamacoes_minimas)} reclamações; e <strong>normal</strong>, a partir de {nf(overview.limites_pausa.normal.envios_minimos)} envios, com bounce permanente acima de {rateToPercent(overview.limites_pausa.normal.bounce_percentual / 100)} dos enviados ou reclamações acima de {rateToPercent(overview.limites_pausa.normal.reclamacao_percentual / 100)} das entregas confirmadas, com pelo menos {nf(overview.limites_pausa.normal.reclamacoes_minimas)} reclamações. Abaixo de {nf(overview.limites_pausa.catastrofe.envios_minimos)} envios nenhum gatilho de pausa se aplica. Após uma retomada, a avaliação considera o período atual.
       </p>
     </div>
   );
 }
 
-function sampleNote(sent: number) {
+function sampleNote(sent: number, minSends: number) {
   if (sent === 0) return 'sem envios';
-  if (sent < CATASTROPHE_MIN_SENT) return `amostra pequena (${nf(sent)} enviados)`;
+  if (sent < minSends) return `amostra pequena (${nf(sent)} enviados)`;
   return null;
 }
 
@@ -188,7 +186,7 @@ export function ProviderTable({ overview }: { overview: CampaignExclusionOvervie
         </thead>
         <tbody className="divide-y divide-[#eee7dc] bg-[#fffdf9]">
           {overview.provedores.map((p) => {
-            const note = sampleNote(p.enviados);
+            const note = sampleNote(p.enviados, overview.limites_pausa.catastrofe.envios_minimos);
             return (
               <tr key={p.provedor} data-testid={`row-provider-${p.provedor}`}>
                 <td className="px-3 py-2.5 font-extrabold text-[#263044]">{providerLabels[p.provedor] ?? p.provedor}</td>
@@ -205,7 +203,10 @@ export function ProviderTable({ overview }: { overview: CampaignExclusionOvervie
         </tbody>
       </table>
       <p className="border-t border-[#eee7dc] bg-[#f8f3ec] px-3 py-2 text-[11px] leading-4 text-[#7d7e87]" data-testid="text-provider-sample-caveat">
-        As taxas usam enviados como denominador. Com poucos envios por provedor (menos de {nf(CATASTROPHE_MIN_SENT)}) uma única ocorrência muda muito o percentual: trate como indício, não como conclusão.
+        As taxas usam enviados como denominador. Com poucos envios por provedor (menos de {nf(overview.limites_pausa.catastrofe.envios_minimos)}) uma única ocorrência muda muito o percentual: trate como indício, não como conclusão.
+      </p>
+      <p className="border-t border-[#eee7dc] bg-[#f8f3ec] px-3 py-2 text-[11px] leading-4 text-[#7d7e87]" data-testid="text-provider-delivery-bounce-overlap">
+        Recebidos e bounces podem contar a mesma mensagem: ela pode ser aceita pelo provedor e devolvida depois. Por isso, essas colunas não são categorias exclusivas e podem somar mais que os enviados.
       </p>
     </div>
   );

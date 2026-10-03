@@ -3,11 +3,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CampaignRecipientSummary } from "@workspace/api-client-react";
+import type { EmailBlock } from "@workspace/email-template";
 import {
   campaignCancelSuccessMessage,
   ImportPanel,
   RecipientSummaryPanel,
 } from "./campaigns";
+import { creditContentWarning } from "../lib/credit-content-warning";
 
 const campaignId = "campaign-under-test";
 const recipientSummaryUrl = `/api/campaigns/${campaignId}/recipients/summary`;
@@ -285,14 +287,46 @@ describe("campaign recipient summary", () => {
 
     expect(displayedStatusTotal).toBe(43);
     expect(screen.getByTestId("recipient-status-bounce").textContent).toContain("6");
+    expect(screen.getByTestId("recipient-status-entregue").textContent).toContain("Status atual: entregue");
     expect(screen.getByTestId("recipient-email-metric-enviados").textContent).toContain(
       "90,7% sobre lista",
     );
     expect(screen.getByTestId("recipient-email-metric-entregues").textContent).toContain(
       "82,05% sobre enviados",
     );
+    expect(screen.getByTestId("recipient-email-metric-entregues").textContent).toContain(
+      "Entrega confirmada em algum momento",
+    );
+    expect(screen.getByTestId("panel-email-engagement").textContent).toContain(
+      "antes de mudar para bounce",
+    );
     expect(screen.getByTestId("recipient-reputation-bounce").textContent).toContain(
       "Acima do limite",
     );
+  });
+});
+
+describe("credit content warnings", () => {
+  const textBlock = (html: string): EmailBlock => ({ id: "text-1", type: "text", html });
+
+  it("warns when the body promises a credit value but the field is empty", () => {
+    expect(creditContentWarning([textBlock("<p>Você tem <strong>R$5</strong> de crédito!</p>")], null))
+      .toContain("campo “Valor do crédito” está vazio");
+  });
+
+  it("accepts a template variable or a matching amount in Brazilian format", () => {
+    expect(creditContentWarning([textBlock("<p>Você tem {{valor_credito}} de crédito!</p>")], 5))
+      .toBeNull();
+    expect(creditContentWarning([textBlock("<p>Você recebeu R$ 1.234,50.</p>")], 1234.5))
+      .toBeNull();
+    expect(creditContentWarning([textBlock("<p>Você recebeu 5 reais.</p>")], 5))
+      .toBeNull();
+  });
+
+  it("warns when a filled field is missing from the body or differs from its amount", () => {
+    expect(creditContentWarning([textBlock("<p>Confira sua conta.</p>")], 5))
+      .toContain("não informa um valor em reais");
+    expect(creditContentWarning([textBlock("<p>Você tem R$ 7,00 de crédito!</p>")], 5))
+      .toContain("corpo menciona");
   });
 });

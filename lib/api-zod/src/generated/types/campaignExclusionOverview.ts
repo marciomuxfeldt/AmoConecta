@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CampaignExcludedRecipient } from './campaignExcludedRecipient';
+import type { CampaignReputationPauseLimits } from './campaignReputationPauseLimits';
 import type { CampaignReputationPeriod } from './campaignReputationPeriod';
 import type { ProviderRecipientDiagnostic } from './providerRecipientDiagnostic';
 
@@ -21,4 +22,5 @@ export interface CampaignExclusionOverview {
   retomada_enviados_base: number | null;
   acumulada: CampaignReputationPeriod;
   periodo_atual: CampaignReputationPeriod;
+  limites_pausa: CampaignReputationPauseLimits;
 }

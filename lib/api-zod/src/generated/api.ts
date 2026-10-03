@@ -2298,6 +2298,20 @@ export const GetCampaignExclusionsResponse = zod.object({
   "reclamacoes": zod.number().int(),
   "taxa_bounce": zod.number(),
   "taxa_reclamacao": zod.number()
+}),
+  "limites_pausa": zod.object({
+  "catastrofe": zod.object({
+  "envios_minimos": zod.number().int(),
+  "bounce_percentual": zod.number(),
+  "reclamacao_percentual": zod.number(),
+  "reclamacoes_minimas": zod.number().int()
+}),
+  "normal": zod.object({
+  "envios_minimos": zod.number().int(),
+  "bounce_percentual": zod.number(),
+  "reclamacao_percentual": zod.number(),
+  "reclamacoes_minimas": zod.number().int()
+})
 })
 })
 

@@ -31,6 +31,8 @@ export * from './campaignListItemStatus';
 export * from './campaignRecipientsCleared';
 export * from './campaignRecipientSummary';
 export * from './campaignReputationEvaluation';
+export * from './campaignReputationPauseLimits';
+export * from './campaignReputationPauseRule';
 export * from './campaignReputationPeriod';
 export * from './campaignRestoreInput';
 export * from './campaignResumeInput';

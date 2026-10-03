@@ -22,6 +22,10 @@ const overview: CampaignExclusionOverview = {
   total_excluidos: 1, pendentes_na_fila: 77, exclusoes_desde_pausa: 0,
   retomada_em: null, retomada_enviados_base: null,
   acumulada: period, periodo_atual: { ...period, taxa_bounce: 0.01 },
+  limites_pausa: {
+    catastrofe: { envios_minimos: 200, bounce_percentual: 8, reclamacao_percentual: 0.3, reclamacoes_minimas: 3 },
+    normal: { envios_minimos: 1000, bounce_percentual: 5, reclamacao_percentual: 0.3, reclamacoes_minimas: 3 },
+  },
 };
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -46,7 +50,13 @@ describe("exclusion panel", () => {
     expect(screen.getByTestId("reputation-cumulative-bounce").textContent).toBe("2%");
     expect(screen.getByTestId("reputation-current-bounce").textContent).toBe("1%");
     expect(screen.getByTestId("text-provider-sample-gmail").textContent).toContain("amostra pequena");
-    expect(screen.getByTestId("text-reputation-triggers").textContent).toContain("nenhuma avaliação");
+    const triggers = screen.getByTestId("text-reputation-triggers").textContent ?? "";
+    expect(triggers).toContain("8%");
+    expect(triggers).toContain("0,3%");
+    expect(triggers).toContain("5%");
+    expect(triggers).toContain("1.000 envios");
+    expect(triggers).not.toContain("4%");
+    expect(screen.getByTestId("text-provider-delivery-bounce-overlap").textContent).toContain("aceita pelo provedor e devolvida depois");
   });
 
   it("requires confirmation, warns about in-flight sends, then posts the exclusion", async () => {
