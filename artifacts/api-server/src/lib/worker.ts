@@ -28,8 +28,11 @@ import {
 } from "./sender-config";
 import { logger } from "./logger";
 import { getTechnicalError } from "./technical-error";
-import { recordAuditEvent, systemAuditActor } from "./audit-events";
-import { loadReputationCounts, evaluateReputation, reputationPeriod } from "./campaign-reputation";
+import {
+  loadWorkerCampaign,
+  maybePauseWorkerCampaign,
+  type WorkerCampaign as Campaign,
+} from "./worker-campaign";
 
 const RESEND_BATCH_SIZE = 100;
 const MAX_RETRIES = 3;
@@ -45,31 +48,6 @@ const WORKER_LOCK_KEY = 4_782_913_421;
 export type WorkerLockLease = {
   key: number;
   token: string;
-};
-
-type Campaign = {
-  id: string;
-  nome: string;
-  assunto: string;
-  remetente_nome: string;
-  remetente_email: string;
-  preheader?: string | null;
-  valor_credito?: number | null;
-  validade_credito?: string | null;
-  reply_to?: string | null;
-  corpo: unknown;
-  cor_botao_snapshot?: string | null;
-  assunto_lembrete?: string | null;
-  corpo_lembrete?: unknown;
-  incluir_desengajados?: boolean | null;
-  status: string;
-  agendada_para?: string | null;
-  teto_hora?: number | null;
-  teto_dia?: number | null;
-  pausa_motivo?: string | null;
-  pausa_taxa_bounce?: number | null;
-  pausa_taxa_reclamacao?: number | null;
-  retomada_em?: string | null;
 };
 
 export type WorkerRecipient = {
@@ -225,15 +203,7 @@ export async function releaseWorkerLock(lease: WorkerLockLease): Promise<void> {
 }
 
 async function loadCampaign(campaignId: string): Promise<Campaign | null> {
-  const { data, error } = await supabaseAdminClient()
-    .from("campanha")
-    .select(
-      "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,reply_to,corpo,status,agendada_para,teto_hora,teto_dia",
-    )
-    .eq("id", campaignId)
-    .maybeSingle();
-  if (error) throw error;
-  return data as Campaign | null;
+  return loadWorkerCampaign(supabaseAdminClient(), campaignId);
 }
 
 async function loadSuppressedEmails(emails: string[]): Promise<Set<string>> {
@@ -548,22 +518,7 @@ async function sendWithRetries(
 }
 
 async function maybePauseCampaign(campaignId: string): Promise<boolean> {
-  const client = supabaseAdminClient();
-  const campaign = await loadCampaign(campaignId);
-  if (!campaign || campaign.status !== "enviando") return true;
-  const counts = await loadReputationCounts(client, campaignId, campaign.retomada_em ?? null);
-  const decision = evaluateReputation(counts);
-  if (!decision) return false;
-  const cumulative = reputationPeriod(await loadReputationCounts(client, campaignId));
-  const { error } = await client.rpc("transition_campaign_with_audit", {
-    p_campanha_id: campaignId, p_expected: "enviando", p_target: "pausada",
-    p_actor_id: null, p_actor_nome: "Sistema", p_actor_email: null,
-    p_motivo: decision.motivo, p_bounce: decision.taxa_bounce, p_reclamacao: decision.taxa_reclamacao,
-    p_metadata: { gatilho: decision.gatilho, periodo_atual: decision,
-      acumulada: cumulative, marco_retomada: campaign.retomada_em ?? null },
-  });
-  if (error) throw error; // Fail closed; never send after an unaudited pause.
-  return true;
+  return maybePauseWorkerCampaign(supabaseAdminClient(), campaignId, logger);
 }
 
 export async function processPendingEmailEvents(): Promise<number> {
@@ -626,6 +581,15 @@ export async function processPendingEmailEvents(): Promise<number> {
         },
         "Resend event recipient is not ready yet; event remains queued for retry",
       );
+    } else if (result.matched === false && result.reason === "test_email") {
+      logger.info(
+        {
+          svixId: event.svix_id, eventType: event.tipo,
+          resendEmailId: event.resend_email_id, campaignId: result.campaign_id,
+          reason: result.reason,
+        },
+        "Verified Resend test email event was ignored and retained for audit",
+      );
     } else if (result.matched === false) {
       logger.warn(
         {
@@ -633,6 +597,9 @@ export async function processPendingEmailEvents(): Promise<number> {
           eventType: event.tipo,
           resendEmailId: event.resend_email_id,
           reason: result.reason,
+           attempts: result.attempts,
+           maxAttempts: result.max_attempts,
+           maxAgeSeconds: result.max_age_seconds,
         },
         "Verified Resend event could not be matched and was retained for audit",
       );

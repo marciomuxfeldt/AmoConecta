@@ -3,7 +3,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -121,6 +123,25 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+  let sourceCommit = null;
+  let uncommittedChanges = null;
+  try {
+    sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: artifactDir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    uncommittedChanges = execFileSync("git", ["status", "--porcelain"], {
+      cwd: artifactDir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim().length > 0;
+  } catch {
+    // Some publishing snapshots omit .git. Never invent a commit in that case.
+  }
+  const manifest = {
+    sourceCommit, uncommittedChanges, builtAt: new Date().toISOString(),
+    bundleSha256: createHash("sha256")
+      .update(await readFile(path.join(distDir, "worker-entry.mjs"))).digest("hex"),
+  };
+  await writeFile(path.join(distDir, "worker-build.json"), JSON.stringify(manifest));
+  console.info(JSON.stringify({ msg: "AmoConecta worker build identity", ...manifest }));
 }
 
 buildAll().catch((err) => {

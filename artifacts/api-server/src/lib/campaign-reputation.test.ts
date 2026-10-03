@@ -16,4 +16,5 @@ test("complaints use delivered denominator; zero cohort is safe", () => {
   assert.equal(evaluateReputation({ enviados: 200, entregues: 100, bounces_permanentes: 0, reclamacoes: 1 })?.gatilho, "catastrofe");
   assert.equal(evaluateReputation({ enviados: 1000, entregues: 900, bounces_permanentes: 0, reclamacoes: 2 })?.gatilho, "normal");
   assert.equal(reputationPeriod({ enviados: 0, entregues: 0, bounces_permanentes: 0, reclamacoes: 0 }).taxa_bounce, 0);
+  assert.equal(evaluateReputation({ enviados: 0, entregues: 0, bounces_permanentes: 0, reclamacoes: 0 }), null);
 });

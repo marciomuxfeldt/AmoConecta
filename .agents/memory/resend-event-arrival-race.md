@@ -9,6 +9,12 @@ Persist a verified Resend event before acknowledging it. Recipient matching must
 
 **How to apply:** When changing webhook acknowledgement, sender persistence, or worker event processing, preserve the retry path for unmatched provider IDs and retain the raw event for audit.
 
+Known test sends intentionally have no queue recipient; recognize their audited origin instead of fabricating a recipient or spending the unmatched-event retry budget. An ignored event is not a technical processing failure.
+
+**Why:** A day-long matching window consumed over a thousand attempts per test event, and later opens started fresh retry windows despite earlier sent/delivered events having expired.
+
+**How to apply:** Keep a short finite matching window for genuine send/persistence races, retain the payload and terminal ignore reason, and never join a test event to a campaign recipient merely by email.
+
 For bounce handling, suppress only when the payload explicitly identifies a `permanent` or `hard` bounce, case-insensitively. Preserve the raw classification (or a missing marker) separately for diagnosis. When inserting a suppression that already exists, use `DO NOTHING` so the first recorded reason is retained.
 
 **Why:** Unknown provider values must not cause irreversible suppression, and overwriting an unsubscribe reason destroys important audit history.

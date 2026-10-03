@@ -12,6 +12,8 @@ await build({
     "artifacts/api-server/src/lib/csv-import.test.ts",
     "artifacts/api-server/src/lib/recipient-exclusions.test.ts",
     "artifacts/api-server/src/lib/campaign-reputation.test.ts",
+    "artifacts/api-server/src/lib/worker-campaign.test.ts",
+    "artifacts/api-server/src/lib/worker-build.test.ts",
     "artifacts/api-server/src/lib/recipient-delivery-projection.test.ts",
     "artifacts/api-server/src/lib/csv-export.test.ts",
     "artifacts/api-server/src/lib/campaign-email-metrics.test.ts",

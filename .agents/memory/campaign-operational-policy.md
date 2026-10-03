@@ -15,6 +15,12 @@ Após retomar, a taxa acumulada continua visível, mas somente os envios posteri
 
 **How to apply:** Preserve essa separação ao mudar relatórios, gatilhos ou o processamento de eventos; não filtre apenas pela hora de chegada do webhook.
 
+Uma coorte pós-retomada com zero envios não é motivo para usar o histórico acumulado: ela precisa poder iniciar os novos envios. Marco ausente na resposta não deve ser confundido com uma campanha nunca retomada.
+
+**Why:** Uma pausa real aconteceu antes de qualquer novo envio porque o marco salvo não chegou à avaliação; usar o acumulado recriou o ciclo de pausa imediatamente.
+
+**How to apply:** Verifique o caminho de leitura até a decisão, não apenas a fórmula isolada. Uma amostra insuficiente aguarda os mínimos do período novo.
+
 Não altere ENVIO_LIBERADO nem o modo de segurança, não mexa na lógica de assinatura dos webhooks e não implemente coordenação de limite de taxa entre processos neste lote.
 
 **Why:** O usuário delimitou explicitamente o lote, que se originou de uma campanha real em andamento.

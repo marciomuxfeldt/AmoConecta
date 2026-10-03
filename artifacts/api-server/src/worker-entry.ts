@@ -8,8 +8,20 @@ import {
   WORKER_REQUIRED_SECRET_NAMES,
 } from "./lib/config-diagnostics";
 import { getTechnicalError } from "./lib/technical-error";
+import { readWorkerBuildIdentity } from "./lib/worker-build";
 
 async function main(): Promise<void> {
+  try {
+    logger.info(
+      { process: "worker", ...readWorkerBuildIdentity(new URL(import.meta.url)) },
+      "AmoConecta worker runtime build identity",
+    );
+  } catch (error) {
+    logger.warn(
+      { process: "worker", technicalError: getTechnicalError(error) },
+      "AmoConecta worker build identity unavailable; source commit cannot be confirmed",
+    );
+  }
   logger.info(
     {
       process: "worker",

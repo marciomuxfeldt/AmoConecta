@@ -47,8 +47,72 @@ before(async () => {
   `);
   await db.exec(await sqlFile("migrations/202610020016_campaign_exclusions_reputation.sql"));
   await db.exec(await sqlFile("migrations/202610020017_bounce_terminal_semantics.sql"));
+  await db.exec(await sqlFile("migrations/202610030018_bounded_event_matching.sql"));
 });
 after(() => db.close());
+
+const unmatched = async (providerId, attempts = 0, age = "0 seconds") => (await row(
+  `INSERT INTO evento_email(resend_email_id,tipo,payload,tentativas,recebido_em)
+    VALUES($1,'email.opened','{"data":{}}',$2,now()-$3::interval) RETURNING id`,
+  [providerId, attempts, age],
+)).id;
+
+test("known test messages leave the retry queue immediately, including old high-attempt events", async () => {
+  for (const [providerId, attempts] of [["known-test", 0], ["old-known-test", 1400]]) {
+    await db.query(`INSERT INTO evento_auditoria(action,entity_type,entity_id,metadata)
+      VALUES('campaign_test_sent','campaign',$1,jsonb_build_object('resend_email_id',$2::text))`,
+    [campaign, providerId]);
+    const id = await unmatched(providerId, attempts);
+    const result = (await row("SELECT process_resend_email_event($1) AS value", [id])).value;
+    assert.equal(result.reason, "test_email");
+    assert.equal(result.retryable, false);
+    const e = await row("SELECT * FROM evento_email WHERE id=$1", [id]);
+    assert.ok(e.processado_em);
+    assert.equal(e.proxima_tentativa_em, null);
+    assert.equal(e.erro_processamento, null);
+    assert.equal(e.motivo_nao_correspondido, "test_email");
+    assert.equal(e.campanha_id, campaign);
+    assert.equal((await row("SELECT count(*) AS n FROM destinatario WHERE resend_email_id=$1", [providerId])).n, 0);
+    assert.equal((await row("SELECT process_resend_email_event($1) AS value", [id])).value.duplicate, true);
+  }
+});
+
+test("unknown IDs retry briefly, and attempt 10 ends with audit reason, never technical error", async () => {
+  const id = await unmatched("short-race");
+  let result = (await row("SELECT process_resend_email_event($1) AS value", [id])).value;
+  assert.equal(result.retryable, true);
+  assert.equal(result.attempts, 1);
+  assert.equal((await row("SELECT process_resend_email_event($1) AS value", [id])).value.reason, "retry_not_due");
+  await db.query("UPDATE evento_email SET tentativas=9,proxima_tentativa_em=NULL WHERE id=$1", [id]);
+  result = (await row("SELECT process_resend_email_event($1) AS value", [id])).value;
+  assert.equal(result.reason, "recipient_not_found_retry_limit");
+  assert.equal(result.attempts, 10);
+  const e = await row("SELECT * FROM evento_email WHERE id=$1", [id]);
+  assert.ok(e.processado_em);
+  assert.equal(e.erro_processamento, null);
+  assert.equal(e.proxima_tentativa_em, null);
+  assert.equal(e.motivo_nao_correspondido, result.reason);
+  assert.ok(e.payload);
+});
+
+test("15 minutes is a terminal time bound independent of attempt count", async () => {
+  const id = await unmatched("aged-race", 0, "16 minutes");
+  const result = (await row("SELECT process_resend_email_event($1) AS value", [id])).value;
+  assert.equal(result.reason, "recipient_not_found_timeout");
+  assert.equal(result.retryable, false);
+  assert.equal(result.max_age_seconds, 900);
+});
+
+test("a recipient that appears before a retry still gets its event, even beyond the budget", async () => {
+  const id = await unmatched("late-persisted");
+  await db.query("SELECT process_resend_email_event($1)", [id]);
+  const d = await recipient("late-persisted@example.test", "enviado");
+  await db.query("UPDATE destinatario SET resend_email_id='late-persisted' WHERE id=$1", [d]);
+  await db.query("UPDATE evento_email SET proxima_tentativa_em=NULL,tentativas=1400 WHERE id=$1", [id]);
+  const result = (await row("SELECT process_resend_email_event($1) AS value", [id])).value;
+  assert.equal(result.matched, true);
+  assert.equal((await row("SELECT status FROM destinatario WHERE id=$1", [d])).status, "aberto");
+});
 
 test("provider and CSV-list exclusions preserve pending, records, author, suppression and restoration", async () => {
   const id = await recipient("pending@hotmail.com");

@@ -366,8 +366,8 @@ router.get("/campaigns/:campaignId/imports/:importId", async (req, res) => {
       return;
     }
     // Polling must only serialize the persisted job. Never recompute delivery
-    // projection here: its old 1,000-email URL filters caused upstream 431s
-    // only after completion, which this boundary exposed as a misleading 502.
+    // projection here: old 1,000-email URL filters can exceed upstream limits
+    // (431 reproduced). This does not establish the cause of later live 502s.
     res.json(
       GetCampaignImportResponse.parse({
         ...data,
