@@ -1,0 +1,32 @@
+Três correções na tela da campanha, encontradas conferindo o painel contra o banco. Nenhuma é urgente; a primeira é a que mais importa.
+
+1. O texto que explica os limites está desatualizado
+
+Abaixo dos cartões "Acumulada da campanha" e "Período atual", o parágrafo diz:
+
+"Dois gatilhos pausam o envio: catastrófico, a partir de 200 envios, com mais de 4% de bounce permanente ou mais de 0,5% de reclamações sobre entregues; e normal, a partir de 1.000 envios, com mais de 2% de bounce permanente ou mais de 0,2% de reclamações."
+
+Os quatro números são os antigos. Os valores em vigor são 8% e 0,3% para o catastrófico e 5% e 0,3% para o normal. O bloco "Sinais de reputação", mais acima na mesma página, já mostra os valores corretos — então a página se contradiz.
+
+Corrija, e resolva a causa em vez do sintoma: todo texto que descreve um limite deve ler o valor da mesma constante que a avaliação usa, nunca de um texto escrito à mão. Enquanto houver número digitado em prosa, ele vai divergir de novo na próxima mudança.
+
+Procure outros lugares da plataforma onde um limite, prazo ou regra está escrito literalmente no texto da interface e me diga quais encontrou.
+
+2. "Entregue" aparece com dois valores diferentes na mesma página
+
+O card de status mostra "Entregue 1.179" e a métrica de resultados mostra "Entregues 1.185". Os dois estão corretos: o card conta o estado atual do destinatário, a métrica conta quem teve entrega confirmada em algum momento — e a diferença de 6 são pessoas que receberam e depois tiveram bounce permanente.
+
+O problema é a palavra repetida com números diferentes e sem explicação. Diferencie os rótulos, de modo que a leitura não dependa de o operador adivinhar a definição. A mesma situação aparece na tabela de provedores, onde Microsoft mostra 460 recebidos mais 29 bounces para 479 enviados — soma maior que o total. Acrescente ali a nota de que uma mensagem pode ser aceita e devolvida depois.
+
+3. O bloco de crédito está vazio enquanto o e-mail promete um valor
+
+Na campanha "Base antiga SMO", os campos "Valor do crédito" e "Validade do crédito" estão em branco, e o corpo do e-mail diz "você tem R$5 de crédito!" escrito à mão.
+
+Antes de corrigir, me responda: esses dois campos são usados em algum lugar — exportação para BI, lembrete, relatório, variáveis {{valor_credito}} e {{validade_credito}}?
+
+Se forem usados, avise quando o corpo mencionar um valor em reais e o campo estiver vazio, e vice-versa.
+Se não forem usados em lugar nenhum, proponha removê-los. Campo que ninguém preenche e nada consome é só mais uma coisa para divergir.
+
+Fora do escopo: não altere os limites de reputação, a avaliação por período, a exclusão de destinatários nem o conteúdo de nenhuma campanha.
+
+Ao final: SQL de qualquer migração nova em bloco de código, o que preciso configurar à mão, e quais arquivos alterados são executados também pelo worker.
