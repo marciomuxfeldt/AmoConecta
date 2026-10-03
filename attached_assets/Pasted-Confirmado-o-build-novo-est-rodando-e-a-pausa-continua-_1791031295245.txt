@@ -1,0 +1,32 @@
+Confirmado: o build novo está rodando e a pausa continua errada. Mais dois defeitos apareceram no log.
+
+1. A pausa ignora o marco, e o build é o novo.
+
+O log do Scheduled Deployment mostra ciclos regulares em :07/:08 de cada minuto, e um ciclo fora do padrão às 12:25:32, compatível com o reinício da publicação. Confirme contra o registro de build.
+
+No ciclo das 12:27:
+
+12:27:09.170 INFO AmoConecta worker required Secrets check  process: "worker"
+12:27:13.003 INFO AmoConecta worker finished  processed: 0
+
+E no banco, pausada_em = 2026-10-03 12:27:12.455, com retomada_enviados_base = 1000 e retomada_em = 12:26:14. Zero envios entre a retomada e a pausa. processed: 0 indica que ele avaliou reputação antes de reservar e pausou sem enviar nada.
+
+2. A pausa automática não registra nada no log.
+
+O ciclo em que a campanha foi pausada não produziu uma única linha sobre a pausa, o gatilho, a taxa ou o motivo. Pausar uma campanha é a ação mais consequente que o worker executa e precisa de log explícito: qual campanha, qual gatilho, denominador usado, numerador, limite e se o marco de retomada foi aplicado. Sem isso, qualquer diagnóstico futuro depende de inferir pelo banco.
+
+3. Eventos de webhook em laço infinito de retentativa.
+
+A mensagem Resend event recipient is not ready yet; event remains queued for retry se repete a cada minuto, com os mesmos identificadores, desde 12:23 até o fim do log às 12:36:
+
+msg_3K8imLWJxeQY0pAsFJYiEg6T6Tf → resendEmailId 01a0fc8e-8b5d-7795-bb66-05ae25577032, tipo email.opened — 11 tentativas observadas
+msg_3K8imPzC19j73DC8cNRRpV4UXiZ → 01a0fc8e-1f3f-77e5-a67c-d5e97ca95797
+msg_3K8in8VSZrRnGajCxNN1fAkhg5P → 01a0fc72-42ca-7ef3-b26a-3993ef4fb238
+
+Não há limite de tentativas nem descarte. A Fase 5 determinava que evento sem correspondência é registrado e ignorado com log, nunca com erro — havia inclusive a mensagem Verified Resend event could not be matched and was retained for audit, que aparece às 12:20 e faz isso corretamente. O caminho "not ready yet" não tem saída.
+
+Investigue por que esses três resendEmailId não encontram destinatário, e estabeleça um limite: após N tentativas ou X minutos, o evento é tratado como não correspondido e sai da fila de retentativa.
+
+O que preciso de você:
+
+Diagnóstico dos três, a correção, e a resposta às quatro perguntas anteriores — em especial o que a avaliação faz quando o período posterior ao marco tem zero envios. Não altere a campanha nem retome nada.
