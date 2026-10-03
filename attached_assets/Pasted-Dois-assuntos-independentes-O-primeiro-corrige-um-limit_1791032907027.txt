@@ -1,0 +1,67 @@
+Dois assuntos independentes. O primeiro corrige um limite que escolhi conservador demais e que, na prática, travou uma campanha saudável a manhã inteira. O segundo generaliza uma regra de interface que foi aplicada a um botão só.
+
+1. Separar aviso de pausa
+
+O limite de 2% de bounce que está no código é uma escolha nossa, não um padrão de mercado. Os limites que de fato têm consequência vêm da Amazon SES, que é por onde o Resend entrega:
+
+Métrica	Recomendado pela SES	Conta sob revisão	Envio suspenso
+Bounce	abaixo de 5%	5%	10%
+Reclamação	abaixo de 0,1%	0,1%	0,5%
+
+Uma campanha real fechou 1.000 envios com 4% de bounce permanente e zero reclamações — abaixo da linha de revisão da SES, impecável na métrica mais rigorosa — e mesmo assim pausou três vezes. Uma trava que dispara com números saudáveis ensina o operador a ignorá-la, e aí ela deixa de proteger.
+
+Substitua o gatilho único por três níveis:
+
+Nível	Mínimo de enviados	Bounce permanente	Reclamação	Ação
+Aviso	50	2% ou mais	0,1% ou mais	Só sinaliza no painel. Não pausa.
+Catástrofe	200	acima de 8%	acima de 0,3%	Pausa
+Normal	1.000	acima de 5%	acima de 0,3%	Pausa
+
+Regras que acompanham:
+
+Todos os três avaliam apenas o período posterior ao marco de retomada, exatamente como já funciona hoje. Esta mudança é só de valores e de ação, não de janela.
+A pausa por reclamação exige no mínimo 3 reclamações, além da porcentagem. Com 200 entregues, uma única pessoa irritada representa 0,5% — não pode parar uma campanha sozinha. O bounce não precisa desse mínimo: 8% de 200 são 16 endereços, o que já é padrão, não acidente.
+O aviso é visual e persistente enquanto a condição valer. Não é notificação que soma e some.
+pausa_motivo passa a dizer qual dos dois gatilhos de pausa foi, com a taxa, o numerador, o denominador e o limite.
+
+Não torne esses valores configuráveis pelo painel. Limite de reputação que a pessoa de marketing pode aumentar sozinha, num momento de pressa, deixa de ser limite. Eles ficam no código, com comentário explicando de onde vieram.
+
+Mostrar a referência no painel
+
+No bloco de sinais de reputação, ao lado de cada número, mostre onde ele está em relação às linhas da SES — por exemplo, que a revisão de conta começa em 5% de bounce e em 0,1% de reclamação.
+
+Hoje o painel diz "limite 2%" sem dizer limite de quê, e o operador não tem como saber se 4% é um susto ou uma emergência. Essa informação é o que permite decidir com a cabeça no lugar.
+
+Reputação no nível da conta
+
+A SES mede a conta inteira, numa janela móvel. Nossa trava mede campanha por campanha. Enquanto há uma campanha só, os números se parecem; com várias simultâneas, não — e é possível ter três campanhas individualmente dentro do limite somando uma taxa de conta acima dele.
+
+Acrescente, na tela inicial do painel, um indicador consolidado: bounce permanente e reclamação de todas as campanhas somadas nos últimos 14 dias, com as mesmas linhas de referência.
+
+Por ora é só indicador, sem pausa automática ligada a ele. Me diga se enxerga algum jeito melhor de aproximar a janela que a SES usa.
+
+2. Toda confirmação abre junto do botão que a disparou
+
+Na Fase anterior corrigimos isto para o agendamento: o painel de confirmação abria no topo da página, longe do bloco onde o operador estava, e parecia que o clique não tinha funcionado.
+
+A correção foi aplicada só ao agendamento. O botão Retomar envio reproduz o problema inteiro: fica no fim da página, e ao ser clicado abre a confirmação em outro ponto, obrigando a rolar a tela para encontrar o que confirmar.
+
+Estabeleça como regra geral da plataforma: o painel de confirmação de qualquer ação abre imediatamente adjacente ao controle que o disparou, e a tela rola até ele. Vale para agendar, pausar, retomar, cancelar, excluir destinatários, limpar lista, desativar usuário e qualquer confirmação que venha a existir.
+
+Revise todas as confirmações existentes e me diga quais estavam fora dessa regra e como ficaram.
+
+Fora do escopo
+
+Não altere a janela de avaliação por período nem o marco de retomada, que acabaram de ser corrigidos. Não mexa em ENVIO_LIBERADO, no modo de segurança, na exclusão de destinatários nem no casamento de eventos de webhook. Não implemente o validador de e-mails externo — virá em lote próprio.
+
+Critérios de aceite
+Uma campanha com 4% de bounce e 0% de reclamação não pausa, e mostra aviso no painel.
+Uma campanha com 6% de bounce e 1.000 enviados no período pausa pelo gatilho normal.
+Uma campanha com 9% de bounce e 200 enviados no período pausa pelo gatilho de catástrofe.
+Uma campanha com 2 reclamações, qualquer que seja a porcentagem, não pausa por reclamação.
+O painel mostra, junto de cada taxa, a linha em que a SES coloca a conta sob revisão.
+O painel inicial mostra bounce e reclamação consolidados dos últimos 14 dias.
+A confirmação de retomada abre ao lado do botão Retomar, sem rolagem.
+Ao final
+
+SQL de qualquer migração nova em bloco de código, o que preciso configurar à mão, e quais arquivos alterados são executados também pelo worker — em especial a avaliação de reputação, que roda lá.
