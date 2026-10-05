@@ -476,19 +476,35 @@ async function processExport(job: ExportJob): Promise<boolean> {
             .filter((id): id is string => Boolean(id)),
         ),
       ];
-      const campaignNames = new Map<string, string>();
+      const campaignDetails = new Map<
+        string,
+        {
+          nome: string | null;
+          valor_credito: number | string | null;
+          validade_credito: string | null;
+        }
+      >();
       if (campaignIds.length > 0) {
         const { data: campaigns, error: campaignError } = await client
           .from("campanha")
-          .select("id,nome")
+          .select("id,nome,valor_credito,validade_credito")
           .in("id", campaignIds)
           .abortSignal(signalBeforeDeadline(deadline));
         if (campaignError) throw campaignError;
         assertBeforeDeadline(deadline);
         for (const campaign of campaigns ?? []) {
-          if (typeof campaign.nome === "string") {
-            campaignNames.set(campaign.id, campaign.nome);
-          }
+          campaignDetails.set(campaign.id, {
+            nome: typeof campaign.nome === "string" ? campaign.nome : null,
+            valor_credito:
+              typeof campaign.valor_credito === "number" ||
+              typeof campaign.valor_credito === "string"
+                ? campaign.valor_credito
+                : null,
+            validade_credito:
+              typeof campaign.validade_credito === "string"
+                ? campaign.validade_credito
+                : null,
+          });
         }
       }
 
@@ -552,8 +568,8 @@ async function processExport(job: ExportJob): Promise<boolean> {
         if (eventsForRow?.bounce) row.bounce_tipo_bruto = "bounce";
         if (eventsForRow?.complaint) row.reclamado_em = true;
         if (!matchesFilter(row, filter)) continue;
-        const campaignName = rowCampaignId
-          ? campaignNames.get(rowCampaignId) ?? null
+        const campaign = rowCampaignId
+          ? campaignDetails.get(rowCampaignId)
           : null;
         csvRows.push(
           csvRowLine({
@@ -566,7 +582,9 @@ async function processExport(job: ExportJob): Promise<boolean> {
                 ? row.data_ultima_compra
                 : null,
             campanha_id: (row.campanha_id as string | number | null) ?? null,
-            campanha_nome: campaignName,
+            campanha_nome: campaign?.nome ?? null,
+            valor_credito: campaign?.valor_credito ?? null,
+            validade_credito: campaign?.validade_credito ?? null,
             is_lembrete:
               typeof row.is_lembrete === "boolean" ? row.is_lembrete : null,
             status: typeof row.status === "string" ? row.status : null,

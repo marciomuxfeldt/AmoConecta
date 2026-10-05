@@ -505,6 +505,8 @@ export const createCampaignBodyTetoHoraMin = 0;
 
 export const createCampaignBodyTetoDiaMin = 0;
 
+export const createCampaignBodyJanelaEnvioInicioRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createCampaignBodyJanelaEnvioFimRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const createCampaignBodyLembreteHorasMin = 24;
 export const createCampaignBodyLembreteHorasMax = 168;
 
@@ -552,6 +554,8 @@ export const CreateCampaignBody = zod.object({
   "validade_credito": zod.coerce.date().nullish(),
   "teto_hora": zod.number().int().min(createCampaignBodyTetoHoraMin).optional(),
   "teto_dia": zod.number().int().min(createCampaignBodyTetoDiaMin).optional(),
+  "janela_envio_inicio": zod.string().regex(createCampaignBodyJanelaEnvioInicioRegExp).optional(),
+  "janela_envio_fim": zod.string().regex(createCampaignBodyJanelaEnvioFimRegExp).optional(),
   "agendada_para": zod.coerce.date().nullish(),
   "lembrete_horas": zod.number().int().min(createCampaignBodyLembreteHorasMin).max(createCampaignBodyLembreteHorasMax).optional(),
   "incluir_desengajados": zod.boolean().optional(),
@@ -594,6 +598,8 @@ export const createCampaignResponseTetoHoraMin = 0;
 
 export const createCampaignResponseTetoDiaMin = 0;
 
+export const createCampaignResponseJanelaEnvioInicioRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
+export const createCampaignResponseJanelaEnvioFimRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
 export const createCampaignResponseEnviadosHoraMin = 0;
 
 export const createCampaignResponseEnviadosDiaMin = 0;
@@ -652,6 +658,10 @@ export const CreateCampaignResponse = zod.object({
   "validade_credito": zod.coerce.date().nullable(),
   "teto_hora": zod.number().int().min(createCampaignResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(createCampaignResponseTetoDiaMin).nullable(),
+  "janela_envio_inicio": zod.string().regex(createCampaignResponseJanelaEnvioInicioRegExp),
+  "janela_envio_fim": zod.string().regex(createCampaignResponseJanelaEnvioFimRegExp),
+  "motivo_parada_envio": zod.union([zod.literal('fora_da_janela'),zod.literal('teto_hora'),zod.literal('teto_dia'),zod.literal('campanha_pausada'),zod.literal(null)]).nullish(),
+  "proximo_envio_em": zod.coerce.date().nullish(),
   "pausa_motivo": zod.string().nullish(),
   "pausa_taxa_bounce": zod.number().nullish(),
   "pausa_taxa_reclamacao": zod.number().nullish(),
@@ -718,6 +728,8 @@ export const createCampaignDraftResponseTetoHoraMin = 0;
 
 export const createCampaignDraftResponseTetoDiaMin = 0;
 
+export const createCampaignDraftResponseJanelaEnvioInicioRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
+export const createCampaignDraftResponseJanelaEnvioFimRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
 export const createCampaignDraftResponseEnviadosHoraMin = 0;
 
 export const createCampaignDraftResponseEnviadosDiaMin = 0;
@@ -776,6 +788,10 @@ export const CreateCampaignDraftResponse = zod.object({
   "validade_credito": zod.coerce.date().nullable(),
   "teto_hora": zod.number().int().min(createCampaignDraftResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(createCampaignDraftResponseTetoDiaMin).nullable(),
+  "janela_envio_inicio": zod.string().regex(createCampaignDraftResponseJanelaEnvioInicioRegExp),
+  "janela_envio_fim": zod.string().regex(createCampaignDraftResponseJanelaEnvioFimRegExp),
+  "motivo_parada_envio": zod.union([zod.literal('fora_da_janela'),zod.literal('teto_hora'),zod.literal('teto_dia'),zod.literal('campanha_pausada'),zod.literal(null)]).nullish(),
+  "proximo_envio_em": zod.coerce.date().nullish(),
   "pausa_motivo": zod.string().nullish(),
   "pausa_taxa_bounce": zod.number().nullish(),
   "pausa_taxa_reclamacao": zod.number().nullish(),
@@ -842,6 +858,8 @@ export const getCampaignResponseTetoHoraMin = 0;
 
 export const getCampaignResponseTetoDiaMin = 0;
 
+export const getCampaignResponseJanelaEnvioInicioRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
+export const getCampaignResponseJanelaEnvioFimRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
 export const getCampaignResponseEnviadosHoraMin = 0;
 
 export const getCampaignResponseEnviadosDiaMin = 0;
@@ -900,6 +918,10 @@ export const GetCampaignResponse = zod.object({
   "validade_credito": zod.coerce.date().nullable(),
   "teto_hora": zod.number().int().min(getCampaignResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(getCampaignResponseTetoDiaMin).nullable(),
+  "janela_envio_inicio": zod.string().regex(getCampaignResponseJanelaEnvioInicioRegExp),
+  "janela_envio_fim": zod.string().regex(getCampaignResponseJanelaEnvioFimRegExp),
+  "motivo_parada_envio": zod.union([zod.literal('fora_da_janela'),zod.literal('teto_hora'),zod.literal('teto_dia'),zod.literal('campanha_pausada'),zod.literal(null)]).nullish(),
+  "proximo_envio_em": zod.coerce.date().nullish(),
   "pausa_motivo": zod.string().nullish(),
   "pausa_taxa_bounce": zod.number().nullish(),
   "pausa_taxa_reclamacao": zod.number().nullish(),
@@ -968,6 +990,8 @@ export const updateCampaignBodyTetoHoraMin = 0;
 
 export const updateCampaignBodyTetoDiaMin = 0;
 
+export const updateCampaignBodyJanelaEnvioInicioRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateCampaignBodyJanelaEnvioFimRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const updateCampaignBodyLembreteHorasMin = 24;
 export const updateCampaignBodyLembreteHorasMax = 168;
 
@@ -1015,6 +1039,8 @@ export const UpdateCampaignBody = zod.object({
   "validade_credito": zod.coerce.date().nullish(),
   "teto_hora": zod.number().int().min(updateCampaignBodyTetoHoraMin).optional(),
   "teto_dia": zod.number().int().min(updateCampaignBodyTetoDiaMin).optional(),
+  "janela_envio_inicio": zod.string().regex(updateCampaignBodyJanelaEnvioInicioRegExp).optional(),
+  "janela_envio_fim": zod.string().regex(updateCampaignBodyJanelaEnvioFimRegExp).optional(),
   "agendada_para": zod.coerce.date().nullish(),
   "lembrete_horas": zod.number().int().min(updateCampaignBodyLembreteHorasMin).max(updateCampaignBodyLembreteHorasMax).optional(),
   "incluir_desengajados": zod.boolean().optional(),
@@ -1057,6 +1083,8 @@ export const updateCampaignResponseTetoHoraMin = 0;
 
 export const updateCampaignResponseTetoDiaMin = 0;
 
+export const updateCampaignResponseJanelaEnvioInicioRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
+export const updateCampaignResponseJanelaEnvioFimRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
 export const updateCampaignResponseEnviadosHoraMin = 0;
 
 export const updateCampaignResponseEnviadosDiaMin = 0;
@@ -1115,6 +1143,10 @@ export const UpdateCampaignResponse = zod.object({
   "validade_credito": zod.coerce.date().nullable(),
   "teto_hora": zod.number().int().min(updateCampaignResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(updateCampaignResponseTetoDiaMin).nullable(),
+  "janela_envio_inicio": zod.string().regex(updateCampaignResponseJanelaEnvioInicioRegExp),
+  "janela_envio_fim": zod.string().regex(updateCampaignResponseJanelaEnvioFimRegExp),
+  "motivo_parada_envio": zod.union([zod.literal('fora_da_janela'),zod.literal('teto_hora'),zod.literal('teto_dia'),zod.literal('campanha_pausada'),zod.literal(null)]).nullish(),
+  "proximo_envio_em": zod.coerce.date().nullish(),
   "pausa_motivo": zod.string().nullish(),
   "pausa_taxa_bounce": zod.number().nullish(),
   "pausa_taxa_reclamacao": zod.number().nullish(),
@@ -1201,6 +1233,8 @@ export const scheduleCampaignResponseTetoHoraMin = 0;
 
 export const scheduleCampaignResponseTetoDiaMin = 0;
 
+export const scheduleCampaignResponseJanelaEnvioInicioRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
+export const scheduleCampaignResponseJanelaEnvioFimRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
 export const scheduleCampaignResponseEnviadosHoraMin = 0;
 
 export const scheduleCampaignResponseEnviadosDiaMin = 0;
@@ -1259,6 +1293,10 @@ export const ScheduleCampaignResponse = zod.object({
   "validade_credito": zod.coerce.date().nullable(),
   "teto_hora": zod.number().int().min(scheduleCampaignResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(scheduleCampaignResponseTetoDiaMin).nullable(),
+  "janela_envio_inicio": zod.string().regex(scheduleCampaignResponseJanelaEnvioInicioRegExp),
+  "janela_envio_fim": zod.string().regex(scheduleCampaignResponseJanelaEnvioFimRegExp),
+  "motivo_parada_envio": zod.union([zod.literal('fora_da_janela'),zod.literal('teto_hora'),zod.literal('teto_dia'),zod.literal('campanha_pausada'),zod.literal(null)]).nullish(),
+  "proximo_envio_em": zod.coerce.date().nullish(),
   "pausa_motivo": zod.string().nullish(),
   "pausa_taxa_bounce": zod.number().nullish(),
   "pausa_taxa_reclamacao": zod.number().nullish(),
@@ -1325,6 +1363,8 @@ export const pauseCampaignResponseTetoHoraMin = 0;
 
 export const pauseCampaignResponseTetoDiaMin = 0;
 
+export const pauseCampaignResponseJanelaEnvioInicioRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
+export const pauseCampaignResponseJanelaEnvioFimRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
 export const pauseCampaignResponseEnviadosHoraMin = 0;
 
 export const pauseCampaignResponseEnviadosDiaMin = 0;
@@ -1383,6 +1423,10 @@ export const PauseCampaignResponse = zod.object({
   "validade_credito": zod.coerce.date().nullable(),
   "teto_hora": zod.number().int().min(pauseCampaignResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(pauseCampaignResponseTetoDiaMin).nullable(),
+  "janela_envio_inicio": zod.string().regex(pauseCampaignResponseJanelaEnvioInicioRegExp),
+  "janela_envio_fim": zod.string().regex(pauseCampaignResponseJanelaEnvioFimRegExp),
+  "motivo_parada_envio": zod.union([zod.literal('fora_da_janela'),zod.literal('teto_hora'),zod.literal('teto_dia'),zod.literal('campanha_pausada'),zod.literal(null)]).nullish(),
+  "proximo_envio_em": zod.coerce.date().nullish(),
   "pausa_motivo": zod.string().nullish(),
   "pausa_taxa_bounce": zod.number().nullish(),
   "pausa_taxa_reclamacao": zod.number().nullish(),
@@ -1453,6 +1497,8 @@ export const resumeCampaignResponseTetoHoraMin = 0;
 
 export const resumeCampaignResponseTetoDiaMin = 0;
 
+export const resumeCampaignResponseJanelaEnvioInicioRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
+export const resumeCampaignResponseJanelaEnvioFimRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
 export const resumeCampaignResponseEnviadosHoraMin = 0;
 
 export const resumeCampaignResponseEnviadosDiaMin = 0;
@@ -1511,6 +1557,10 @@ export const ResumeCampaignResponse = zod.object({
   "validade_credito": zod.coerce.date().nullable(),
   "teto_hora": zod.number().int().min(resumeCampaignResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(resumeCampaignResponseTetoDiaMin).nullable(),
+  "janela_envio_inicio": zod.string().regex(resumeCampaignResponseJanelaEnvioInicioRegExp),
+  "janela_envio_fim": zod.string().regex(resumeCampaignResponseJanelaEnvioFimRegExp),
+  "motivo_parada_envio": zod.union([zod.literal('fora_da_janela'),zod.literal('teto_hora'),zod.literal('teto_dia'),zod.literal('campanha_pausada'),zod.literal(null)]).nullish(),
+  "proximo_envio_em": zod.coerce.date().nullish(),
   "pausa_motivo": zod.string().nullish(),
   "pausa_taxa_bounce": zod.number().nullish(),
   "pausa_taxa_reclamacao": zod.number().nullish(),
@@ -1577,6 +1627,8 @@ export const cancelCampaignResponseTetoHoraMin = 0;
 
 export const cancelCampaignResponseTetoDiaMin = 0;
 
+export const cancelCampaignResponseJanelaEnvioInicioRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
+export const cancelCampaignResponseJanelaEnvioFimRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]+)?)?$');
 export const cancelCampaignResponseEnviadosHoraMin = 0;
 
 export const cancelCampaignResponseEnviadosDiaMin = 0;
@@ -1635,6 +1687,10 @@ export const CancelCampaignResponse = zod.object({
   "validade_credito": zod.coerce.date().nullable(),
   "teto_hora": zod.number().int().min(cancelCampaignResponseTetoHoraMin).nullable(),
   "teto_dia": zod.number().int().min(cancelCampaignResponseTetoDiaMin).nullable(),
+  "janela_envio_inicio": zod.string().regex(cancelCampaignResponseJanelaEnvioInicioRegExp),
+  "janela_envio_fim": zod.string().regex(cancelCampaignResponseJanelaEnvioFimRegExp),
+  "motivo_parada_envio": zod.union([zod.literal('fora_da_janela'),zod.literal('teto_hora'),zod.literal('teto_dia'),zod.literal('campanha_pausada'),zod.literal(null)]).nullish(),
+  "proximo_envio_em": zod.coerce.date().nullish(),
   "pausa_motivo": zod.string().nullish(),
   "pausa_taxa_bounce": zod.number().nullish(),
   "pausa_taxa_reclamacao": zod.number().nullish(),
@@ -2563,7 +2619,7 @@ export const excludeCampaignRecipientsBodyProvedoresMax = 4;
 
 export const excludeCampaignRecipientsBodyEmailsMax = 50000;
 
-export const excludeCampaignRecipientsBodyCsvMax = 5000000;
+export const excludeCampaignRecipientsBodyCsvMax = 52428800;
 
 
 

@@ -50,8 +50,9 @@ const webhookBodyParserError: ErrorRequestHandler = (error, _req, res, next) => 
   next(error);
 };
 app.use("/api/webhooks/resend", webhookBodyParserError);
-// CSV exclusions are bounded, parsed in memory and never stored as file bytes.
-app.use("/api/campaigns/:campaignId/exclusions", express.json({ limit: "11mb" }));
+// A 50 MiB CSV travels inside JSON, where quotes and line endings expand.
+// Keep this larger parser limit scoped to campaign exclusions only.
+app.use("/api/campaigns/:campaignId/exclusions", express.json({ limit: "110mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

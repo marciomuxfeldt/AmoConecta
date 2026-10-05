@@ -39,6 +39,8 @@ test("emits a UTF-8 BOM and the exact BI header order", () => {
     "data_ultima_compra",
     "campanha_id",
     "campanha_nome",
+    "valor_credito",
+    "validade_credito",
     "is_lembrete",
     "status",
     "enviado_em",
@@ -58,6 +60,8 @@ test("quotes every field and escapes quotes, commas, newlines, and accents", () 
     data_ultima_compra: "2026-01-02",
     campanha_id: "campaign-1",
     campanha_nome: "Oferta, verão",
+    valor_credito: 25.5,
+    validade_credito: "2026-02-28",
     is_lembrete: false,
     status: "entregue",
     enviado_em: "2026-01-02T12:30:00-03:00",
@@ -69,7 +73,7 @@ test("quotes every field and escapes quotes, commas, newlines, and accents", () 
 
   assert.equal(
     line,
-    `"marina@example.com","João, ""Júnior""\nSul","u-1","São Paulo","2026-01-02","campaign-1","Oferta, verão","false","entregue","2026-01-02T15:30:00.000Z","","","","erro: ""timeout"""\r\n`,
+    `"marina@example.com","João, ""Júnior""\nSul","u-1","São Paulo","2026-01-02","campaign-1","Oferta, verão","25.5","2026-02-28","false","entregue","2026-01-02T15:30:00.000Z","","","","erro: ""timeout"""\r\n`,
   );
 });
 
@@ -82,6 +86,8 @@ test("renders nulls as empty quoted fields and preserves date-only values", () =
     data_ultima_compra: null,
     campanha_id: null,
     campanha_nome: null,
+    valor_credito: null,
+    validade_credito: null,
     is_lembrete: null,
     status: null,
     enviado_em: null,
@@ -91,7 +97,7 @@ test("renders nulls as empty quoted fields and preserves date-only values", () =
     motivo_nao_envio: null,
   });
 
-  assert.equal(line, `${Array.from({ length: 14 }, () => '""').join(",")}\r\n`);
+  assert.equal(line, `${Array.from({ length: 16 }, () => '""').join(",")}\r\n`);
   assert.match(csvRowLine({
     email: "a@b.test",
     nome: null,
@@ -100,6 +106,8 @@ test("renders nulls as empty quoted fields and preserves date-only values", () =
     data_ultima_compra: "2025-12-31",
     campanha_id: "c",
     campanha_nome: null,
+    valor_credito: null,
+    validade_credito: null,
     is_lembrete: false,
     status: "entregue",
     enviado_em: null,

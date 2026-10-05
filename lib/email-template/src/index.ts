@@ -290,7 +290,7 @@ export function normalizeEmailBlocks(value: unknown): EmailBlock[] {
           id,
           type: "image",
           src: safeUrl(block.src),
-          alt: block.alt.slice(0, 160),
+          alt: block.alt,
           ...(typeof block.href === "string" ? { href: safeUrl(block.href) } : {}),
         },
       ];
@@ -304,7 +304,7 @@ export function normalizeEmailBlocks(value: unknown): EmailBlock[] {
         {
           id,
           type: "button",
-          label: block.label.slice(0, 120),
+          label: block.label,
           href: block.href.trim(),
         },
       ];

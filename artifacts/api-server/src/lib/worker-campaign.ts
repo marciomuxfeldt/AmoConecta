@@ -23,6 +23,8 @@ export type WorkerCampaign = {
   incluir_desengajados?: boolean | null;
   status: string;
   agendada_para?: string | null;
+  janela_envio_inicio: string;
+  janela_envio_fim: string;
   teto_hora?: number | null;
   teto_dia?: number | null;
   pausa_motivo?: string | null;
@@ -41,7 +43,7 @@ export async function loadWorkerCampaign(
   campaignId: string,
 ): Promise<WorkerCampaign | null> {
   const { data, error } = await client.from("campanha").select(
-    "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,reply_to,corpo,status,agendada_para,teto_hora,teto_dia,retomada_em,retomada_enviados_base",
+    "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,reply_to,corpo,status,agendada_para,janela_envio_inicio,janela_envio_fim,teto_hora,teto_dia,retomada_em,retomada_enviados_base",
   ).eq("id", campaignId).maybeSingle();
   if (error) throw error;
   if (!data) return null;

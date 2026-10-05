@@ -86,6 +86,18 @@ before(async () => {
       FOR EACH ROW EXECUTE FUNCTION public.normalize_email_before_write();
   `);
   await db.exec(await sqlFile("migrations/202610050020_email_validation.sql"));
+  await db.exec(await sqlFile("migrations/202610050021_campaign_send_window.sql"));
+  const initialWindow = await row(
+    "SELECT janela_envio_inicio::text, janela_envio_fim::text FROM campanha WHERE id=$1",
+    [campaign],
+  );
+  assert.equal(initialWindow.janela_envio_inicio, "09:00:00");
+  assert.equal(initialWindow.janela_envio_fim, "20:00:00");
+  // Keep existing reservation tests independent of the clock used by CI.
+  await db.exec(`
+    UPDATE campanha
+    SET janela_envio_inicio='00:00', janela_envio_fim='23:59'
+  `);
 });
 after(() => db.close());
 
@@ -94,6 +106,61 @@ const unmatched = async (providerId, attempts = 0, age = "0 seconds") => (await 
     VALUES($1,'email.opened','{"data":{}}',$2,now()-$3::interval) RETURNING id`,
   [providerId, attempts, age],
 )).id;
+
+test("reservation refuses primary and reminder queues outside the São Paulo send window", async () => {
+  const timeParts = new Map(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "America/Sao_Paulo",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date())
+      .map(({ type, value }) => [type, value]),
+  );
+  const currentMinute =
+    Number(timeParts.get("hour")) * 60 + Number(timeParts.get("minute"));
+  const startMinute = currentMinute >= 1437 ? 0 : currentMinute + 2;
+  const endMinute = startMinute + 1;
+  const toTime = (minutes) =>
+    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  const start = toTime(startMinute);
+  const end = toTime(endMinute);
+
+  await db.query(
+    "UPDATE campanha SET janela_envio_inicio=$2,janela_envio_fim=$3,status='enviando' WHERE id=$1",
+    [campaign, start, end],
+  );
+  const primaryId = await recipient("outside-window-primary@example.test");
+  const primaryReserved = await db.query(
+    "SELECT id FROM reservar_destinatarios($1,100,false)",
+    [campaign],
+  );
+  assert.equal(primaryReserved.rows.some((item) => item.id === primaryId), false);
+  assert.equal(
+    (await row("SELECT status FROM destinatario WHERE id=$1", [primaryId])).status,
+    "pendente",
+  );
+
+  await db.query("UPDATE campanha SET status='concluida' WHERE id=$1", [campaign]);
+  const reminderId = await recipient("outside-window-reminder@example.test", "pendente", true);
+  const reminderReserved = await db.query(
+    "SELECT id FROM reservar_destinatarios($1,100,true)",
+    [campaign],
+  );
+  assert.equal(reminderReserved.rows.some((item) => item.id === reminderId), false);
+  assert.equal(
+    (await row("SELECT status FROM destinatario WHERE id=$1", [reminderId])).status,
+    "pendente",
+  );
+
+  await db.query("DELETE FROM destinatario WHERE id=$1", [primaryId]);
+  await db.query("DELETE FROM destinatario WHERE id=$1", [reminderId]);
+  await db.query(
+    "UPDATE campanha SET janela_envio_inicio='00:00',janela_envio_fim='23:59',status='enviando' WHERE id=$1",
+    [campaign],
+  );
+});
 
 test("known test messages leave the retry queue immediately, including old high-attempt events", async () => {
   for (const [providerId, attempts] of [["known-test", 0], ["old-known-test", 1400]]) {

@@ -52,6 +52,17 @@ import {
 } from "../lib/campaign-schedule-policy";
 import { recipientDeliveryProjection } from "../lib/recipient-delivery-projection";
 import {
+  CAMPAIGN_SEND_TIME_ZONE,
+  DEFAULT_CAMPAIGN_SEND_WINDOW_END,
+  DEFAULT_CAMPAIGN_SEND_WINDOW_START,
+  campaignDayBucketStart,
+  campaignHourBucketStart,
+  campaignSendDiagnostics,
+  isValidCampaignSendWindow,
+  nextCampaignDayBucketStart,
+  nextCampaignHourBucketStart,
+} from "../lib/campaign-send-window";
+import {
   CAMPAIGN_REPUTATION_THRESHOLDS,
   hasCampaignReputationWarning,
   loadReputationCounts,
@@ -69,7 +80,7 @@ import {
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
-  "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,status,agendada_para,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em,criado_por_id,criado_por_nome,criado_por_email,agendado_por_id,agendado_por_nome,agendado_por_email,agendado_em,pausado_por_id,pausado_por_nome,pausado_por_email,retomada_em,retomada_enviados_base,retomado_por_nome,retomado_por_email";
+  "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,janela_envio_inicio,janela_envio_fim,status,agendada_para,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em,criado_por_id,criado_por_nome,criado_por_email,agendado_por_id,agendado_por_nome,agendado_por_email,agendado_em,pausado_por_id,pausado_por_nome,pausado_por_email,retomada_em,retomada_enviados_base,retomado_por_nome,retomado_por_email";
 // Public by design: this bucket contains only e-mail image assets.
 // Never reuse the private CSV bucket from routes/imports.ts here.
 const EMAIL_ASSET_BUCKET = "amoconecta-assets";
@@ -243,6 +254,14 @@ function campaignPayload(
   }
   if (!partial || "teto_hora" in input) payload.teto_hora = input.teto_hora ?? 100;
   if (!partial || "teto_dia" in input) payload.teto_dia = input.teto_dia ?? 1000;
+  if (!partial || "janela_envio_inicio" in input) {
+    payload.janela_envio_inicio =
+      input.janela_envio_inicio ?? DEFAULT_CAMPAIGN_SEND_WINDOW_START;
+  }
+  if (!partial || "janela_envio_fim" in input) {
+    payload.janela_envio_fim =
+      input.janela_envio_fim ?? DEFAULT_CAMPAIGN_SEND_WINDOW_END;
+  }
   if (!partial || "agendada_para" in input) {
     payload.agendada_para = dateValue(input.agendada_para);
   }
@@ -308,29 +327,38 @@ function replyToValidationError(email: unknown): string | null {
 
 async function withSendMetrics<T extends Record<string, unknown>>(campaign: T): Promise<T> {
   const client = supabaseAdminClient();
-  const now = Date.now();
-  const hourStart = new Date(now - 60 * 60 * 1000).toISOString();
-  const day = new Date(now);
-  day.setHours(0, 0, 0, 0);
-  const dayStart = day.toISOString();
+  const now = new Date();
+  const hourStart = campaignHourBucketStart(now).toISOString();
+  const hourEnd = nextCampaignHourBucketStart(now).toISOString();
+  const dayStart = campaignDayBucketStart(now).toISOString();
+  const dayEnd = nextCampaignDayBucketStart(now).toISOString();
   const [hour, dayResult] = await Promise.all([
     client
       .from("destinatario")
       .select("id", { count: "exact", head: true })
       .eq("campanha_id", campaign.id)
-      .gte("enviado_em", hourStart),
+      .gte("enviado_em", hourStart)
+      .lt("enviado_em", hourEnd),
     client
       .from("destinatario")
       .select("id", { count: "exact", head: true })
       .eq("campanha_id", campaign.id)
-      .gte("enviado_em", dayStart),
+      .gte("enviado_em", dayStart)
+      .lt("enviado_em", dayEnd),
   ]);
   if (hour.error) throw hour.error;
   if (dayResult.error) throw dayResult.error;
+  const diagnostics = campaignSendDiagnostics(
+    campaign as unknown as Parameters<typeof campaignSendDiagnostics>[0],
+    hour.count ?? 0,
+    dayResult.count ?? 0,
+    now,
+  );
   return {
     ...campaign,
     enviados_hora: hour.count ?? 0,
     enviados_dia: dayResult.count ?? 0,
+    ...diagnostics,
   };
 }
 
@@ -762,7 +790,7 @@ async function findCampaign(campaignId: string) {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,status,assunto,preheader,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,lembrete_horas,teste_enviado,corpo,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,retomada_em",
+      "id,status,assunto,preheader,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,janela_envio_inicio,janela_envio_fim,lembrete_horas,teste_enviado,corpo,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,retomada_em",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -879,6 +907,16 @@ router.post("/campaigns", async (req, res) => {
   const parsed = CreateCampaignBody.safeParse(withDefaultSender(req.body ?? {}));
   if (!parsed.success) {
     res.status(422).json({ error: formatValidationError(parsed.error) });
+    return;
+  }
+  const sendWindowStart =
+    parsed.data.janela_envio_inicio ?? DEFAULT_CAMPAIGN_SEND_WINDOW_START;
+  const sendWindowEnd =
+    parsed.data.janela_envio_fim ?? DEFAULT_CAMPAIGN_SEND_WINDOW_END;
+  if (!isValidCampaignSendWindow(sendWindowStart, sendWindowEnd)) {
+    res.status(422).json({
+      error: "O fim da janela precisa ser posterior ao início, com pelo menos um minuto de envio.",
+    });
     return;
   }
   const senderError = senderValidationError(parsed.data.remetente_email);
@@ -1681,6 +1719,20 @@ router.patch("/campaigns/:campaignId", async (req, res) => {
     const existing = await findCampaign(params.data.campaignId);
     if (!existing) {
       res.status(404).json({ error: "Campanha não encontrada." });
+      return;
+    }
+    const sendWindowStart = String(
+      parsed.data.janela_envio_inicio ?? existing.janela_envio_inicio ??
+        DEFAULT_CAMPAIGN_SEND_WINDOW_START,
+    );
+    const sendWindowEnd = String(
+      parsed.data.janela_envio_fim ?? existing.janela_envio_fim ??
+        DEFAULT_CAMPAIGN_SEND_WINDOW_END,
+    );
+    if (!isValidCampaignSendWindow(sendWindowStart, sendWindowEnd)) {
+      res.status(422).json({
+        error: "O fim da janela precisa ser posterior ao início, com pelo menos um minuto de envio.",
+      });
       return;
     }
     const updatePayload = campaignPayload(parsed.data as Record<string, unknown>, true);

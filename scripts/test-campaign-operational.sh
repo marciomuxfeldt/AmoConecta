@@ -17,6 +17,8 @@ await build({
     "artifacts/api-server/src/lib/recipient-delivery-projection.test.ts",
     "artifacts/api-server/src/lib/csv-export.test.ts",
     "artifacts/api-server/src/lib/campaign-email-metrics.test.ts",
+    "artifacts/api-server/src/lib/campaign-send-window.test.ts",
+    "artifacts/api-server/src/lib/config-diagnostics.test.ts",
   ],
   bundle: true, platform: "node", format: "esm",
   outdir: process.env.TEST_OUTPUT, outExtension: { ".js": ".mjs" },

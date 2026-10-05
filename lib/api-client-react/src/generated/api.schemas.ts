@@ -388,6 +388,19 @@ export interface SendTestResponse {
   resend_email_id: string;
 }
 
+/**
+ * @nullable
+ */
+export type CampaignMotivoParadaEnvio = typeof CampaignMotivoParadaEnvio[keyof typeof CampaignMotivoParadaEnvio] | null;
+
+
+export const CampaignMotivoParadaEnvio = {
+  fora_da_janela: 'fora_da_janela',
+  teto_hora: 'teto_hora',
+  teto_dia: 'teto_dia',
+  campanha_pausada: 'campanha_pausada',
+} as const;
+
 export type EmailTextBlockType = typeof EmailTextBlockType[keyof typeof EmailTextBlockType];
 
 
@@ -501,6 +514,14 @@ export interface Campaign {
      * @nullable
      */
   teto_dia: number | null;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]+)?)?$ */
+  janela_envio_inicio: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]+)?)?$ */
+  janela_envio_fim: string;
+  /** @nullable */
+  motivo_parada_envio?: CampaignMotivoParadaEnvio;
+  /** @nullable */
+  proximo_envio_em?: string | null;
   /** @nullable */
   pausa_motivo?: string | null;
   /** @nullable */
@@ -569,6 +590,10 @@ export interface CreateCampaignInput {
   teto_hora?: number;
   /** @minimum 0 */
   teto_dia?: number;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  janela_envio_inicio?: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  janela_envio_fim?: string;
   /** @nullable */
   agendada_para?: string | null;
   /**
@@ -610,6 +635,10 @@ export interface UpdateCampaignInput {
   teto_hora?: number;
   /** @minimum 0 */
   teto_dia?: number;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  janela_envio_inicio?: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  janela_envio_fim?: string;
   /** @nullable */
   agendada_para?: string | null;
   /**
@@ -857,7 +886,7 @@ export interface CampaignExclusionInput {
   emails?: string[];
   /**
      * @minLength 1
-     * @maxLength 5000000
+     * @maxLength 52428800
      */
   csv?: string;
 }

@@ -26,7 +26,7 @@ import {
 import { ScrollConfirmation } from './ScrollConfirmation';
 
 export const EXCLUSION_PAGE_SIZE = 20;
-export const EXCLUSION_CSV_MAX_BYTES = 5_000_000;
+export const EXCLUSION_CSV_MAX_BYTES = 50 * 1024 * 1024;
 export const MISSING_DATE_WARNING_PERCENT = 20;
 
 type ProviderKey = 'gmail' | 'microsoft' | 'yahoo' | 'outros';
@@ -306,7 +306,7 @@ export function CampaignExclusionPanel({
     setFormError(null);
     if (!file) return;
     if (file.size > EXCLUSION_CSV_MAX_BYTES) {
-      setFormError('O CSV excede o limite de 5 MB.');
+      setFormError('O CSV excede o limite de 50 MB.');
       if (fileRef.current) fileRef.current.value = '';
       return;
     }
@@ -442,7 +442,7 @@ export function CampaignExclusionPanel({
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <span className="text-[11px] font-bold text-[#6d7180]">CSV com coluna email (até 5 MB)</span>
+              <span className="text-[11px] font-bold text-[#6d7180]">CSV com coluna email (até 50 MB)</span>
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
                 <label className="action-button action-button-secondary cursor-pointer !px-3"><FileUp size={14} /> Escolher arquivo<input ref={fileRef} type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => { void onFile(e.target.files?.[0]); }} data-testid="input-exclude-csv" /></label>
                 {csvName && <span className="text-xs font-semibold text-[#42495b]" data-testid="text-exclude-csv-name">{csvName} <button type="button" onClick={clearCsv} className="ml-1 underline" data-testid="button-exclude-csv-clear">remover</button></span>}

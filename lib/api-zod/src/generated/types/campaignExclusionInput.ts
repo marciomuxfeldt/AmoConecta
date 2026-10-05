@@ -19,7 +19,7 @@ export interface CampaignExclusionInput {
   emails?: string[];
   /**
      * @minLength 1
-     * @maxLength 5000000
+     * @maxLength 52428800
      */
   csv?: string;
 }

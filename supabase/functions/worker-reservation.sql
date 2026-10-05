@@ -1,5 +1,39 @@
--- Apply 202610050020_email_validation.sql first, then run this in the
+-- Apply 202610050021_campaign_send_window.sql first, then run this in the
 -- Supabase SQL Editor for Repls whose worker uses this reservation function.
+ALTER TABLE public.campanha
+  ADD COLUMN IF NOT EXISTS janela_envio_inicio time without time zone,
+  ADD COLUMN IF NOT EXISTS janela_envio_fim time without time zone;
+
+UPDATE public.campanha
+SET janela_envio_inicio = COALESCE(janela_envio_inicio, time '09:00'),
+    janela_envio_fim = COALESCE(janela_envio_fim, time '20:00');
+
+ALTER TABLE public.campanha
+  ALTER COLUMN janela_envio_inicio SET DEFAULT time '09:00',
+  ALTER COLUMN janela_envio_inicio SET NOT NULL,
+  ALTER COLUMN janela_envio_fim SET DEFAULT time '20:00',
+  ALTER COLUMN janela_envio_fim SET NOT NULL;
+
+DO $worker_migration$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.campanha'::regclass
+      AND conname = 'campanha_janela_envio_valida'
+  ) THEN
+    ALTER TABLE public.campanha
+      ADD CONSTRAINT campanha_janela_envio_valida CHECK (
+        janela_envio_inicio < janela_envio_fim
+        AND extract(second FROM janela_envio_inicio) = 0
+        AND extract(second FROM janela_envio_fim) = 0
+      ) NOT VALID;
+  END IF;
+END;
+$worker_migration$;
+
+ALTER TABLE public.campanha
+  VALIDATE CONSTRAINT campanha_janela_envio_valida;
+
 ALTER TABLE public.destinatario
   ADD COLUMN IF NOT EXISTS processando_em timestamptz;
 
@@ -21,6 +55,8 @@ BEGIN
   PERFORM 1 FROM public.campanha c
   WHERE c.id=p_campanha_id
     AND c.status=CASE WHEN p_is_lembrete THEN 'concluida' ELSE 'enviando' END
+    AND timezone('America/Sao_Paulo', clock_timestamp())::time >= c.janela_envio_inicio
+    AND timezone('America/Sao_Paulo', clock_timestamp())::time < c.janela_envio_fim
   FOR UPDATE;
   IF NOT FOUND THEN RETURN; END IF;
 
@@ -57,6 +93,8 @@ BEGIN
         SELECT 1 FROM public.campanha c
         WHERE c.id=p_campanha_id
           AND c.status=CASE WHEN p_is_lembrete THEN 'concluida' ELSE 'enviando' END
+          AND timezone('America/Sao_Paulo', clock_timestamp())::time >= c.janela_envio_inicio
+          AND timezone('America/Sao_Paulo', clock_timestamp())::time < c.janela_envio_fim
       )
     ORDER BY d.data_ultima_compra DESC NULLS LAST,d.id
     LIMIT greatest(1,least(p_limite,100))

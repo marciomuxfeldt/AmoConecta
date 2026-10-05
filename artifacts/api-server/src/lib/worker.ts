@@ -35,6 +35,14 @@ import {
 } from "./csv-import";
 import { normalizeEmail } from "./email-normalization";
 import {
+  campaignDayBucketStart,
+  campaignHourBucketStart,
+  isInsideCampaignSendWindow,
+  nextCampaignWindowOpenAtOrAfter,
+  nextCampaignDayBucketStart,
+  nextCampaignHourBucketStart,
+} from "./campaign-send-window";
+import {
   loadWorkerCampaign,
   maybePauseWorkerCampaign,
   type WorkerCampaign as Campaign,
@@ -456,13 +464,86 @@ async function sendWithRetries(
     string,
     Awaited<ReturnType<typeof sendBatch>>[number]
   >();
+  const attemptedRecipientIds = new Set<string>();
+  const persistResults = async (
+    deferredRecipientIds?: Set<string>,
+    deferredReason?: string,
+  ) => {
+    const sentAt = new Date().toISOString();
+    const unresolvedError =
+      lastError instanceof Error
+        ? lastError.message
+        : lastError === undefined
+          ? "Resend não retornou um resultado para este destinatário."
+          : String(lastError);
+    await Promise.all(
+      recipients.map((recipient) => {
+        const result = resultsByRecipient.get(recipient.id);
+        if (!result) {
+          if (deferredRecipientIds?.has(recipient.id)) {
+            const hasAttemptedSend = attemptedRecipientIds.has(recipient.id);
+            return updateRecipient(recipient.id, {
+              status: "pendente",
+              tentativas: hasAttemptedSend
+                ? recipient.tentativas
+                : Math.max(0, recipient.tentativas - 1),
+              processando_em: null,
+              erro: hasAttemptedSend ? deferredReason ?? null : null,
+            });
+          }
+          return updateRecipient(recipient.id, {
+            status: "erro",
+            processando_em: null,
+            erro: unresolvedError,
+          });
+        }
+        return updateRecipient(recipient.id, {
+          status: result.error ? "erro" : "enviado",
+          resend_email_id: result.id ?? null,
+          enviado_em: result.error ? null : sentAt,
+          processando_em: null,
+          erro: result.error?.message ?? null,
+        });
+      }),
+    );
+  };
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
     if (pending.length === 0) break;
     try {
       const sendable = await markSuppressedOrBlocked(pending, campaign);
       if (sendable.length !== pending.length) return;
-      const results = await sendBatch(campaign, pending, { reminder });
+      const liveCampaign = await loadCampaign(campaign.id);
+      const now = new Date();
+      const requiredStatus = reminder ? "concluida" : "enviando";
+      const windowOpen =
+        liveCampaign && isInsideCampaignSendWindow(liveCampaign, now);
+      if (!liveCampaign || liveCampaign.status !== requiredStatus || !windowOpen) {
+        const deferredReason =
+          liveCampaign?.status === "pausada"
+            ? "Envio adiado porque a campanha está pausada."
+            : "Nova tentativa adiada porque a janela de envio está fechada.";
+        logger.info(
+          {
+            campaignId: campaign.id,
+            reminder,
+            nextSendAt:
+              liveCampaign && !windowOpen
+                ? nextCampaignWindowOpenAtOrAfter(liveCampaign, now).toISOString()
+                : null,
+          },
+          "Campaign batch deferred before contacting the email provider",
+        );
+        await persistResults(
+          new Set(pending.map((recipient) => recipient.id)),
+          deferredReason,
+        );
+        return;
+      }
+      for (const recipient of pending) {
+        attemptedRecipientIds.add(recipient.id);
+      }
+      const results = await sendBatch(liveCampaign, pending, { reminder });
       if (results.length !== pending.length) {
         throw new Error(
           `Resend retornou ${results.length} resultado(s) para ${pending.length} mensagem(ns).`,
@@ -505,34 +586,7 @@ async function sendWithRetries(
     }
   }
 
-  const sentAt = new Date().toISOString();
-  const unresolvedError =
-    lastError instanceof Error
-      ? lastError.message
-      : lastError === undefined
-        ? "Resend não retornou um resultado para este destinatário."
-        : String(lastError);
-  await Promise.all(
-    recipients.map((recipient) =>
-      (() => {
-        const result = resultsByRecipient.get(recipient.id);
-        if (!result) {
-          return updateRecipient(recipient.id, {
-            status: "erro",
-            processando_em: null,
-            erro: unresolvedError,
-          });
-        }
-        return updateRecipient(recipient.id, {
-          status: result.error ? "erro" : "enviado",
-          resend_email_id: result.id ?? null,
-          enviado_em: result.error ? null : sentAt,
-          processando_em: null,
-          erro: result.error?.message ?? null,
-        });
-      })(),
-    ),
-  );
+  await persistResults();
 }
 
 async function maybePauseCampaign(campaignId: string): Promise<boolean> {
@@ -638,22 +692,24 @@ async function quotaRemaining(campaign: Campaign): Promise<number> {
     (limit): limit is number => typeof limit === "number" && limit > 0,
   );
   if (limits.length === 0) return RESEND_BATCH_SIZE;
-  const now = Date.now();
-  const hourStart = new Date(now - 60 * 60 * 1000).toISOString();
-  const day = new Date();
-  day.setHours(0, 0, 0, 0);
-  const dayStart = day.toISOString();
+  const now = new Date();
+  const hourStart = campaignHourBucketStart(now).toISOString();
+  const hourEnd = nextCampaignHourBucketStart(now).toISOString();
+  const dayStart = campaignDayBucketStart(now).toISOString();
+  const dayEnd = nextCampaignDayBucketStart(now).toISOString();
   const counts = await Promise.all([
     client
       .from("destinatario")
       .select("id", { count: "exact", head: true })
       .eq("campanha_id", campaign.id)
-      .gte("enviado_em", hourStart),
+      .gte("enviado_em", hourStart)
+      .lt("enviado_em", hourEnd),
     client
       .from("destinatario")
       .select("id", { count: "exact", head: true })
       .eq("campanha_id", campaign.id)
-      .gte("enviado_em", dayStart),
+      .gte("enviado_em", dayStart)
+      .lt("enviado_em", dayEnd),
   ]);
   for (const result of counts) {
     if (result.error) throw result.error;
@@ -681,6 +737,17 @@ async function enqueueReminders(campaignId: string, limit: number): Promise<numb
 async function processReminderQueue(campaign: Campaign): Promise<number> {
   let processed = 0;
   while (true) {
+    const now = new Date();
+    if (!isInsideCampaignSendWindow(campaign, now)) {
+      logger.info(
+        {
+          campaignId: campaign.id,
+          nextSendAt: nextCampaignWindowOpenAtOrAfter(campaign, now).toISOString(),
+        },
+        "Campaign reminder sending deferred outside its configured window",
+      );
+      break;
+    }
     const remaining = await quotaRemaining(campaign);
     if (remaining <= 0) break;
     await enqueueReminders(campaign.id, remaining);
@@ -767,6 +834,17 @@ export async function processCampaign(campaignId: string): Promise<number> {
     campaign = current;
     if (await logCampaignValidationBlock(campaignId)) break;
     if (await maybePauseCampaign(campaignId)) break;
+    const now = new Date();
+    if (!isInsideCampaignSendWindow(campaign, now)) {
+      logger.info(
+        {
+          campaignId,
+          nextSendAt: nextCampaignWindowOpenAtOrAfter(campaign, now).toISOString(),
+        },
+        "Campaign sending deferred outside its configured window",
+      );
+      break;
+    }
     const remaining = await quotaRemaining(campaign);
     if (remaining <= 0) break;
     const reserved = await reserveRecipients(campaignId, remaining);
@@ -842,7 +920,7 @@ export async function processDueCampaigns(): Promise<number> {
       await supabaseAdminClient()
         .from("campanha")
         .select(
-          "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,reply_to,corpo,status,agendada_para,teto_hora,teto_dia",
+          "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,valor_credito,validade_credito,reply_to,corpo,status,agendada_para,janela_envio_inicio,janela_envio_fim,teto_hora,teto_dia",
         )
         .eq("status", "concluida")
         .not("assunto_lembrete", "is", null)

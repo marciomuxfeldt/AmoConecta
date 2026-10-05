@@ -51,6 +51,8 @@ test("omits Reply-To when neither the campaign nor the environment configures on
       remetente_email: "envios@marketing.amo.delivery",
       corpo: [],
       status: "enviando",
+      janela_envio_inicio: "09:00",
+      janela_envio_fim: "20:00",
       teto_hora: 100,
       teto_dia: 1000,
       retomada_em: null,

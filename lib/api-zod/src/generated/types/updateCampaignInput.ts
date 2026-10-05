@@ -37,6 +37,10 @@ export interface UpdateCampaignInput {
   teto_hora?: number;
   /** @minimum 0 */
   teto_dia?: number;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  janela_envio_inicio?: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  janela_envio_fim?: string;
   /** @nullable */
   agendada_para?: Date | null;
   /**

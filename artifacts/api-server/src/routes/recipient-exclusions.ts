@@ -16,6 +16,7 @@ import { ImportValidationError } from "../lib/csv-import";
 import { normalizeEmail } from "../lib/email-normalization";
 import { getTechnicalError } from "../lib/technical-error";
 
+const MAX_EXCLUSION_CSV_BYTES = 50 * 1024 * 1024;
 const router: IRouter = Router();
 const FIELDS = "id,email,nome,status,excluido_em,exclusao_motivo,excluido_por_nome,excluido_por_email";
 
@@ -96,6 +97,14 @@ async function mutateExclusions(req: Request, res: Response, restore: boolean) {
     }
     if (restore && (Number(Boolean(undo?.ids?.length)) + Number(undo?.todos === true) !== 1)) {
       res.status(422).json({ error: "Selecione os destinatários ou confirme a restauração de todos." }); return;
+    }
+    if (
+      !restore &&
+      input?.csv &&
+      Buffer.byteLength(input.csv, "utf8") > MAX_EXCLUSION_CSV_BYTES
+    ) {
+      res.status(422).json({ error: "O CSV excede o limite de 50 MB." });
+      return;
     }
     const emails = !restore && input?.csv
       ? await emailsFromExclusionCsv(input.csv)

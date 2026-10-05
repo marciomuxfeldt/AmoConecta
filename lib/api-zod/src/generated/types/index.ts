@@ -35,6 +35,7 @@ export * from './campaignExclusionOverview';
 export * from './campaignExclusionResult';
 export * from './campaignListItem';
 export * from './campaignListItemStatus';
+export * from './campaignMotivoParadaEnvio';
 export * from './campaignRecipientsCleared';
 export * from './campaignRecipientSummary';
 export * from './campaignReputationEvaluation';

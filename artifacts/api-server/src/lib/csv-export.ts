@@ -14,6 +14,8 @@ export const BI_EXPORT_COLUMNS = [
   "data_ultima_compra",
   "campanha_id",
   "campanha_nome",
+  "valor_credito",
+  "validade_credito",
   "is_lembrete",
   "status",
   "enviado_em",
@@ -33,6 +35,8 @@ export type BiExportRow = {
   data_ultima_compra: string | null;
   campanha_id: string | number | null;
   campanha_nome: string | null;
+  valor_credito: string | number | null;
+  validade_credito: string | null;
   is_lembrete: boolean | null;
   status: string | null;
   enviado_em: string | Date | null;
@@ -126,6 +130,8 @@ export function csvRowLine(row: BiExportRow): string {
     normalizeExportDate(row.data_ultima_compra),
     nullableValue(row.campanha_id),
     nullableValue(row.campanha_nome),
+    nullableValue(row.valor_credito),
+    normalizeExportDate(row.validade_credito),
     row.is_lembrete == null ? "" : String(row.is_lembrete),
     nullableValue(row.status),
     normalizeExportTimestamp(row.enviado_em),

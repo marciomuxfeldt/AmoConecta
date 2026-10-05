@@ -283,9 +283,11 @@ function validateEmailBlocks(blocks: EmailBlock[]) {
   for (const block of blocks) {
     if (block.type === 'image') {
       if (!block.src) return 'Envie uma imagem antes de salvar o bloco de imagem.';
+      if (block.alt.length > 160) return 'O texto alternativo da imagem deve ter até 160 caracteres.';
     }
     if (block.type === 'button') {
       if (!block.label.trim()) return 'Informe o rótulo de todos os botões.';
+      if (block.label.length > 120) return 'O rótulo do botão deve ter até 120 caracteres.';
     }
   }
   const urlIssues = validateEmailBlockUrls(blocks.map((block) => (
@@ -578,6 +580,8 @@ type CampaignFormValues = {
   validade_credito: string;
   teto_hora: string;
   teto_dia: string;
+  janela_envio_inicio: string;
+  janela_envio_fim: string;
   agendada_para: string;
   lembrete_horas: string;
   corpo: EmailBlock[];
@@ -604,6 +608,8 @@ function blankCampaign(
     validade_credito: '',
     teto_hora: hourCap,
     teto_dia: dayCap,
+    janela_envio_inicio: '09:00',
+    janela_envio_fim: '20:00',
     agendada_para: '',
     lembrete_horas: '48',
     corpo: [],
@@ -633,6 +639,8 @@ function campaignToForm(
     validade_credito: toDateInput(campaign.validade_credito),
     teto_hora: campaign.teto_hora == null ? '' : String(campaign.teto_hora),
     teto_dia: campaign.teto_dia == null ? '' : String(campaign.teto_dia),
+    janela_envio_inicio: campaign.janela_envio_inicio?.slice(0, 5) ?? '09:00',
+    janela_envio_fim: campaign.janela_envio_fim?.slice(0, 5) ?? '20:00',
     agendada_para: toDateTimeLocal(campaign.agendada_para),
     lembrete_horas: String(campaign.lembrete_horas ?? 48),
     corpo: normalizeEmailBlocks(campaign.corpo),
@@ -969,6 +977,17 @@ function CampaignForm({
       form.setError('lembrete_horas', { type: 'validate', message: 'O lembrete precisa ficar entre 24 e 168 horas.' });
       return false;
     }
+    if (
+      !values.janela_envio_inicio ||
+      !values.janela_envio_fim ||
+      values.janela_envio_inicio >= values.janela_envio_fim
+    ) {
+      form.setError('janela_envio_fim', {
+        type: 'validate',
+        message: 'O fim precisa ser posterior ao início; configure ao menos um minuto de janela.',
+      });
+      return false;
+    }
     return true;
   };
 
@@ -995,6 +1014,8 @@ function CampaignForm({
       validade_credito: values.validade_credito.trim() || null,
       teto_hora: nullableNumber(values.teto_hora) ?? 100,
       teto_dia: nullableNumber(values.teto_dia) ?? 1000,
+      janela_envio_inicio: values.janela_envio_inicio,
+      janela_envio_fim: values.janela_envio_fim,
       agendada_para: toServerDate(values.agendada_para),
       lembrete_horas: Math.min(168, Math.max(24, Number(values.lembrete_horas) || 48)),
       corpo,
@@ -1209,6 +1230,13 @@ function CampaignForm({
             <Field label="Horas até o lembrete"><input {...form.register('lembrete_horas')} disabled={contentLocked} type="number" min="24" max="168" className="field-control disabled:cursor-not-allowed disabled:bg-[#f3eee7]" data-testid="input-reminder-hours" /></Field>
              <Field label="Teto por hora" hint="Sugestão inicial para a rampa: 100."><input {...form.register('teto_hora')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-hour-cap" /></Field>
              <Field label="Teto por dia" hint="Sugestão inicial para a rampa: 1.000."><input {...form.register('teto_dia')} inputMode="numeric" className="field-control" placeholder="Sem limite" data-testid="input-day-cap" /></Field>
+              <Field label="Início da janela (São Paulo)" hint="Padrão: 09:00. Este horário está incluído.">
+                <input {...form.register('janela_envio_inicio')} type="time" step="60" required className="field-control" data-testid="input-send-window-start" />
+              </Field>
+              <Field label="Fim da janela (São Paulo)" hint="Padrão: 20:00. Este horário não está incluído.">
+                <input {...form.register('janela_envio_fim')} type="time" step="60" required aria-invalid={Boolean(form.formState.errors.janela_envio_fim)} className="field-control" data-testid="input-send-window-end" />
+                {form.formState.errors.janela_envio_fim?.message && <p className="mt-1.5 text-[11px] font-semibold leading-4 text-[#a64220]" role="alert">{form.formState.errors.janela_envio_fim.message}</p>}
+              </Field>
         </div>
          <div className="mt-6 grid gap-3 border-t border-[#eee7dc] pt-5 sm:grid-cols-2">
            <label className="flex items-start gap-3 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-3 text-xs text-[#565c6a]"><input {...form.register('incluir_desengajados')} type="checkbox" className="mt-0.5 accent-[#e96527]" data-testid="checkbox-include-disengaged" /><span><strong className="block text-[#263044]">Incluir desengajados</strong><span className="mt-1 block leading-5">Permite incluir contatos fora da janela usual de engajamento nesta campanha.</span></span></label>
@@ -1923,13 +1951,26 @@ function SendQuotaPanel({ campaign }: { campaign: Campaign }) {
   ];
   const formatRate = (value: number | null | undefined) =>
     value == null ? null : `${(value * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
+  const pauseMessages: Record<string, string> = {
+    fora_da_janela: 'A janela diária de envio está fechada.',
+    teto_hora: 'O teto de envios desta hora foi atingido.',
+    teto_dia: 'O teto de envios deste dia foi atingido.',
+    campanha_pausada: campaign.pausa_motivo?.trim() || 'A campanha foi pausada e precisa ser retomada manualmente.',
+  };
+  const nextSendAt = campaign.proximo_envio_em
+    ? new Intl.DateTimeFormat('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        dateStyle: 'short',
+        timeStyle: 'short',
+      }).format(new Date(campaign.proximo_envio_em))
+    : null;
 
   return (
     <div className="mt-5 rounded-2xl border border-[#e5ddd0] bg-[#fbf9f5] p-4 sm:p-5" data-testid="panel-send-quota">
       <div className="mb-4 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
         <div>
           <p className="section-kicker">Controle de rampa</p>
-          <h3 className="mt-2 text-base font-extrabold tracking-[-.04em] text-[#263044]">Enviado na hora e no dia</h3>
+          <h3 className="mt-2 text-base font-extrabold tracking-[-.04em] text-[#263044]">Enviado na hora e no dia de São Paulo</h3>
         </div>
         <span className="font-mono text-[9px] uppercase tracking-[.12em] text-[#989498]">Contagem atualizada ao abrir</span>
       </div>
@@ -1956,6 +1997,16 @@ function SendQuotaPanel({ campaign }: { campaign: Campaign }) {
         {campaign.pausa_taxa_bounce != null && campaign.pausa_taxa_reclamacao != null && ' · '}
         {campaign.pausa_taxa_reclamacao != null && `Reclamações ${formatRate(campaign.pausa_taxa_reclamacao)}`}
       </p>
+      {campaign.motivo_parada_envio && (
+        <div className="mt-4 rounded-xl border border-[#efc9ba] bg-[#fff7f2] px-4 py-3 text-xs text-[#7c3c27]" role="status" data-testid="send-stop-diagnostic">
+          <p className="font-bold">{pauseMessages[campaign.motivo_parada_envio] ?? 'O envio está temporariamente parado.'}</p>
+          <p className="mt-1 leading-5">
+            {nextSendAt
+              ? `Retomada estimada: ${nextSendAt} (horário de São Paulo).`
+              : 'Não há horário automático previsto para retomar.'}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

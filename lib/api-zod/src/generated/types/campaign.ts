@@ -5,6 +5,7 @@
  * API do AmoConecta
  * OpenAPI spec version: 0.1.0
  */
+import type { CampaignMotivoParadaEnvio } from './campaignMotivoParadaEnvio';
 import type { CampaignStatus } from './campaignStatus';
 import type { EmailBlock } from './emailBlock';
 
@@ -50,6 +51,14 @@ export interface Campaign {
      * @nullable
      */
   teto_dia: number | null;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]+)?)?$ */
+  janela_envio_inicio: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]+)?)?$ */
+  janela_envio_fim: string;
+  /** @nullable */
+  motivo_parada_envio?: CampaignMotivoParadaEnvio;
+  /** @nullable */
+  proximo_envio_em?: Date | null;
   /** @nullable */
   pausa_motivo?: string | null;
   /** @nullable */
