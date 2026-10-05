@@ -1,0 +1,100 @@
+# Janela de envio e pendências acumuladas — AmoConecta
+
+Execute no Repl **principal**. Ao final, diga o que precisa ser propagado para o Repl do worker.
+
+O item 1 é o que importa; os outros quatro são pequenos e estavam na fila.
+
+---
+
+## 1. Os envios estão saindo de madrugada
+
+Três dias de dados da campanha Base antiga SMO, com `teto_hora` 100 e `teto_dia` 1.000, em horário de Brasília:
+
+| Dia | Janela em que o envio aconteceu | Quantidade |
+| --- | --- | --- |
+| sábado | 10h às 19h | 1.000 |
+| sábado → domingo | **21h às 06h** | 1.000 |
+| domingo → segunda | **21h às 06h** | 1.000 |
+
+Repare no buraco: sábado às 20h não saiu nada e às 21h recomeçou. É o contador do teto diário virando às 21h de Brasília — meia-noite em UTC.
+
+Resultado: de cada mil e-mails, trezentos saem entre 21h e 23h e **setecentos entre meia-noite e seis da manhã**. Uma oferta de crédito para delivery chegando às 3h da manhã está soterrada quando a pessoa acorda. A campanha tem 7 cliques em 3.610 entregas, e isso é parte da explicação.
+
+### O que corrigir
+
+**O dia do `teto_dia` precisa virar no fuso da operação**, `America/Sao_Paulo`, não em UTC. Mesma coisa para a hora do `teto_hora`.
+
+**E, mais importante, a campanha precisa de uma janela de envio.** Só corrigir o fuso faz os envios começarem à meia-noite em vez das 21h — continua madrugada. É a janela que resolve.
+
+- Dois campos por campanha: hora de início e hora de fim do envio, no fuso da operação.
+- Padrão para campanha nova: **09h às 20h**.
+- Fora da janela, o worker não reserva nada. Dentro dela, segue valendo o teto por hora e o teto por dia.
+- Validação: o fim precisa ser depois do início; recuse janela que não comporte nenhum envio.
+- Campanhas existentes assumem o padrão.
+
+### E o painel precisa dizer quando volta
+
+Hoje, se o operador olha o painel às 14h e nada se move, ele não tem como distinguir entre "fora da janela" e "quebrado". Eu passei por isso hoje de manhã.
+
+No bloco de controle de rampa, quando o envio estiver parado, diga o motivo e o horário da retomada: fora da janela, teto da hora atingido, teto do dia atingido, campanha pausada. Com o horário em que volta a enviar, quando for o caso.
+
+Me diga também qual migração isso exige e o que acontece com a campanha que está em andamento agora.
+
+---
+
+## 2. A checagem de segredos do worker não inclui a chave da ZeroBounce
+
+No log de inicialização, o worker lista os segredos obrigatórios e informa `"missing": []`. A lista traz `RESEND_API_KEY`, `SUPABASE_URL`, `ENVIO_LIBERADO` e os demais, mas **não traz `ZEROBOUNCE_API_KEY`**.
+
+Isso significa que, se a chave faltar, o worker sobe dizendo que está tudo certo e só descobre o problema na primeira chamada paga — que é exatamente onde não se quer descobrir nada.
+
+Acrescente a chave à verificação de inicialização. E revise se há outro segredo em uso que ficou de fora da mesma lista.
+
+---
+
+## 3. Dois campos são cortados em silêncio
+
+O rótulo do botão é limitado a 120 caracteres e o texto alternativo da imagem a 160, sem aviso. O operador digita, o sistema corta, ninguém informa.
+
+Mostre o limite e o contador enquanto a pessoa digita, e impeça passar — em vez de aceitar e truncar depois. Procure outros campos com corte silencioso e me diga quais encontrou.
+
+---
+
+## 4. O limite do CSV de exclusões vai apertar
+
+A importação de destinatários aceita até 50 MB; o CSV de exclusões, até 5 MB.
+
+O uso previsto para o arquivo de exclusões é receber a lista de endereços reprovados por validação externa. Numa base de centenas de milhares de contatos, uma lista de endereços passa de 5 MB com facilidade.
+
+Alinhe o limite do arquivo de exclusões ao da importação, ou me explique por que ele precisa ser menor.
+
+---
+
+## 5. O valor do crédito não chega ao BI
+
+`valor_credito` e `validade_credito` alimentam as variáveis do e-mail, mas não aparecem na exportação para BI.
+
+O projeto existe para cruzar quem abriu e clicou com quem comprou. Sem saber quanto de crédito cada campanha ofereceu, não dá para comparar campanhas entre si nem calcular retorno — que é a pergunta final.
+
+Acrescente as duas colunas à exportação, por campanha.
+
+---
+
+## Fora do escopo
+
+Não altere os limites de reputação, a avaliação por período, a validação de e-mails, a exclusão de destinatários nem o casamento de eventos de webhook. Não mexa em `ENVIO_LIBERADO` nem no modo de segurança.
+
+## Critérios de aceite
+
+- Uma campanha com janela 09h às 20h não envia nada fora desse intervalo, no horário de Brasília.
+- O teto diário zera à meia-noite de Brasília, não às 21h.
+- Com o envio parado, o painel diz o motivo e, quando aplicável, a que horas volta.
+- O worker recusa iniciar, ou avisa de forma visível, se `ZEROBOUNCE_API_KEY` não existir.
+- Um rótulo de botão acima do limite é impedido na digitação, não cortado depois.
+- A exportação para BI traz o valor e a validade do crédito.
+
+## Ao final
+
+SQL de qualquer migração nova em bloco de código único, o que preciso configurar à mão, e quais arquivos alterados são executados também pelo worker — em especial a reserva da fila, que passa a depender da janela.
+
+Depois de entregar, não aplique nada: vou rodar a migração com `ROLLBACK` no lugar do `COMMIT` antes de valer.
