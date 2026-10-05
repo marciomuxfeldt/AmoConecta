@@ -138,6 +138,38 @@ ALTER TABLE public.destinatario
 ALTER TABLE public.destinatario
   VALIDATE CONSTRAINT destinatario_email_normalizado_check;
 
+-- These production tables were checked after cleanup. Enforce the same
+-- normalized-address and ASCII invariants as destinatario, preserving the
+-- nullable-email behavior of supressao and the non-empty contact key.
+ALTER TABLE public.supressao
+  DROP CONSTRAINT IF EXISTS supressao_email_normalizado_check;
+ALTER TABLE public.supressao
+  ADD CONSTRAINT supressao_email_normalizado_check
+  CHECK (email IS NULL OR email = public.normalize_email(email)) NOT VALID;
+ALTER TABLE public.supressao
+  ADD CONSTRAINT supressao_email_ascii_check
+  CHECK (email IS NULL OR email ~ '^[[:ascii:]]+$') NOT VALID;
+ALTER TABLE public.supressao
+  VALIDATE CONSTRAINT supressao_email_normalizado_check;
+ALTER TABLE public.supressao
+  VALIDATE CONSTRAINT supressao_email_ascii_check;
+
+ALTER TABLE public.contato_desengajamento
+  DROP CONSTRAINT IF EXISTS contato_desengajamento_email_normalizado_check;
+ALTER TABLE public.contato_desengajamento
+  ADD CONSTRAINT contato_desengajamento_email_normalizado_check
+  CHECK (
+    email = public.normalize_email(email)
+    AND email <> ''
+  ) NOT VALID;
+ALTER TABLE public.contato_desengajamento
+  ADD CONSTRAINT contato_desengajamento_email_ascii_check
+  CHECK (email ~ '^[[:ascii:]]+$') NOT VALID;
+ALTER TABLE public.contato_desengajamento
+  VALIDATE CONSTRAINT contato_desengajamento_email_normalizado_check;
+ALTER TABLE public.contato_desengajamento
+  VALIDATE CONSTRAINT contato_desengajamento_email_ascii_check;
+
 CREATE OR REPLACE FUNCTION public.guard_validacao_email_queue_changes()
 RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$

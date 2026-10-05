@@ -39,7 +39,18 @@ before(async () => {
       ocorrido_em timestamptz DEFAULT now(),recebido_em timestamptz DEFAULT now(),
       processado_em timestamptz,proxima_tentativa_em timestamptz,erro_processamento text,
       tentativas integer DEFAULT 0,bounce_tipo_bruto text,bounce_permanente boolean);
-    CREATE TABLE supressao(email text,motivo text,origem text);
+    CREATE TABLE supressao(
+      email text,motivo text,origem text,
+      CONSTRAINT supressao_email_normalizado_check CHECK(email IS NULL OR email=lower(btrim(email)))
+    );
+    CREATE TABLE contato_desengajamento(
+      email text PRIMARY KEY,
+      desengajado_cronico boolean NOT NULL DEFAULT false,
+      desengajado_desde timestamptz,
+      apurado_em timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT contato_desengajamento_email_normalizado_check
+        CHECK(email=lower(btrim(email)) AND email<>'')
+    );
     CREATE UNIQUE INDEX suppression_email ON supressao(email) WHERE email IS NOT NULL;
     CREATE TABLE evento_auditoria(id uuid DEFAULT gen_random_uuid(),actor_user_id uuid,
       actor_name text,actor_email text,action text,entity_type text,entity_id uuid,
@@ -489,6 +500,47 @@ test("database email normalization removes the same invisible characters as impo
     ["\u0001\uFEFFANA\u200B\u00A0@EX\u2060AMPLE.COM\uFEFF"],
   );
   assert.equal(result.email, "ana@example.com");
+});
+
+test("suppression and chronic-disengagement addresses require normalized ASCII", async () => {
+  const constraints = await db.query(`
+    SELECT conrelid::regclass::text AS table_name, conname, convalidated
+    FROM pg_constraint
+    WHERE conname IN (
+      'supressao_email_normalizado_check',
+      'supressao_email_ascii_check',
+      'contato_desengajamento_email_normalizado_check',
+      'contato_desengajamento_email_ascii_check'
+    )
+    ORDER BY table_name, conname
+  `);
+  assert.deepEqual(
+    constraints.rows.map((item) => [item.table_name, item.conname, item.convalidated]),
+    [
+      ["contato_desengajamento", "contato_desengajamento_email_ascii_check", true],
+      ["contato_desengajamento", "contato_desengajamento_email_normalizado_check", true],
+      ["supressao", "supressao_email_ascii_check", true],
+      ["supressao", "supressao_email_normalizado_check", true],
+    ],
+  );
+
+  await db.query("INSERT INTO supressao(email) VALUES(NULL)");
+  await assert.rejects(
+    db.query("INSERT INTO supressao(email) VALUES('pessoa@exémplo.test')"),
+    /supressao_email_ascii_check/u,
+  );
+  await assert.rejects(
+    db.query("INSERT INTO supressao(email) VALUES('Upper@example.test')"),
+    /supressao_email_normalizado_check/u,
+  );
+  await assert.rejects(
+    db.query("INSERT INTO contato_desengajamento(email) VALUES('pessoa@exémplo.test')"),
+    /contato_desengajamento_email_ascii_check/u,
+  );
+  await assert.rejects(
+    db.query("INSERT INTO contato_desengajamento(email) VALUES('Upper@example.test')"),
+    /contato_desengajamento_email_normalizado_check/u,
+  );
 });
 
 test("validation cancellation releases the queue and an exhausted item is ignored", async () => {
