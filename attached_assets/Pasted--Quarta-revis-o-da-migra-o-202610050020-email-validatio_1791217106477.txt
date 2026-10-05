@@ -1,0 +1,91 @@
+# Quarta revisão da migração 202610050020_email_validation.sql
+
+A correção da normalização está certa: a âncora no início e no fim preserva o espaço interno, e as três tabelas passaram a usar a mesma função. O ponto 4 está respondido de forma satisfatória.
+
+Três coisas antes de aplicar. A primeira faz a migração falhar inteira.
+
+---
+
+## 1. O GRANT tem assinatura errada e derruba a migração
+
+No bloco final de permissões:
+
+```sql
+GRANT EXECUTE ON FUNCTION public.criar_job_validacao_email(uuid,integer,integer,uuid,text,text)
+  TO service_role;
+```
+
+São seis parâmetros. A função tem sete:
+
+```sql
+CREATE OR REPLACE FUNCTION public.criar_job_validacao_email(
+  p_campanha_id uuid,
+  p_total_pendentes_esperado integer,
+  p_custo_estimado integer,
+  p_creditos_no_inicio integer,
+  p_actor_id uuid,
+  p_actor_nome text,
+  p_actor_email text
+)
+```
+
+Falta um `integer`. O `REVOKE` logo acima usa a assinatura correta de sete, então a divergência está só no `GRANT`.
+
+PostgreSQL recusa `GRANT` sobre assinatura inexistente com `function ... does not exist`. Como tudo está dentro de um `BEGIN`/`COMMIT`, a migração inteira reverte — depois de já ter criado tabelas, constraints e funções. Ninguém descobre isso lendo; descobre colando no SQL Editor e vendo o erro.
+
+Corrija para `(uuid,integer,integer,integer,uuid,text,text)` e **revise todas as demais assinaturas** dos blocos `REVOKE` e `GRANT` contra as definições correspondentes, uma a uma. Me diga se encontrou outra divergente.
+
+---
+
+## 2. `normalize_email_before_write` é criada e nunca usada
+
+A migração define:
+
+```sql
+CREATE OR REPLACE FUNCTION public.normalize_email_before_write()
+RETURNS trigger ...
+```
+
+E não existe nenhum `CREATE TRIGGER` que a acione, nem nesta migração nem em qualquer referência visível no arquivo.
+
+Três possibilidades, e preciso saber qual é:
+
+- Ela já está acionada por um gatilho criado em migração anterior. Nesse caso me diga qual, e confirme que ele continua compatível com a função nova.
+- Era para ser acionada aqui e o gatilho foi esquecido.
+- Ela é desnecessária, porque a decisão passou a ser **recusar** endereço malformado em vez de consertá-lo — o que é coerente com o resto desta revisão. Nesse caso, remova a função, para não deixar código morto que alguém um dia ligue sem entender.
+
+Se a terceira for o caso, vale dizer explicitamente no comentário da migração que a normalização é responsabilidade da aplicação antes de gravar, e que o banco apenas recusa o que chegar fora do padrão.
+
+---
+
+## 3. A validação das constraints pode falhar por espaço interno
+
+As constraints novas exigem, nas três tabelas:
+
+```sql
+AND email !~ '[[:space:]]'
+```
+
+Essa condição nunca foi verificada em produção. As checagens que fizemos até agora cobriram as pontas, a caixa e os bytes não-ASCII — nenhuma delas detectaria `joao silva@gmail.com`, que tem espaço no meio, é ASCII puro e é igual ao próprio `lower(btrim())`.
+
+Se existir uma linha assim em qualquer das três tabelas, o `VALIDATE CONSTRAINT` falha e a migração reverte inteira.
+
+Vou rodar esta consulta em produção antes de aplicar:
+
+```sql
+select
+  (select count(*) from public.destinatario
+     where email ~ '[[:space:]]') as destinatario_com_espaco,
+  (select count(*) from public.supressao
+     where email is not null and email ~ '[[:space:]]') as supressao_com_espaco,
+  (select count(*) from public.contato_desengajamento
+     where email ~ '[[:space:]]') as desengajamento_com_espaco;
+```
+
+Se vier tudo zero, aplicamos como está. Se vier qualquer número, me diga como você quer tratar essas linhas antes — e lembre que apagar o espaço transformaria o endereço em outro, que foi justamente o que acabamos de proibir.
+
+---
+
+## Ao final
+
+Me entregue a migração corrigida inteira, em bloco de código único, e a resposta ao ponto 2. Não aplique nada no banco.
