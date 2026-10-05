@@ -1,0 +1,80 @@
+Segunda revisão da migração 202610050020_email_validation.sql
+
+As correções dos pontos 1 a 3 estão boas. O gatilho por instrução, o limite de três tentativas e o cancelamento do job resolvem o que eu tinha apontado.
+
+Cinco coisas novas, encontradas na versão corrigida. Não aplique ainda.
+
+1. A limpeza no caminho do lembrete não remove os caracteres do incidente
+
+Em enqueue_campaign_reminders:
+
+sql
+regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g')
+
+O comentário acima diz "clean ASCII controls", e é exatamente isso que o código faz — e é o conjunto errado.
+
+[[:cntrl:]] casa apenas caracteres de controle ASCII, categoria Unicode Cc. Os caracteres que causaram o incidente desta base são de categoria Cf, de formatação: espaço de largura zero U+200B, juntor de palavra U+2060, BOM U+FEFF. Nenhum deles é casado por [[:cntrl:]]. O espaço não separável U+00A0 também não, e btrim sem segundo argumento só remove espaço comum.
+
+Na prática, hoje isso não produz linha suja, porque a origem são linhas de destinatario que já passam pelas duas constraints. Mas o problema real é outro: agora existem duas implementações diferentes de normalização de e-mail no sistema — a do importador de CSV, que você diz remover controles e invisíveis, e esta, que remove menos. Duas definições da mesma regra sempre divergem com o tempo, e já perdemos horas por causa de uma divergência dessas entre uma consulta e um índice.
+
+Unifique: uma única definição de "e-mail normalizado", usada pelo importador, pelo lembrete, pela validação e por qualquer rota futura. Me diga onde ela passou a viver e quais chamadas foram apontadas para ela.
+
+2. As comparações com supressão e desengajamento assumem uma invariante que ninguém verificou
+
+Ainda em enqueue_campaign_reminders:
+
+sql
+AND s.email = regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g')
+sql
+WHERE cd.email = regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g')
+
+Essas comparações só funcionam se supressao.email e contato_desengajamento.email estiverem gravados normalizados. Nenhuma das duas tabelas tem constraint que garanta isso, e nenhuma verificação foi feita.
+
+Se um endereço estiver na supressão com maiúscula ou espaço, a comparação não casa, e uma pessoa que se descadastrou recebe o lembrete. Já tivemos exatamente essa falha neste projeto, quando o índice único de supressao ficou inutilizável porque a consulta normalizava e o índice não.
+
+Verifique no banco e me diga o resultado:
+
+sql
+select
+  (select count(*) from public.supressao
+     where email is not null and email <> lower(btrim(email))) as supressao_fora_do_padrao,
+  (select count(*) from public.supressao
+     where email is not null and octet_length(email) <> length(email)) as supressao_byte_extra,
+  (select count(*) from public.contato_desengajamento
+     where email <> lower(btrim(email))) as desengajamento_fora_do_padrao,
+  (select count(*) from public.contato_desengajamento
+     where octet_length(email) <> length(email)) as desengajamento_byte_extra;
+
+Se vier tudo zero, acrescente as mesmas constraints que destinatario ganhou, nas duas tabelas, para que a invariante passe a ser garantida e não apenas verdadeira por enquanto. Se vier qualquer número diferente de zero, me avise antes de aplicar qualquer coisa — há linha suja em produção e precisamos limpar primeiro.
+
+3. Quem marca um item esgotado como ignorado
+
+finalizar_job_validacao_email recusa concluir enquanto houver item em pendente ou erro. A transição para ignorado aparece em retomar_job_validacao_email, que só roda quando o job está em sem_creditos ou erro.
+
+Pergunta direta: um item que esgota as três tentativas enquanto o job está em processando é marcado como ignorado pelo próprio worker, durante a execução, ou depende de alguém clicar em retomar?
+
+Se depender do operador, um único endereço problemático deixa o job preso em processando para sempre, e pelo bloqueio da reserva a campanha nunca volta a enviar. É o mesmo desfecho do ponto 2 da revisão anterior, por um caminho diferente.
+
+Se o worker já faz isso, me diga em que ponto do código, e confirme que um job em processando consegue concluir sozinho mesmo com itens esgotados.
+
+4. Crédito gasto não pode virar resultado jogado fora
+
+Você registrou que uma chamada à ZeroBounce já em andamento pode terminar e consumir créditos depois do cancelamento do job. Isso é inevitável e está certo em ser declarado.
+
+O que não pode acontecer é a resposta ser descartada. O crédito foi pago; o veredito tem valor permanente e não pertence ao job, pertence ao endereço.
+
+Garanta que toda resposta recebida da ZeroBounce é gravada em verificacao_email, mesmo que o job tenha sido cancelado, mesmo que o item tenha sido marcado como ignorado, mesmo que a campanha tenha sido concluída nesse meio-tempo. O que o cancelamento interrompe é a continuidade do job, nunca o aproveitamento do que já foi pago.
+
+Me confirme que é assim e onde está implementado.
+
+5. O ponto 5 da revisão anterior ficou sem resposta
+
+A migração acrescenta bloqueado_validacao_email ao CHECK de destinatario.status, e reservar_destinatarios passa a gravar esse status.
+
+Os cartões de status na tela da campanha somam exatamente o total da lista, e usamos essa igualdade para conferir a integridade do painel — foi assim que descobrimos que faltava o cartão de bounce.
+
+O cartão "Bloqueado" contabiliza esse novo status, ou ele fica fora e quebra a soma? Responda, e corrija se necessário.
+
+Ao final
+
+Me entregue a migração corrigida inteira, em bloco de código único, e o resultado da consulta do ponto 2. Não aplique nada no banco.
