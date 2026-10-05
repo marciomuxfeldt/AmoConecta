@@ -1,0 +1,151 @@
+Uma campanha real fechou 1.300 envios com 4,31% de bounce permanente numa base antiga de São Miguel do Oeste. A taxa por provedor foi Gmail 1,93%, Microsoft 4,38%, Outros 10,53% e Yahoo 19,72%. Sobraram 3.887 destinatários pendentes com o mesmo perfil, e mandar para eles às cegas somaria cerca de 165 rejeições permanentes.
+
+Esta fase existe para parar de descobrir endereço morto pelo bounce. Cada verificação consome crédito pago, então o desenho inteiro gira em torno de nunca gastar duas vezes pelo mesmo endereço e nunca gastar por um endereço que não vamos usar.
+
+Regra número zero: limpar antes de gastar
+
+Numa campanha anterior, quatro endereços copiados do WhatsApp chegaram ao banco com um caractere invisível de três bytes grudado na frente. Gastar crédito num endereço assim é perder dinheiro duas vezes: paga-se pela consulta e recebe-se uma resposta sobre um endereço que não existe.
+
+Antes de qualquer chamada à API:
+
+Remova caracteres de controle e de formatação (largura zero, BOM, juntores de palavra, espaço não separável).
+Aplique trim e minúsculas.
+Recuse o que sobrar com caractere fora de ASCII, sem gastar crédito, registrando o endereço como inválido por formato.
+Recuse também o que não tiver estrutura de e-mail.
+
+A normalização precisa ser exatamente a mesma usada na supressão e no envio. Me diga qual função o projeto já usa para isso e reaproveite-a — não escreva uma segunda.
+
+1. A tabela de cache
+
+Migração, com RLS habilitado e nenhuma policy, backend usando a service role, como no resto do projeto.
+
+verificacao_email
+  id              uuid primary key
+  email           text not null          -- já normalizado: minúsculo, sem espaços
+  status          text not null
+  sub_status      text
+  free_email      boolean
+  did_you_mean    text
+  dominio         text
+  smtp_provider   text
+  mx_found        boolean
+  resposta_bruta  jsonb not null
+  verificado_em   timestamptz not null default now()
+  origem          text                   -- o que provocou a verificação
+
+Pontos que não podem ser esquecidos:
+
+Índice único em email. É ele que garante que o mesmo endereço nunca é verificado duas vezes, mesmo com duas verificações rodando ao mesmo tempo.
+A consulta de leitura precisa usar a mesma expressão do índice. Já tivemos um índice único em supressao que ficou inutilizável porque a consulta normalizava o endereço e o índice não — resultado, varredura sequencial no caminho mais quente do sistema. Como aqui a coluna guarda o valor já normalizado, a consulta deve comparar com o valor já normalizado, nunca aplicar função sobre a coluna.
+A inserção usa ON CONFLICT (email) DO NOTHING. Se dois processos verificarem o mesmo endereço na mesma janela, o segundo não sobrescreve nem falha.
+resposta_bruta guarda o JSON completo da ZeroBounce, para que um campo que hoje ignoramos não exija pagar de novo amanhã.
+2. O cliente da ZeroBounce
+
+Chave em Secret ZEROBOUNCE_API_KEY, usada só no backend. Nunca no front-end, nunca no repositório, nunca em log.
+
+Use o endpoint de lote, POST https://api.zerobounce.net/v2/validatebatch, com os limites reais da API:
+
+Máximo de 100 e-mails por requisição
+Máximo de 30 requisições por minuto — exceder resulta em bloqueio temporário de 10 minutos
+Na prática, 3.000 endereços por minuto, o que atende qualquer volume nosso
+
+A resposta traz email_batch com um item por endereço e um array errors que precisa ser tratado item a item. Um erro em um endereço não pode invalidar os outros 99 — já tivemos exatamente esse defeito no envio, onde uma falha marcou 43 destinatários como erro quando 39 tinham sido enviados.
+
+Regras de falha, que vêm da regra do projeto de nunca mascarar erro:
+
+Timeout, erro HTTP, falta de crédito ou resposta malformada não gravam nada em verificacao_email. O endereço continua sem verificação e entra na próxima tentativa.
+A causa técnica completa vai para o log.
+Distinga falha nossa de resposta da API. unknown é uma resposta legítima da ZeroBounce, custa crédito e deve ser gravada. Um timeout não é resposta e não deve virar unknown — se isso acontecer, teremos pago por uma consulta e gravado uma mentira.
+Saldo de créditos
+
+GET https://api.zerobounce.net/v2/getcredits informa o saldo.
+
+Consulte antes de iniciar qualquer verificação em massa.
+Se o saldo for menor que a quantidade de endereços a verificar, recuse o início e diga quantos créditos faltam. Começar e parar no meio gasta dinheiro sem entregar a decisão.
+Se o crédito acabar durante a execução, pare imediatamente, registre quantos foram concluídos e deixe o restante pendente. Nunca grave status para quem não foi verificado.
+Mostre o saldo no painel, junto do botão de validar.
+Testes sem gastar
+
+Verifique na documentação da ZeroBounce se existem endereços de teste que retornam status fixos sem consumir crédito. Se existirem, use-os na suíte automatizada e me diga quais são. Se não existirem, a suíte usa respostas simuladas e nenhum teste chama a API real.
+
+3. O que cada status significa para nós
+
+Esta é a parte mais consequente do lote. Os status da ZeroBounce são sete, e eles se dividem em três grupos com tratamentos diferentes:
+
+Status	O que é	O que o sistema faz
+valid	Existe e recebe	Envia normalmente
+invalid	Não existe	Nunca envia, em nenhuma campanha
+spamtrap	Armadilha de spam	Nunca envia, em nenhuma campanha
+abuse	Marca mensagens como spam	Nunca envia, em nenhuma campanha
+do_not_mail	Endereço de função, domínio tóxico, descartável	Nunca envia, em nenhuma campanha
+catch-all	O domínio aceita tudo; não dá para saber	Exclui da campanha, decisão do operador
+unknown	Não foi possível determinar	Exclui da campanha, decisão do operador
+
+O spamtrap é o mais importante da tabela. É um endereço plantado por provedores e por listas de bloqueio justamente para pegar quem manda para base velha. Um único envio para um spamtrap pode colocar o domínio em lista de bloqueio, e nenhuma taxa de bounce avisa antes. É o tipo de dano que esta fase existe para evitar.
+
+Como "nunca envia" é implementado
+
+Não jogue esses endereços na tabela supressao. A supressão guarda fatos vindos do destinatário ou do provedor — descadastro, reclamação, bounce confirmado. Um veredito de terceiro é outra coisa, e misturar os dois estraga a tabela que precisa ser confiável sem ressalva.
+
+Em vez disso, a verificação vira uma segunda camada de checagem no momento do envio: o worker consulta supressão e verificacao_email, e não envia para quem está com status do grupo "nunca envia", em qualquer campanha.
+
+Isso precisa ser feito com cuidado de desempenho: a checagem entra no caminho mais quente do sistema, executado para cada destinatário de cada envio. Resolva na reserva da fila, com junção indexada, nunca com uma consulta por destinatário. Me diga como implementou e mostre o plano de execução da consulta de reserva depois da mudança.
+
+Para catch-all e unknown, use o mecanismo de exclusão que já existe, com motivo validacao: catch-all e validacao: unknown. São exclusões reversíveis, por campanha, e o operador decide se quer arriscar.
+
+4. Onde isso entra no fluxo
+
+Dois pontos de entrada. Implemente o primeiro agora; o segundo se couber no mesmo lote.
+
+Validar a fila de uma campanha
+
+No bloco "Provedores, reputação e exclusões", ao lado da exclusão por provedor, um botão Validar endereços.
+
+Ao clicar, antes de executar, mostre:
+
+Quantos endereços pendentes a campanha tem
+Quantos já estão no cache e não consumirão crédito
+Quantos serão efetivamente verificados, que é o custo real
+O saldo de créditos atual
+
+Só então o operador confirma. Essa tela é o que impede alguém clicar e gastar quatro mil créditos sem perceber.
+
+A execução é assíncrona, com o mesmo padrão da importação e da exportação: tabela de controle, progresso consultável, painel acompanhando. Não pode ser síncrona — quatro mil endereços levam mais de um minuto só pelo limite de requisições.
+
+Ao terminar, mostre o resumo por status e aplique automaticamente:
+
+grupo "nunca envia" → bloqueado pela camada de verificação
+catch-all e unknown → excluídos da campanha, com motivo
+valid → permanece na fila
+Validar na importação
+
+Opcional, logo após importar a lista, antes de agendar. Mesma tela de custo, mesmo processamento.
+
+5. Concorrência e gasto duplicado
+
+Dois operadores podem validar listas que se sobrepõem ao mesmo tempo. Sem proteção, o mesmo endereço é consultado duas vezes e pago duas vezes.
+
+Use pg_advisory_xact_lock por execução de validação, que é seguro sobre conexão em pool — diferente do pg_try_advisory_lock de sessão.
+Deduplique dentro do próprio lote antes de chamar a API: a mesma lista pode trazer o mesmo endereço duas vezes.
+Consulte o cache imediatamente antes de montar cada requisição de 100, não só no início da execução. Entre o início e o fim de uma validação de quatro mil endereços, outra pode ter preenchido parte do cache.
+6. Idade da verificação
+
+Um veredito envelhece: um endereço válido hoje pode ser abandonado em dois anos.
+
+Por ora, não re-verifique nada automaticamente — o custo é real e a decisão é do operador. Mas guarde verificado_em e mostre a idade do resultado quando ele for exibido. E me diga: faz sentido oferecer uma re-verificação explícita, para um conjunto escolhido, com aviso de que vai consumir crédito novo? Quero sua opinião antes de implementar.
+
+Fora do escopo
+
+Não altere os limites de reputação, a avaliação por período, a pausa automática nem o casamento de eventos de webhook. Não mexa em ENVIO_LIBERADO nem no modo de segurança. Não implemente re-verificação automática.
+
+Critérios de aceite
+Verificar a mesma lista duas vezes consome crédito só na primeira.
+Um endereço com caractere invisível é recusado antes da chamada à API, sem consumir crédito.
+Falha de rede ou de HTTP não grava nenhum status, e o endereço continua pendente de verificação.
+Um endereço com status spamtrap não recebe e-mail de nenhuma campanha, nem de uma campanha nova criada depois.
+A tela de confirmação mostra quantos endereços custarão crédito antes de executar.
+Saldo insuficiente impede o início, com a quantidade que falta.
+A reserva da fila não ficou mais lenta de forma perceptível após a nova checagem.
+Ao final
+
+SQL da migração em bloco de código, a lista do que preciso configurar à mão — incluindo em quais Repls o ZEROBOUNCE_API_KEY precisa existir —, e quais arquivos alterados são executados também pelo worker, em especial a reserva da fila e a checagem no envio.
