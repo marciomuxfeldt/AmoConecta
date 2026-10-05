@@ -1,0 +1,98 @@
+# Terceira revisão da migração 202610050020_email_validation.sql
+
+Centralizar a normalização numa função foi o caminho certo. Mas a função que você escreveu tem um comportamento que não é normalização, e ela convive com uma constraint antiga que ficou para trás. Juntos, os dois reabrem o furo.
+
+Não aplique ainda.
+
+---
+
+## 1. `normalize_email` apaga espaços no meio do endereço, não só nas pontas
+
+```sql
+regexp_replace(
+  ...,
+  U&'[\0020\00A0\1680\2000-\200A\2028-\2029\202F\205F\3000]+',
+  '',
+  'g'
+)
+```
+
+Com o modificador `g` e sem âncora, isso remove **toda** ocorrência desses caracteres em qualquer posição da string, não apenas no início e no fim.
+
+Consequência: `joao silva@gmail.com` vira `joaosilva@gmail.com`.
+
+Isso não é limpar um endereço — é transformá-lo em outro. E o outro pode existir e pertencer a outra pessoa. Um endereço inválido, que deveria ser recusado, vira silenciosamente um endereço válido e diferente. A partir daí: gastamos crédito verificando um endereço que ninguém digitou, gravamos o veredito sob a chave errada, e eventualmente mandamos e-mail para quem não pediu.
+
+O comportamento correto é remover esses caracteres **apenas nas extremidades**. Um espaço que sobreviver no meio significa endereço malformado, e endereço malformado é recusado, nunca consertado por adivinhação.
+
+Corrija a função para ancorar a remoção no início e no fim, e me confirme que `normalize_email('joao silva@gmail.com')` devolve o valor com o espaço preservado, para que a validação de formato o recuse depois.
+
+**E confirme que a implementação em TypeScript faz exatamente a mesma coisa.** Você declarou que as duas são "duas implementações do mesmo comportamento, verificadas com o mesmo caso de teste". Se o TypeScript apara as pontas e o SQL apaga tudo, elas divergem justamente no caso que importa — e o caso de teste compartilhado não cobria isso, senão teria falhado. Acrescente um teste com espaço interno, rodando contra as duas implementações.
+
+---
+
+## 2. `destinatario` ficou com a regra antiga enquanto as outras duas tabelas ganharam a nova
+
+A migração acrescenta às tabelas novas:
+
+```sql
+CHECK (email IS NULL OR email = public.normalize_email(email))
+CHECK (email = public.normalize_email(email) AND email <> '')
+```
+
+Mas, em `destinatario`, ela apenas valida a constraint que já existia:
+
+```sql
+ALTER TABLE public.destinatario
+  VALIDATE CONSTRAINT destinatario_email_normalizado_check;
+```
+
+E essa constraint continua com a definição antiga:
+
+```
+CHECK ((email = lower(btrim(email))))
+```
+
+Resultado: o banco passa a ter **duas regras diferentes de endereço normalizado**, aplicadas a tabelas que são comparadas entre si o tempo todo. `destinatario` segue `lower(btrim())`; `supressao` e `contato_desengajamento` seguem `normalize_email()`.
+
+Era exatamente isso que o trabalho desta rodada deveria eliminar. Refaça a constraint de `destinatario` para usar `public.normalize_email(email)`, como as outras duas, e valide.
+
+---
+
+## 3. Os dois pontos acima se combinam e reabrem o furo do cache
+
+Tome o endereço `joao silva@gmail.com`:
+
+- Ele **passa** em `destinatario_email_normalizado_check`, porque `lower(btrim('joao silva@gmail.com'))` é igual a ele mesmo — `btrim` só remove das pontas.
+- Ele **passa** em `destinatario_email_ascii_check`, porque espaço é ASCII.
+- Logo, ele pode existir em `destinatario`.
+
+Agora o caminho da validação: `verificacao_email` grava o endereço normalizado por `normalize_email`, que apaga o espaço e produz `joaosilva@gmail.com`.
+
+E em `reservar_destinatarios`:
+
+```sql
+AND v.email = d.email
+```
+
+`'joaosilva@gmail.com'` nunca é igual a `'joao silva@gmail.com'`. A junção não casa, o bloqueio não acontece, e o endereço é enviado — **mesmo que o veredito gravado seja `spamtrap`**.
+
+É o mesmo furo da primeira revisão, por um caminho novo, criado pela própria correção. Resolver os pontos 1 e 2 fecha os dois lados: a função para de inventar endereços, e as três tabelas passam a concordar sobre o que é um endereço normalizado.
+
+Depois de corrigir, me mostre um teste que cubra este caso específico: um destinatário com espaço interno, um registro em `verificacao_email` com status `spamtrap`, e a confirmação de que a reserva o bloqueia em vez de enviá-lo.
+
+---
+
+## 4. Uma pergunta sobre função em constraint
+
+`public.normalize_email()` é usada dentro de CHECK constraints. Isso funciona porque ela está marcada `IMMUTABLE`, mas traz duas consequências que quero entender antes de aplicar:
+
+**Restauração de backup.** Em um `pg_dump`/`pg_restore`, a constraint pode ser restaurada antes da função existir, e a restauração falha. O Supabase tem rotina de backup e eventualmente alguém vai precisar restaurar. Isso é um risco real neste caso, ou a ordem de restauração resolve sozinha? Se for risco, prefiro a expressão escrita direto na constraint, mesmo repetida, a ter um backup que não restaura.
+
+**Alteração futura da função.** Se alguém fizer `CREATE OR REPLACE` em `normalize_email` com uma definição diferente, as constraints passam a aplicar a regra nova sem revalidar as linhas antigas, e a tabela fica com dados que violam a própria constraint sem ninguém saber. Proponha como evitar isso — nem que seja um comentário no código da função dizendo que alterá-la exige revalidar as três tabelas.
+
+---
+
+## Ao final
+
+Me entregue a migração corrigida inteira, em bloco de código único, e a resposta ao ponto 4. Não aplique nada no banco.
