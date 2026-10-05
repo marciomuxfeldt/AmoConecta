@@ -1456,6 +1456,38 @@ paths:
               schema: { $ref: "#/components/schemas/CampaignEmailValidationConflict" }
         "503":
           description: ZeroBounce ou banco indisponível
+  /campaigns/{campaignId}/email-validation/jobs/{jobId}/cancel:
+    post:
+      operationId: cancelCampaignEmailValidationJob
+      tags: [campaigns]
+      summary: Cancela uma validação ativa e libera a fila da campanha
+      description: Uma chamada externa já em andamento pode terminar e consumir créditos antes de o cancelamento surtir efeito.
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Validação cancelada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CampaignEmailValidationJob" }
+        "401":
+          description: Sessão expirada
+        "404":
+          description: Validação não encontrada
+        "409":
+          description: Validação já terminou ou não pode ser cancelada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CampaignEmailValidationConflict" }
+        "503":
+          description: Banco indisponível
   /campaigns/{campaignId}/exclusions:
     parameters:
       - name: campaignId
@@ -2633,7 +2665,8 @@ components:
         formato_invalido: { type: integer }
         erro: { type: integer }
         pendente: { type: integer }
-      required: [valid, invalid, spamtrap, abuse, do_not_mail, catch_all, unknown, formato_invalido, erro, pendente]
+        ignorado: { type: integer }
+      required: [valid, invalid, spamtrap, abuse, do_not_mail, catch_all, unknown, formato_invalido, erro, pendente, ignorado]
     CampaignEmailValidationAutomaticExclusions:
       type: object
       properties:
@@ -2645,7 +2678,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         campanha_id: { type: string, format: uuid }
-        status: { type: string, enum: [pendente, processando, sem_creditos, erro, concluida] }
+        status: { type: string, enum: [pendente, processando, sem_creditos, erro, concluida, cancelada] }
         total_pendentes: { type: integer }
         processados: { type: integer }
         custo_estimado: { type: integer }
@@ -2655,8 +2688,11 @@ components:
         erro: { type: ["string", "null"] }
         proxima_tentativa_em: { type: ["string", "null"], format: date-time }
         criado_em: { type: string, format: date-time }
+        iniciado_em: { type: ["string", "null"], format: date-time }
+        criado_por_nome: { type: ["string", "null"] }
+        criado_por_email: { type: ["string", "null"] }
         concluido_em: { type: ["string", "null"], format: date-time }
-      required: [id, campanha_id, status, total_pendentes, processados, custo_estimado, creditos_no_inicio, por_status, exclusoes_automaticas, erro, proxima_tentativa_em, criado_em, concluido_em]
+      required: [id, campanha_id, status, total_pendentes, processados, custo_estimado, creditos_no_inicio, por_status, exclusoes_automaticas, erro, proxima_tentativa_em, criado_em, iniciado_em, criado_por_nome, criado_por_email, concluido_em]
     CampaignEmailValidationQuote:
       type: object
       properties:

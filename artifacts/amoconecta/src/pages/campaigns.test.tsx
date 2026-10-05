@@ -220,16 +220,16 @@ describe("campaign cancellation feedback", () => {
 describe("campaign recipient summary", () => {
   it("shows bounce as a status and renders corrected rate bases", () => {
     const summary = {
-      total: 43,
-      total_na_lista: 43,
+        total: 43,
+        total_na_lista: 43,
       status: {
         pendente: 0,
         enviado: 1,
         entregue: 32,
         bounce: 6,
-        bloqueado: 0,
+        bloqueado: 2,
         suprimido: 0,
-        erro: 4,
+        erro: 2,
       },
       reputacao: {
         total_enviado: 39,
@@ -286,6 +286,7 @@ describe("campaign recipient summary", () => {
     }, 0);
 
     expect(displayedStatusTotal).toBe(43);
+    expect(screen.getByTestId("recipient-status-bloqueado").textContent).toContain("2");
     expect(screen.getByTestId("recipient-status-bounce").textContent).toContain("6");
     expect(screen.getByTestId("recipient-status-entregue").textContent).toContain("Status atual: entregue");
     expect(screen.getByTestId("recipient-email-metric-enviados").textContent).toContain(

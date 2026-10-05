@@ -3743,6 +3743,83 @@ export const useResumeCampaignEmailValidationJob = <TError = ErrorType<void | Ca
       return useMutation(getResumeCampaignEmailValidationJobMutationOptions(options));
     }
 
+export const getCancelCampaignEmailValidationJobUrl = (campaignId: string,
+    jobId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/email-validation/jobs/${jobId}/cancel`
+}
+
+/**
+ * Uma chamada externa já em andamento pode terminar e consumir créditos antes de o cancelamento surtir efeito.
+ * @summary Cancela uma validação ativa e libera a fila da campanha
+ */
+export const cancelCampaignEmailValidationJob = async (campaignId: string,
+    jobId: string, options?: Parameters<typeof customFetch>[1]): Promise<CampaignEmailValidationJob> => {
+
+  return customFetch<CampaignEmailValidationJob>(getCancelCampaignEmailValidationJobUrl(campaignId,jobId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCancelCampaignEmailValidationJobMutationKey = () => ['cancelCampaignEmailValidationJob'] as const;
+
+export const getCancelCampaignEmailValidationJobMutationOptions = <TError = ErrorType<void | CampaignEmailValidationConflict>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelCampaignEmailValidationJob>>, TError,CancelCampaignEmailValidationJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelCampaignEmailValidationJob>>, TError,CancelCampaignEmailValidationJobMutationVariables, TContext> => {
+
+const mutationKey = getCancelCampaignEmailValidationJobMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelCampaignEmailValidationJob>>, CancelCampaignEmailValidationJobMutationVariables> = (props) => {
+          const {campaignId,jobId} = props ?? {};
+
+          return  cancelCampaignEmailValidationJob(campaignId,jobId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelCampaignEmailValidationJobMutationResult = NonNullable<Awaited<ReturnType<typeof cancelCampaignEmailValidationJob>>>
+
+    export type CancelCampaignEmailValidationJobMutationError = ErrorType<void | CampaignEmailValidationConflict>
+    export type CancelCampaignEmailValidationJobMutationVariables = {campaignId: string;jobId: string}
+
+    /**
+ * @summary Cancela uma validação ativa e libera a fila da campanha
+ */
+export const useCancelCampaignEmailValidationJob = <TError = ErrorType<void | CampaignEmailValidationConflict>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelCampaignEmailValidationJob>>, TError,CancelCampaignEmailValidationJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelCampaignEmailValidationJob>>,
+        TError,
+        CancelCampaignEmailValidationJobMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCancelCampaignEmailValidationJobMutationOptions(options));
+    }
+
 export const getGetCampaignExclusionsUrl = (campaignId: string,
     params?: GetCampaignExclusionsParams,) => {
   const normalizedParams = new URLSearchParams();

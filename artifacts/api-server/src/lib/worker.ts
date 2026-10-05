@@ -725,6 +725,25 @@ async function refreshChronicDisengagementIfDue(): Promise<void> {
   if (refreshError) throw refreshError;
 }
 
+async function logCampaignValidationBlock(campaignId: string): Promise<boolean> {
+  const { data: job, error } = await supabaseAdminClient()
+    .from("validacao_email_job")
+    .select("id,status")
+    .eq("campanha_id", campaignId)
+    .in("status", ["pendente", "processando", "sem_creditos", "erro"])
+    .order("criado_em", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!job) return false;
+
+  logger.warn(
+    { campaignId, validationJobId: job.id, validationJobStatus: job.status },
+    "Campaign sending is blocked by an active email validation job",
+  );
+  return true;
+}
+
 export async function processCampaign(campaignId: string): Promise<number> {
   let campaign = await loadCampaign(campaignId);
   if (!campaign || !["agendada", "enviando"].includes(campaign.status)) return 0;
@@ -746,11 +765,13 @@ export async function processCampaign(campaignId: string): Promise<number> {
     const current = await loadCampaign(campaignId);
     if (!current || current.status !== "enviando") break;
     campaign = current;
+    if (await logCampaignValidationBlock(campaignId)) break;
     if (await maybePauseCampaign(campaignId)) break;
     const remaining = await quotaRemaining(campaign);
     if (remaining <= 0) break;
     const reserved = await reserveRecipients(campaignId, remaining);
     if (reserved.length === 0) {
+      if (await logCampaignValidationBlock(campaignId)) break;
       const { data: didComplete, error: completeError } = await supabaseAdminClient()
         .rpc("complete_campaign_if_queue_empty", { p_campanha_id: campaignId });
       if (completeError) throw completeError;

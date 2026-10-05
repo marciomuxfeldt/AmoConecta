@@ -773,6 +773,7 @@ export interface CampaignEmailValidationStatusCounts {
   formato_invalido: number;
   erro: number;
   pendente: number;
+  ignorado: number;
 }
 
 export interface CampaignEmailValidationAutomaticExclusions {
@@ -789,6 +790,7 @@ export const CampaignEmailValidationJobStatus = {
   sem_creditos: 'sem_creditos',
   erro: 'erro',
   concluida: 'concluida',
+  cancelada: 'cancelada',
 } as const;
 
 export interface CampaignEmailValidationJob {
@@ -806,6 +808,12 @@ export interface CampaignEmailValidationJob {
   /** @nullable */
   proxima_tentativa_em: string | null;
   criado_em: string;
+  /** @nullable */
+  iniciado_em: string | null;
+  /** @nullable */
+  criado_por_nome: string | null;
+  /** @nullable */
+  criado_por_email: string | null;
   /** @nullable */
   concluido_em: string | null;
 }

@@ -364,12 +364,13 @@ router.post(
       }
       const { data: remainingItems, error: itemsError } = await client
         .from("validacao_email_job_item")
-        .select("email,email_normalizado,status")
+        .select("email,email_normalizado,status,tentativas")
         .eq("job_id", job.id)
         .in("status", ["pendente", "erro"]);
       if (itemsError) throw itemsError;
       const validEmails = new Set<string>();
       for (const item of remainingItems ?? []) {
+        if (item.status === "erro" && item.tentativas >= 3) continue;
         const email = item.email_normalizado ?? normalizeEmail(item.email ?? "");
         if (email && !formatInvalidAddress(item.email ?? "")) validEmails.add(email);
       }
@@ -418,6 +419,77 @@ router.post(
     } catch (error) {
       req.log.error({ technicalError: getTechnicalError(error) }, "Campaign email validation resume failed");
       res.status(503).json({ error: publicError(error) });
+    }
+  },
+);
+
+router.post(
+  "/campaigns/:campaignId/email-validation/jobs/:jobId/cancel",
+  async (req, res) => {
+    const params = ResumeCampaignEmailValidationJobParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(422).json({ error: "Identificadores inválidos." });
+      return;
+    }
+    try {
+      const session = await getSupabaseUser(req, res);
+      if (!session) {
+        res.status(401).json({ error: "Sessão expirada." });
+        return;
+      }
+      const client = supabaseAdminClient();
+      const { data: job, error: jobError } = await client
+        .from("validacao_email_job")
+        .select("id")
+        .eq("id", params.data.jobId)
+        .eq("campanha_id", params.data.campaignId)
+        .maybeSingle();
+      if (jobError) throw jobError;
+      if (!job) {
+        res.status(404).json({ error: "Validação não encontrada." });
+        return;
+      }
+
+      const { data: cancelled, error: cancelError } = await client.rpc(
+        "cancelar_job_validacao_email",
+        { p_job_id: job.id },
+      );
+      if (cancelError) throw cancelError;
+      if (!cancelled) {
+        conflict(
+          res,
+          "Esta validação já terminou ou não pode mais ser cancelada.",
+          await loadQuote(params.data.campaignId),
+        );
+        return;
+      }
+
+      try {
+        await recordAuditEvent({
+          actor: teamAuditActor(session.user),
+          action: "campaign_email_validation_cancelled",
+          entityType: "campaign",
+          entityId: params.data.campaignId,
+          metadata: { job_id: job.id },
+        });
+      } catch (auditError) {
+        req.log.error(
+          { technicalError: getTechnicalError(auditError), jobId: job.id },
+          "Campaign email validation was cancelled but its audit event failed",
+        );
+      }
+      const response = await getJobOverview(
+        job.id,
+        GetCampaignEmailValidationJobResponse,
+      );
+      if (!response) throw new Error("Cancelled email validation job could not be loaded.");
+      res.json(response);
+    } catch (error) {
+      req.log.error(
+        { technicalError: getTechnicalError(error) },
+        "Campaign email validation cancel failed",
+      );
+      res.status(503).json({ error: "Não foi possível cancelar a validação agora." });
     }
   },
 );

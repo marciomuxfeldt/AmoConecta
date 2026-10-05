@@ -21,6 +21,7 @@ type ValidationJob = {
   id: string;
   campanha_id: string;
   status: string;
+  total_pendentes: number;
   processados: number;
   tentativas: number;
 };
@@ -99,7 +100,7 @@ async function selectJob(): Promise<ValidationJob | null> {
   const client = supabaseAdminClient();
   const processing = await client
     .from("validacao_email_job")
-    .select("id,campanha_id,status,processados,tentativas")
+    .select("id,campanha_id,status,total_pendentes,processados,tentativas")
     .eq("status", "processando")
     .order("criado_em")
     .limit(1)
@@ -109,7 +110,7 @@ async function selectJob(): Promise<ValidationJob | null> {
 
   const pending = await client
     .from("validacao_email_job")
-    .select("id,campanha_id,status,processados,tentativas")
+    .select("id,campanha_id,status,total_pendentes,processados,tentativas")
     .eq("status", "pendente")
     .lte("proxima_tentativa_em", new Date().toISOString())
     .order("criado_em")
@@ -126,7 +127,7 @@ async function selectJob(): Promise<ValidationJob | null> {
     })
     .eq("id", pending.data.id)
     .eq("status", "pendente")
-    .select("id,campanha_id,status,processados,tentativas")
+    .select("id,campanha_id,status,total_pendentes,processados,tentativas")
     .maybeSingle();
   if (claimed.error) throw claimed.error;
   return claimed.data as ValidationJob | null;
@@ -177,8 +178,20 @@ async function markJob(
   const { error } = await supabaseAdminClient()
     .from("validacao_email_job")
     .update({ status, ...values })
-    .eq("id", jobId);
+    .eq("id", jobId)
+    .neq("status", "cancelada");
   if (error) throw error;
+}
+
+async function isJobProcessing(jobId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdminClient()
+    .from("validacao_email_job")
+    .select("id")
+    .eq("id", jobId)
+    .eq("status", "processando")
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
 }
 
 async function releaseClaims(token: string): Promise<void> {
@@ -303,6 +316,34 @@ function itemUpdate(
 
 async function finishOrRetry(job: ValidationJob): Promise<void> {
   const client = supabaseAdminClient();
+  const exhausted = await client
+    .from("validacao_email_job_item")
+    .select("id")
+    .eq("job_id", job.id)
+    .eq("status", "erro")
+    .gte("tentativas", MAX_ADDRESS_ATTEMPTS)
+    .limit(BATCH_SIZE);
+  if (exhausted.error) throw exhausted.error;
+  if (exhausted.data?.length) {
+    const ignoredIds = exhausted.data.map((row) => row.id);
+    const ignored = await client
+      .from("validacao_email_job_item")
+      .update({
+        status: "ignorado",
+        erro: "Ignorado após atingir o limite de três tentativas.",
+        proxima_tentativa_em: null,
+      })
+      .in("id", ignoredIds)
+      .eq("status", "erro");
+    if (ignored.error) throw ignored.error;
+    await markJob(job.id, "pendente", {
+      processados: Math.min(job.total_pendentes, job.processados + ignoredIds.length),
+      proxima_tentativa_em: new Date().toISOString(),
+      erro: null,
+    });
+    return;
+  }
+
   const dueErrors = await client
     .from("validacao_email_job_item")
     .select("id")
@@ -338,19 +379,10 @@ async function finishOrRetry(job: ValidationJob): Promise<void> {
   }
   if ((errors.count ?? 0) > 0) {
     const earliest = errors.data?.[0];
-    const exhausted =
-      (earliest?.tentativas ?? 0) >= MAX_ADDRESS_ATTEMPTS ||
-      !earliest?.proxima_tentativa_em;
-    if (exhausted) {
-      await markJob(job.id, "erro", {
-        erro: "Um ou mais endereços não puderam ser verificados após três tentativas. Retome para tentar novamente.",
-      });
-    } else {
-      await markJob(job.id, "pendente", {
-        proxima_tentativa_em: earliest.proxima_tentativa_em,
-        erro: "Há falhas temporárias por endereço; o worker tentará novamente.",
-      });
-    }
+    await markJob(job.id, "pendente", {
+      proxima_tentativa_em: earliest?.proxima_tentativa_em ?? new Date().toISOString(),
+      erro: "Há falhas temporárias por endereço; o worker tentará novamente.",
+    });
     return;
   }
   const { error: finishError } = await client.rpc(
@@ -361,6 +393,7 @@ async function finishOrRetry(job: ValidationJob): Promise<void> {
 }
 
 async function processJobBatch(job: ValidationJob): Promise<void> {
+  if (!(await isJobProcessing(job.id))) return;
   const client = supabaseAdminClient();
   const items = await findItems(job.id);
   if (items.length === 0) {
@@ -450,6 +483,7 @@ async function processJobBatch(job: ValidationJob): Promise<void> {
 
     let results;
     try {
+      if (!(await isJobProcessing(job.id))) return;
       results = await validateZeroBounceBatch(claimed);
     } catch (error) {
       if (error instanceof ZeroBounceError && error.insufficientCredits) {
@@ -479,6 +513,7 @@ async function processJobBatch(job: ValidationJob): Promise<void> {
       return;
     }
 
+    if (!(await isJobProcessing(job.id))) return;
     const successful = results.flatMap((item) =>
       item.kind === "result" ? [item.value] : [],
     );

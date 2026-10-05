@@ -17,4 +17,5 @@ export interface CampaignEmailValidationStatusCounts {
   formato_invalido: number;
   erro: number;
   pendente: number;
+  ignorado: number;
 }

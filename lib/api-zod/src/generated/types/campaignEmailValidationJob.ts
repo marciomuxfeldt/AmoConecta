@@ -25,5 +25,11 @@ export interface CampaignEmailValidationJob {
   proxima_tentativa_em: Date | null;
   criado_em: Date;
   /** @nullable */
+  iniciado_em: Date | null;
+  /** @nullable */
+  criado_por_nome: string | null;
+  /** @nullable */
+  criado_por_email: string | null;
+  /** @nullable */
   concluido_em: Date | null;
 }

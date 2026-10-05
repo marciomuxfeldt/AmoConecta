@@ -14,6 +14,7 @@ import {
   getGetCampaignEmailValidationQuoteQueryKey,
   useGetCampaignEmailValidationJob,
   useGetCampaignEmailValidationQuote,
+  useCancelCampaignEmailValidationJob,
   useResumeCampaignEmailValidationJob,
   useStartCampaignEmailValidation,
 } from "@workspace/api-client-react";
@@ -64,6 +65,7 @@ function jobStatusLabel(status: CampaignEmailValidationJob["status"]): string {
     case "sem_creditos": return "Pausada por saldo";
     case "erro": return "Precisa de atenção";
     case "concluida": return "Concluída";
+    case "cancelada": return "Cancelada";
   }
 }
 
@@ -77,6 +79,7 @@ export function CampaignEmailValidationPanel({
   const client = useQueryClient();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const quoteQuery = useGetCampaignEmailValidationQuote(campaignId);
   const quote = quoteQuery.data;
   const start = useStartCampaignEmailValidation();
@@ -97,6 +100,25 @@ export function CampaignEmailValidationPanel({
       onSuccess: (result) => {
         setSelectedJobId(result.id);
         setConfirming(false);
+        void client.invalidateQueries({
+          queryKey: getGetCampaignEmailValidationQuoteQueryKey(campaignId),
+        });
+        void client.invalidateQueries({
+          queryKey: getGetCampaignEmailValidationJobQueryKey(campaignId, result.id),
+        });
+      },
+      onError: () => {
+        void client.invalidateQueries({
+          queryKey: getGetCampaignEmailValidationQuoteQueryKey(campaignId),
+        });
+      },
+    },
+  });
+  const cancelValidation = useCancelCampaignEmailValidationJob({
+    mutation: {
+      onSuccess: (result) => {
+        setSelectedJobId(result.id);
+        setConfirmingCancel(false);
         void client.invalidateQueries({
           queryKey: getGetCampaignEmailValidationQuoteQueryKey(campaignId),
         });
@@ -266,6 +288,18 @@ export function CampaignEmailValidationPanel({
                   {terminal ? "100%" : `${progress}%`}
                 </span>
               </div>
+              {job.status !== "concluida" && job.status !== "cancelada" && (
+                <div
+                  className="mt-4 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm text-[#8e3a20]"
+                  role="alert"
+                  data-testid="status-campaign-validation-blocked"
+                >
+                  <strong>Envio bloqueado por validação pendente.</strong>
+                  <p className="mt-1 text-xs leading-5">
+                    Estado: {jobStatusLabel(job.status)} · início: {formatDate(job.iniciado_em ?? job.criado_em)} · iniciado por: {job.criado_por_nome || job.criado_por_email || "Equipe"}.
+                  </p>
+                </div>
+              )}
               <div
                 className="mt-3 h-2 overflow-hidden rounded-full bg-[#e4ece7]"
                 role="progressbar"
@@ -307,6 +341,70 @@ export function CampaignEmailValidationPanel({
                   Conferir saldo e retomar
                 </button>
               )}
+              {job.status !== "concluida" && job.status !== "cancelada" && (
+                <div className="mt-3">
+                  {!confirmingCancel ? (
+                    <button
+                      type="button"
+                      disabled={cancelValidation.isPending}
+                      onClick={() => setConfirmingCancel(true)}
+                      className="action-button action-button-secondary"
+                      data-testid="button-email-validation-cancel-job"
+                    >
+                      Cancelar validação
+                    </button>
+                  ) : (
+                    <div
+                      className="rounded-xl border border-[#efc9ba] bg-white p-4"
+                      role="alertdialog"
+                      aria-labelledby="email-validation-cancel-title"
+                      data-testid="dialog-email-validation-cancel-job"
+                    >
+                      <h3
+                        id="email-validation-cancel-title"
+                        className="text-sm font-extrabold text-[#263044]"
+                      >
+                        Cancelar esta validação?
+                      </h3>
+                      <p className="mt-2 text-xs leading-5 text-[#6d7180]">
+                        Isso libera a fila da campanha. Uma chamada ZeroBounce que já está em andamento ainda pode terminar e consumir créditos.
+                      </p>
+                      <div className="mt-3 flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          disabled={cancelValidation.isPending}
+                          onClick={() => setConfirmingCancel(false)}
+                          className="action-button action-button-secondary"
+                          data-testid="button-email-validation-keep-job"
+                        >
+                          Manter validação
+                        </button>
+                        <button
+                          type="button"
+                          disabled={cancelValidation.isPending}
+                          onClick={() => cancelValidation.mutate({ campaignId, jobId: job.id })}
+                          className="action-button action-button-primary"
+                          data-testid="button-email-validation-confirm-cancel-job"
+                        >
+                          {cancelValidation.isPending
+                            ? <LoaderCircle size={14} className="animate-spin" />
+                            : <CircleAlert size={14} />}
+                          Confirmar cancelamento
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {cancelValidation.isError && (
+                <p
+                  className="mt-2 text-xs text-[#a64220]"
+                  role="alert"
+                  data-testid="status-email-validation-cancel-error"
+                >
+                  {errorMessage(cancelValidation.error, "Não foi possível cancelar a validação.")}
+                </p>
+              )}
               {resume.isError && (
                 <p className="mt-2 text-xs text-[#a64220]" role="alert" data-testid="status-email-validation-resume-error">
                   {errorMessage(resume.error, "Não foi possível retomar a validação.")}
@@ -322,6 +420,7 @@ export function CampaignEmailValidationPanel({
                 <Count label="Desconhecidos" value={job.por_status.unknown} />
                 <Count label="Formato inválido" value={job.por_status.formato_invalido} />
                 <Count label="Erros temporários" value={job.por_status.erro} />
+                <Count label="Ignorados após três tentativas" value={job.por_status.ignorado} />
                 {job.status === "concluida" && (
                   <p className="text-[#247b79] sm:col-span-2 lg:col-span-4" data-testid="text-email-validation-complete">
                     Concluída em {formatDate(job.concluido_em)}. Exclusões aplicadas nesta campanha: {nf(job.exclusoes_automaticas.catch_all)} catch-all e {nf(job.exclusoes_automaticas.unknown)} desconhecidos.

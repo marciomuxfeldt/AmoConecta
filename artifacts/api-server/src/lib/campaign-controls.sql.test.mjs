@@ -32,6 +32,8 @@ before(async () => {
       criado_em timestamptz DEFAULT now(),data_ultima_compra date,tentativas integer DEFAULT 0,
       processando_em timestamptz,erro text,resend_email_id text,
       enviado_em timestamptz,entregue_em timestamptz,aberto_em timestamptz,clicado_em timestamptz);
+    ALTER TABLE destinatario ADD CONSTRAINT destinatario_email_normalizado_check
+      CHECK (email = lower(btrim(email))) NOT VALID;
     CREATE TABLE evento_email(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),destinatario_id uuid,
       campanha_id uuid,email text,resend_email_id text,tipo text,payload jsonb,
       ocorrido_em timestamptz DEFAULT now(),recebido_em timestamptz DEFAULT now(),
@@ -322,6 +324,10 @@ test("email validation holds the queue, excludes reversible risk groups, and blo
     )).n,
     1,
   );
+  await db.query(
+    "UPDATE destinatario SET data_ultima_compra='2026-10-01' WHERE campanha_id=$1 AND email='safe@example.test'",
+    [validationCampaign],
+  );
 
   const held = await row(
     "SELECT count(*) AS n FROM reservar_destinatarios($1,100,false)",
@@ -334,8 +340,9 @@ test("email validation holds the queue, excludes reversible risk groups, and blo
   );
   await assert.rejects(
     db.query(
-      `INSERT INTO destinatario(campanha_id,email,status,is_lembrete)
-       VALUES($1,'added-during-validation@example.test','pendente',false)`,
+      `INSERT INTO destinatario(campanha_id,email,status,is_lembrete) VALUES
+        ($1,'added-during-validation@example.test','pendente',false),
+        ($1,'also-added-during-validation@example.test','pendente',false)`,
       [validationCampaign],
     ),
     /email_validation_job_active/u,
@@ -441,4 +448,131 @@ test("email validation holds the queue, excludes reversible risk groups, and blo
   await db.exec("SET enable_seqscan=on");
   const reservationPlan = plan.rows.map((item) => item["QUERY PLAN"]).join("\n");
   assert.match(reservationPlan, /verificacao_email_email_uidx/u);
+});
+
+test("email constraints are validated and reject formatting characters outside ASCII", async () => {
+  const constraints = await db.query(`
+    SELECT conname,convalidated
+    FROM pg_constraint
+    WHERE conrelid='public.destinatario'::regclass
+      AND conname IN ('destinatario_email_normalizado_check','destinatario_email_ascii_check')
+    ORDER BY conname
+  `);
+  assert.deepEqual(
+    constraints.rows.map((item) => [item.conname, item.convalidated]),
+    [
+      ["destinatario_email_ascii_check", true],
+      ["destinatario_email_normalizado_check", true],
+    ],
+  );
+  await assert.rejects(
+    db.query(
+      `INSERT INTO destinatario(campanha_id,email,status,is_lembrete)
+       VALUES($1,'\u200Bhidden@example.test','pendente',false)`,
+      [campaign],
+    ),
+    /destinatario_email_ascii_check/u,
+  );
+  await assert.rejects(
+    db.query(
+      `INSERT INTO destinatario(campanha_id,email,status,is_lembrete)
+       VALUES($1,'Upper@example.test','pendente',false)`,
+      [campaign],
+    ),
+    /destinatario_email_normalizado_check/u,
+  );
+});
+
+test("validation cancellation releases the queue and an exhausted item is ignored", async () => {
+  const cancelCampaign = "00000000-0000-0000-0000-000000000005";
+  await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [cancelCampaign]);
+  await db.query(
+    `INSERT INTO destinatario(campanha_id,email,status,is_lembrete) VALUES
+      ($1,'cancel-one@example.test','pendente',false),
+      ($1,'cancel-two@example.test','pendente',false)`,
+    [cancelCampaign],
+  );
+  const created = await row(
+    `SELECT criar_job_validacao_email($1,2,2,10,NULL,'Operador',NULL) AS id`,
+    [cancelCampaign],
+  );
+  await db.query(
+    "UPDATE validacao_email_job SET status='processando' WHERE id=$1",
+    [created.id],
+  );
+  assert.equal(
+    (await row("SELECT cancelar_job_validacao_email($1) AS value", [created.id])).value,
+    true,
+  );
+  assert.equal(
+    (await row("SELECT status FROM validacao_email_job WHERE id=$1", [created.id])).status,
+    "cancelada",
+  );
+  const unblocked = await db.query(
+    "SELECT email FROM reservar_destinatarios($1,100,false)",
+    [cancelCampaign],
+  );
+  assert.equal(unblocked.rows.length, 2);
+
+  const retryCampaign = "00000000-0000-0000-0000-000000000006";
+  await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [retryCampaign]);
+  await db.query(
+    `INSERT INTO destinatario(campanha_id,email,status,is_lembrete) VALUES
+      ($1,'exhausted@example.test','pendente',false),
+      ($1,'retry@example.test','pendente',false)`,
+    [retryCampaign],
+  );
+  const retryJob = await row(
+    `SELECT criar_job_validacao_email($1,2,2,10,NULL,'Operador',NULL) AS id`,
+    [retryCampaign],
+  );
+  await db.query(
+    `UPDATE validacao_email_job_item SET status='erro',tentativas=3,
+       erro='erro persistente',proxima_tentativa_em=now()
+     WHERE job_id=$1 AND email='exhausted@example.test'`,
+    [retryJob.id],
+  );
+  await db.query(
+    `UPDATE validacao_email_job_item SET status='erro',tentativas=2,
+       erro='erro temporário',proxima_tentativa_em=now()
+     WHERE job_id=$1 AND email='retry@example.test'`,
+    [retryJob.id],
+  );
+  await db.query(
+    "UPDATE validacao_email_job SET status='erro' WHERE id=$1",
+    [retryJob.id],
+  );
+  assert.equal(
+    (await row("SELECT retomar_job_validacao_email($1) AS value", [retryJob.id])).value,
+    true,
+  );
+  const items = await db.query(
+    `SELECT email,status,tentativas FROM validacao_email_job_item
+     WHERE job_id=$1 ORDER BY email`,
+    [retryJob.id],
+  );
+  assert.deepEqual(
+    items.rows.map((item) => [item.status, item.tentativas]),
+    [["ignorado", 3], ["pendente", 2]],
+  );
+  assert.equal(
+    (await row("SELECT processados FROM validacao_email_job WHERE id=$1", [retryJob.id]))
+      .processados,
+    1,
+  );
+  await db.query(
+    `UPDATE validacao_email_job_item SET status='validado',resultado_status='valid'
+     WHERE job_id=$1 AND email='retry@example.test'`,
+    [retryJob.id],
+  );
+  await db.query(
+    "UPDATE validacao_email_job SET status='processando' WHERE id=$1",
+    [retryJob.id],
+  );
+  const summary = await row(
+    "SELECT finalizar_job_validacao_email($1) AS value",
+    [retryJob.id],
+  );
+  assert.equal(summary.value.por_status.ignorado, 1);
+  assert.equal(summary.value.por_status.valid, 1);
 });

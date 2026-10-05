@@ -588,7 +588,11 @@ async function recipientSummary(campaignId: string, resumedAt: string | null) {
     ["enviado", ["enviado"]],
     ["entregue", ["entregue", "aberto", "clicado"]],
     ["bounce", ["bounce"]],
-    ["bloqueado", ["bloqueado_modo_teste", "bloqueado_desengajado"]],
+    ["bloqueado", [
+      "bloqueado_modo_teste",
+      "bloqueado_desengajado",
+      "bloqueado_validacao_email",
+    ]],
     ["suprimido", ["suprimido"]],
     ["erro", ["erro"]],
   ] as const;

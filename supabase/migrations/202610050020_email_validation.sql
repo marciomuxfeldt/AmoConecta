@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS public.validacao_email_job (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campanha_id uuid NOT NULL REFERENCES public.campanha(id) ON DELETE CASCADE,
   status text NOT NULL DEFAULT 'pendente'
-    CHECK (status IN ('pendente','processando','sem_creditos','erro','concluida')),
+    CHECK (status IN ('pendente','processando','sem_creditos','erro','concluida','cancelada')),
   total_pendentes integer NOT NULL DEFAULT 0,
   processados integer NOT NULL DEFAULT 0,
   custo_estimado integer NOT NULL DEFAULT 0,
@@ -91,35 +91,85 @@ CREATE INDEX IF NOT EXISTS verificacao_email_api_chamada_horario_idx
   ON public.verificacao_email_api_chamada(solicitada_em);
 ALTER TABLE public.verificacao_email_api_chamada ENABLE ROW LEVEL SECURITY;
 
+-- The cache join in reservar_destinatarios relies on an exact normalized
+-- address. Validate both invariants before enabling that direct indexed join.
+ALTER TABLE public.destinatario
+  ADD CONSTRAINT destinatario_email_ascii_check
+  CHECK (email ~ '^[[:ascii:]]+$') NOT VALID;
+ALTER TABLE public.destinatario
+  VALIDATE CONSTRAINT destinatario_email_ascii_check;
+ALTER TABLE public.destinatario
+  VALIDATE CONSTRAINT destinatario_email_normalizado_check;
+
 CREATE OR REPLACE FUNCTION public.guard_validacao_email_queue_changes()
 RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 DECLARE
-  v_campaign_id uuid;
+  v_campaign_ids uuid[];
 BEGIN
-  IF TG_OP='DELETE' THEN
-    v_campaign_id := OLD.campanha_id;
+  IF TG_OP='INSERT' THEN
+    SELECT array_agg(DISTINCT campanha_id ORDER BY campanha_id)
+      INTO v_campaign_ids
+    FROM new_rows;
+  ELSIF TG_OP='DELETE' THEN
+    SELECT array_agg(DISTINCT campanha_id ORDER BY campanha_id)
+      INTO v_campaign_ids
+    FROM old_rows;
   ELSE
-    v_campaign_id := NEW.campanha_id;
+    WITH changed AS (
+      SELECT o.campanha_id AS old_campaign_id,
+        n.campanha_id AS new_campaign_id
+      FROM old_rows o
+      JOIN new_rows n USING (id)
+      WHERE (o.campanha_id,o.email,o.is_lembrete)
+        IS DISTINCT FROM (n.campanha_id,n.email,n.is_lembrete)
+    ), affected AS (
+      SELECT old_campaign_id AS campanha_id FROM changed
+      UNION ALL
+      SELECT new_campaign_id AS campanha_id FROM changed
+    )
+    SELECT array_agg(DISTINCT campanha_id ORDER BY campanha_id)
+      INTO v_campaign_ids
+    FROM affected
+    WHERE campanha_id IS NOT NULL;
   END IF;
-  PERFORM 1 FROM public.campanha WHERE id=v_campaign_id FOR UPDATE;
-  IF FOUND AND EXISTS (
+
+  IF coalesce(cardinality(v_campaign_ids),0)=0 THEN
+    RETURN NULL;
+  END IF;
+
+  -- Lock each affected campaign once per SQL statement, not once per
+  -- recipient row. Stable ordering avoids deadlocks for multi-campaign writes.
+  PERFORM 1
+  FROM public.campanha
+  WHERE id=ANY(v_campaign_ids)
+  ORDER BY id
+  FOR UPDATE;
+
+  IF EXISTS (
     SELECT 1 FROM public.validacao_email_job
-    WHERE campanha_id=v_campaign_id
+    WHERE campanha_id=ANY(v_campaign_ids)
       AND status IN ('pendente','processando','sem_creditos','erro')
   ) THEN
     RAISE EXCEPTION 'email_validation_job_active';
   END IF;
-  IF TG_OP='DELETE' THEN RETURN OLD; END IF;
-  RETURN NEW;
+  RETURN NULL;
 END;
 $$;
 
 DROP TRIGGER IF EXISTS destinatario_guard_validacao_email_queue ON public.destinatario;
-CREATE TRIGGER destinatario_guard_validacao_email_queue
-BEFORE INSERT OR DELETE OR UPDATE OF campanha_id,email,is_lembrete
-ON public.destinatario
-FOR EACH ROW EXECUTE FUNCTION public.guard_validacao_email_queue_changes();
+CREATE TRIGGER destinatario_guard_validacao_email_queue_insert
+AFTER INSERT ON public.destinatario
+REFERENCING NEW TABLE AS new_rows
+FOR EACH STATEMENT EXECUTE FUNCTION public.guard_validacao_email_queue_changes();
+CREATE TRIGGER destinatario_guard_validacao_email_queue_delete
+AFTER DELETE ON public.destinatario
+REFERENCING OLD TABLE AS old_rows
+FOR EACH STATEMENT EXECUTE FUNCTION public.guard_validacao_email_queue_changes();
+CREATE TRIGGER destinatario_guard_validacao_email_queue_update
+AFTER UPDATE ON public.destinatario
+REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
+FOR EACH STATEMENT EXECUTE FUNCTION public.guard_validacao_email_queue_changes();
 
 ALTER TABLE public.destinatario
   DROP CONSTRAINT IF EXISTS destinatario_status_check;
@@ -281,14 +331,45 @@ $$;
 CREATE OR REPLACE FUNCTION public.retomar_job_validacao_email(p_job_id uuid)
 RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE
+  v_ignored integer;
 BEGIN
   UPDATE public.validacao_email_job
-  SET status='pendente',erro=NULL,tentativas=0,proxima_tentativa_em=now()
+  SET status='pendente',erro=NULL,proxima_tentativa_em=now()
   WHERE id=p_job_id AND status IN ('sem_creditos','erro');
   IF NOT FOUND THEN RETURN false; END IF;
+
   UPDATE public.validacao_email_job_item
-  SET status='pendente',erro=NULL,tentativas=0,proxima_tentativa_em=NULL
-  WHERE job_id=p_job_id AND status='erro';
+  SET status='ignorado',
+      erro=coalesce(erro,'Ignorado após atingir o limite de três tentativas.'),
+      proxima_tentativa_em=NULL
+  WHERE job_id=p_job_id AND status='erro' AND tentativas>=3;
+  GET DIAGNOSTICS v_ignored = ROW_COUNT;
+
+  UPDATE public.validacao_email_job_item
+  SET status='pendente',erro=NULL,proxima_tentativa_em=NULL
+  WHERE job_id=p_job_id AND status='erro' AND tentativas<3;
+
+  IF v_ignored>0 THEN
+    UPDATE public.validacao_email_job
+    SET processados=least(total_pendentes,processados+v_ignored)
+    WHERE id=p_job_id;
+  END IF;
+  RETURN true;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.cancelar_job_validacao_email(p_job_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  UPDATE public.validacao_email_job
+  SET status='cancelada',erro='Validação cancelada pela equipe.',proxima_tentativa_em=now()
+  WHERE id=p_job_id
+    AND status IN ('pendente','processando','sem_creditos','erro');
+  IF NOT FOUND THEN RETURN false; END IF;
+
+  DELETE FROM public.verificacao_email_lease WHERE job_id=p_job_id;
   RETURN true;
 END;
 $$;
@@ -352,6 +433,7 @@ BEGIN
     'catch_all',count(*) FILTER (WHERE resultado_status='catch-all'),
     'unknown',count(*) FILTER (WHERE resultado_status='unknown'),
     'formato_invalido',count(*) FILTER (WHERE status='formato_invalido'),
+    'ignorado',count(*) FILTER (WHERE status='ignorado'),
     'itens',count(*)
   ) INTO v_counts
   FROM public.validacao_email_job_item WHERE job_id=p_job_id;
@@ -385,7 +467,8 @@ LANGUAGE sql SECURITY DEFINER SET search_path=public AS $$
       'unknown',count(*) FILTER (WHERE i.resultado_status='unknown'),
       'formato_invalido',count(*) FILTER (WHERE i.status='formato_invalido'),
       'erro',count(*) FILTER (WHERE i.status='erro'),
-      'pendente',count(*) FILTER (WHERE i.status='pendente')
+      'pendente',count(*) FILTER (WHERE i.status='pendente'),
+      'ignorado',count(*) FILTER (WHERE i.status='ignorado')
     ),
     'exclusoes_automaticas',coalesce(
       j.resultados->'exclusoes_automaticas',
@@ -467,6 +550,86 @@ BEGIN
 END;
 $$;
 
+-- Reminders copy existing recipients, but clean ASCII controls as well so
+-- this second recipient-insert path always persists a normalized address.
+CREATE OR REPLACE FUNCTION public.enqueue_campaign_reminders(
+  p_campaign_id uuid,
+  p_limit integer
+)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path=public
+AS $$
+DECLARE
+  v_inserted integer;
+BEGIN
+  IF p_limit IS NULL OR p_limit <= 0 THEN
+    RETURN 0;
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_campaign_id::text, 0));
+
+  WITH candidates AS (
+    SELECT d.*,
+      regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g') AS normalized_email
+    FROM public.destinatario d
+    JOIN public.campanha c ON c.id=d.campanha_id
+    WHERE d.campanha_id=p_campaign_id
+      AND nullif(btrim(c.assunto_lembrete), '') IS NOT NULL
+      AND btrim(c.assunto_lembrete) <> btrim(c.assunto)
+      AND CASE
+        WHEN jsonb_typeof(c.corpo_lembrete)='array'
+          THEN jsonb_array_length(c.corpo_lembrete)>0
+        ELSE false
+      END
+      AND d.is_lembrete=false
+      AND d.status='entregue'
+      AND d.entregue_em IS NOT NULL
+      AND d.entregue_em <= now() - make_interval(hours => c.lembrete_horas)
+      AND d.aberto_em IS NULL
+      AND d.clicado_em IS NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.destinatario r
+        WHERE r.campanha_id=d.campanha_id
+          AND r.is_lembrete=true
+          AND r.email=regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g')
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.supressao s
+        WHERE s.email IS NOT NULL
+          AND s.email=regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g')
+      )
+      AND (
+        c.incluir_desengajados
+        OR NOT EXISTS (
+          SELECT 1
+          FROM public.contato_desengajamento cd
+          WHERE cd.email=regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g')
+            AND cd.desengajado_cronico=true
+        )
+      )
+    ORDER BY d.data_ultima_compra DESC NULLS LAST,d.id
+    LIMIT p_limit
+  ),
+  inserted AS (
+    INSERT INTO public.destinatario(
+      campanha_id,id_usuario,nome,email,telefone,regiao,
+      data_ultima_compra,is_lembrete,status
+    )
+    SELECT campanha_id,id_usuario,nome,normalized_email,telefone,regiao,
+      data_ultima_compra,true,'pendente'
+    FROM candidates
+    RETURNING id
+  )
+  SELECT count(*) INTO v_inserted FROM inserted;
+
+  RETURN v_inserted;
+END;
+$$;
+
 REVOKE ALL ON public.verificacao_email,public.validacao_email_job,
   public.validacao_email_job_item,public.verificacao_email_lease,
   public.verificacao_email_api_chamada FROM PUBLIC,anon,authenticated;
@@ -477,6 +640,8 @@ REVOKE ALL ON FUNCTION public.claim_verificacao_email_batch(uuid,text[],uuid)
 REVOKE ALL ON FUNCTION public.liberar_verificacao_email_batch(uuid)
   FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.retomar_job_validacao_email(uuid)
+  FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.cancelar_job_validacao_email(uuid)
   FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.finalizar_job_validacao_email(uuid)
   FROM PUBLIC,anon,authenticated;
@@ -499,6 +664,8 @@ GRANT EXECUTE ON FUNCTION public.claim_verificacao_email_batch(uuid,text[],uuid)
 GRANT EXECUTE ON FUNCTION public.liberar_verificacao_email_batch(uuid)
   TO service_role;
 GRANT EXECUTE ON FUNCTION public.retomar_job_validacao_email(uuid)
+  TO service_role;
+GRANT EXECUTE ON FUNCTION public.cancelar_job_validacao_email(uuid)
   TO service_role;
 GRANT EXECUTE ON FUNCTION public.finalizar_job_validacao_email(uuid)
   TO service_role;

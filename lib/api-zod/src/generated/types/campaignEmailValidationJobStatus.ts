@@ -15,4 +15,5 @@ export const CampaignEmailValidationJobStatus = {
   sem_creditos: 'sem_creditos',
   erro: 'erro',
   concluida: 'concluida',
+  cancelada: 'cancelada',
 } as const;
