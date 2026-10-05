@@ -463,7 +463,7 @@ test("email validation holds the queue, excludes reversible risk groups, and blo
 
 test("email constraints are validated and reject formatting characters outside ASCII", async () => {
   const constraints = await db.query(`
-    SELECT conname,convalidated
+    SELECT conname,convalidated,pg_get_constraintdef(oid) AS definition
     FROM pg_constraint
     WHERE conrelid='public.destinatario'::regclass
       AND conname IN ('destinatario_email_normalizado_check','destinatario_email_ascii_check')
@@ -476,6 +476,11 @@ test("email constraints are validated and reject formatting characters outside A
       ["destinatario_email_normalizado_check", true],
     ],
   );
+  const normalizedConstraint = constraints.rows.find(
+    (item) => item.conname === "destinatario_email_normalizado_check",
+  );
+  assert.match(normalizedConstraint.definition, /normalize_email/u);
+  assert.ok(normalizedConstraint.definition.includes("[[:space:]]"));
   await assert.rejects(
     db.query(
       `INSERT INTO destinatario(campanha_id,email,status,is_lembrete)
@@ -492,14 +497,74 @@ test("email constraints are validated and reject formatting characters outside A
     ),
     /destinatario_email_normalizado_check/u,
   );
+  await assert.rejects(
+    db.query(
+      `INSERT INTO destinatario(campanha_id,email,status,is_lembrete)
+       VALUES($1,'joao silva@gmail.com','pendente',false)`,
+      [campaign],
+    ),
+    /destinatario_email_normalizado_check/u,
+  );
 });
 
 test("database email normalization removes the same invisible characters as imports", async () => {
   const result = await row(
     "SELECT public.normalize_email($1) AS email",
-    ["\u0001\uFEFFANA\u200B\u00A0@EX\u2060AMPLE.COM\uFEFF"],
+    ["\u0001\uFEFFANA\u200B@EX\u2060AMPLE.COM\uFEFF"],
   );
   assert.equal(result.email, "ana@example.com");
+});
+
+test("database normalization trims edge whitespace but preserves internal whitespace", async () => {
+  const result = await row(
+    "SELECT public.normalize_email($1) AS email",
+    ["\u00A0joao silva@gmail.com  "],
+  );
+  assert.equal(result.email, "joao silva@gmail.com");
+});
+
+test("spamtrap cache blocks a legacy recipient with internal whitespace before reservation", async () => {
+  const legacyCampaign = "00000000-0000-0000-0000-000000000007";
+  const malformedEmail = "joao silva@gmail.com";
+  await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [legacyCampaign]);
+  await db.exec(
+    "ALTER TABLE destinatario DROP CONSTRAINT destinatario_email_normalizado_check",
+  );
+  try {
+    const inserted = await row(
+      `INSERT INTO destinatario(campanha_id,email,status,is_lembrete)
+       VALUES($1,$2,'pendente',false) RETURNING id`,
+      [legacyCampaign, malformedEmail],
+    );
+    await db.query(
+      `INSERT INTO verificacao_email(email,status,resposta_bruta,origem)
+       VALUES($1,'spamtrap','{"status":"spamtrap"}','test')`,
+      [malformedEmail],
+    );
+
+    const reserved = await db.query(
+      "SELECT id FROM reservar_destinatarios($1,100,false)",
+      [legacyCampaign],
+    );
+    assert.equal(reserved.rows.length, 0);
+    assert.equal(
+      (await row("SELECT status FROM destinatario WHERE id=$1", [inserted.id])).status,
+      "bloqueado_validacao_email",
+    );
+  } finally {
+    await db.query("DELETE FROM verificacao_email WHERE email=$1", [malformedEmail]);
+    await db.query("DELETE FROM destinatario WHERE campanha_id=$1", [legacyCampaign]);
+    await db.exec(`
+      ALTER TABLE destinatario
+        ADD CONSTRAINT destinatario_email_normalizado_check
+        CHECK (
+          email = public.normalize_email(email)
+          AND email !~ '[[:space:]]'
+        ) NOT VALID;
+      ALTER TABLE destinatario
+        VALIDATE CONSTRAINT destinatario_email_normalizado_check;
+    `);
+  }
 });
 
 test("suppression and chronic-disengagement addresses require normalized ASCII", async () => {

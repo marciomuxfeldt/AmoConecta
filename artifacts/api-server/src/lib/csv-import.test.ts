@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner requires the explicit TypeScript extension.
-import { getPublicImportValidationErrorMessage, ImportValidationError, normalizePhone, validateAndImportCsv, suggestEmailDomain } from "./csv-import.ts";
+import { getPublicImportValidationErrorMessage, ImportValidationError, normalizeEmail, normalizePhone, validateAndImportCsv, suggestEmailDomain } from "./csv-import.ts";
 
 function streamFromText(value: string): ReadableStream<Uint8Array> {
   return new ReadableStream({
@@ -97,7 +97,7 @@ test("removes invisible controls from e-mail before validating and saving", asyn
   const summary = await validateAndImportCsv({
     client: emptyImportClient((rows) => savedRows.push(...rows)) as never,
     stream: streamFromText(
-      "nome,email\nPessoa,\u0001\uFEFFANA\u200B\u00A0@EX\u2060AMPLE.COM\uFEFF",
+      "nome,email\nPessoa,\u0001\uFEFFANA\u200B@EX\u2060AMPLE.COM\uFEFF",
     ),
     campaignId: "00000000-0000-0000-0000-000000000001",
     storagePath: "campaign/invisible-email.csv",
@@ -107,6 +107,27 @@ test("removes invisible controls from e-mail before validating and saving", asyn
   assert.equal(summary.invalidos, 0);
   assert.equal(summary.validos, 1);
   assert.equal((savedRows[0] as { email: string }).email, "ana@example.com");
+});
+
+test("trims only edge whitespace and rejects, rather than rewriting, internal whitespace", async () => {
+  assert.equal(normalizeEmail("  joao silva@gmail.com\u00A0"), "joao silva@gmail.com");
+  const savedRows: unknown[] = [];
+  const summary = await validateAndImportCsv({
+    client: emptyImportClient((rows) => savedRows.push(...rows)) as never,
+    stream: streamFromText("nome,email\nPessoa,joao silva@gmail.com"),
+    campaignId: "00000000-0000-0000-0000-000000000001",
+    storagePath: "campaign/internal-space-email.csv",
+    deduplicatePhone: false,
+  });
+
+  assert.equal(summary.invalidos, 1);
+  assert.equal(summary.emails_invalidos, 1);
+  assert.equal(summary.validos, 0);
+  assert.equal(savedRows.length, 0);
+  assert.equal(
+    summary.amostras_erros[0]?.motivo,
+    "e-mail ausente ou inválido: joao silva@gmail.com",
+  );
 });
 
 test("rejects remaining non-ASCII e-mails and includes the address in the sample", async () => {

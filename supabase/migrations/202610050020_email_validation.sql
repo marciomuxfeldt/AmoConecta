@@ -1,9 +1,14 @@
 BEGIN;
 
 -- Canonical database-side equivalent of
--- artifacts/api-server/src/lib/email-normalization.ts. Strip Cc/Cf characters
--- and Unicode whitespace before lowercasing; the write trigger and reminder
--- path both call this function rather than maintaining separate expressions.
+-- artifacts/api-server/src/lib/email-normalization.ts. Strip Cc/Cf characters,
+-- trim Unicode whitespace only at the edges, and lowercase. Internal
+-- whitespace survives normalization so format validation can reject it
+-- instead of silently converting the address into another recipient.
+--
+-- Keep this function IMMUTABLE. Any semantic change must repair affected data
+-- and recreate/revalidate the normalized-address checks on destinatario,
+-- supressao, and contato_desengajamento.
 CREATE OR REPLACE FUNCTION public.normalize_email(p_email text)
 RETURNS text
 LANGUAGE sql
@@ -19,12 +24,15 @@ AS $function$
         '',
         'g'
       ),
-      U&'[\0020\00A0\1680\2000-\200A\2028-\2029\202F\205F\3000]+',
+      U&'^[\0020\00A0\1680\2000-\200A\2028-\2029\202F\205F\3000]+|[\0020\00A0\1680\2000-\200A\2028-\2029\202F\205F\3000]+$',
       '',
       'g'
     )
   );
 $function$;
+
+COMMENT ON FUNCTION public.normalize_email(text) IS
+  'IMMUTABLE canonical email normalization. Semantic changes require repairing data, then recreating and validating normalized-email checks on destinatario, supressao, and contato_desengajamento.';
 
 CREATE OR REPLACE FUNCTION public.normalize_email_before_write()
 RETURNS trigger
@@ -136,6 +144,14 @@ ALTER TABLE public.destinatario
 ALTER TABLE public.destinatario
   VALIDATE CONSTRAINT destinatario_email_ascii_check;
 ALTER TABLE public.destinatario
+  DROP CONSTRAINT IF EXISTS destinatario_email_normalizado_check;
+ALTER TABLE public.destinatario
+  ADD CONSTRAINT destinatario_email_normalizado_check
+  CHECK (
+    email = public.normalize_email(email)
+    AND email !~ '[[:space:]]'
+  ) NOT VALID;
+ALTER TABLE public.destinatario
   VALIDATE CONSTRAINT destinatario_email_normalizado_check;
 
 -- These production tables were checked after cleanup. Enforce the same
@@ -145,7 +161,12 @@ ALTER TABLE public.supressao
   DROP CONSTRAINT IF EXISTS supressao_email_normalizado_check;
 ALTER TABLE public.supressao
   ADD CONSTRAINT supressao_email_normalizado_check
-  CHECK (email IS NULL OR email = public.normalize_email(email)) NOT VALID;
+  CHECK (
+    email IS NULL OR (
+      email = public.normalize_email(email)
+      AND email !~ '[[:space:]]'
+    )
+  ) NOT VALID;
 ALTER TABLE public.supressao
   ADD CONSTRAINT supressao_email_ascii_check
   CHECK (email IS NULL OR email ~ '^[[:ascii:]]+$') NOT VALID;
@@ -160,6 +181,7 @@ ALTER TABLE public.contato_desengajamento
   ADD CONSTRAINT contato_desengajamento_email_normalizado_check
   CHECK (
     email = public.normalize_email(email)
+    AND email !~ '[[:space:]]'
     AND email <> ''
   ) NOT VALID;
 ALTER TABLE public.contato_desengajamento
