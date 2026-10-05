@@ -5,6 +5,12 @@ BEGIN;
 -- trim Unicode whitespace only at the edges, and lowercase. Internal
 -- whitespace survives normalization so format validation can reject it
 -- instead of silently converting the address into another recipient.
+-- The BEFORE triggers destinatario_normalize_email,
+-- evento_email_normalize_email, and supressao_normalize_email were installed
+-- by 202609250012_final_amoconecta.sql and remain attached. Replacing this
+-- helper updates their behavior too. Application code also normalizes before
+-- writes; these triggers are a database-boundary canonicalization layer, while
+-- the normalized-address constraints reject internal whitespace.
 --
 -- Keep this function IMMUTABLE. Any semantic change must repair affected data
 -- and recreate/revalidate the normalized-address checks on destinatario,

@@ -62,6 +62,29 @@ before(async () => {
   await db.exec(await sqlFile("migrations/202610020017_bounce_terminal_semantics.sql"));
   await db.exec(await sqlFile("migrations/202610030018_bounded_event_matching.sql"));
   await db.exec(await sqlFile("migrations/202610030019_account_campaign_reputation_14d.sql"));
+  // Reproduce the email triggers installed by 202609250012. Migration 020
+  // replaces their helper body without needing to recreate these triggers.
+  await db.exec(`
+    CREATE OR REPLACE FUNCTION public.normalize_email_before_write()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path=public
+    AS $function$
+    BEGIN
+      NEW.email := nullif(lower(btrim(NEW.email)), '');
+      RETURN NEW;
+    END;
+    $function$;
+    CREATE TRIGGER destinatario_normalize_email
+      BEFORE INSERT OR UPDATE OF email ON public.destinatario
+      FOR EACH ROW EXECUTE FUNCTION public.normalize_email_before_write();
+    CREATE TRIGGER evento_email_normalize_email
+      BEFORE INSERT OR UPDATE OF email ON public.evento_email
+      FOR EACH ROW EXECUTE FUNCTION public.normalize_email_before_write();
+    CREATE TRIGGER supressao_normalize_email
+      BEFORE INSERT OR UPDATE OF email ON public.supressao
+      FOR EACH ROW EXECUTE FUNCTION public.normalize_email_before_write();
+  `);
   await db.exec(await sqlFile("migrations/202610050020_email_validation.sql"));
 });
 after(() => db.close());
@@ -461,7 +484,7 @@ test("email validation holds the queue, excludes reversible risk groups, and blo
   assert.match(reservationPlan, /verificacao_email_email_uidx/u);
 });
 
-test("email constraints are validated and reject formatting characters outside ASCII", async () => {
+test("email triggers normalize at the database boundary and constraints reject internal whitespace", async () => {
   const constraints = await db.query(`
     SELECT conname,convalidated,pg_get_constraintdef(oid) AS definition
     FROM pg_constraint
@@ -481,21 +504,20 @@ test("email constraints are validated and reject formatting characters outside A
   );
   assert.match(normalizedConstraint.definition, /normalize_email/u);
   assert.ok(normalizedConstraint.definition.includes("[[:space:]]"));
+  const normalized = await row(
+    `INSERT INTO destinatario(campanha_id,email,status,is_lembrete)
+     VALUES($1,'\u200BUpper@example.test ','pendente',false)
+     RETURNING email`,
+    [campaign],
+  );
+  assert.equal(normalized.email, "upper@example.test");
   await assert.rejects(
     db.query(
       `INSERT INTO destinatario(campanha_id,email,status,is_lembrete)
-       VALUES($1,'\u200Bhidden@example.test','pendente',false)`,
+       VALUES($1,'pessoa@exémplo.test','pendente',false)`,
       [campaign],
     ),
     /destinatario_email_ascii_check/u,
-  );
-  await assert.rejects(
-    db.query(
-      `INSERT INTO destinatario(campanha_id,email,status,is_lembrete)
-       VALUES($1,'Upper@example.test','pendente',false)`,
-      [campaign],
-    ),
-    /destinatario_email_normalizado_check/u,
   );
   await assert.rejects(
     db.query(
@@ -594,10 +616,10 @@ test("suppression and chronic-disengagement addresses require normalized ASCII",
     db.query("INSERT INTO supressao(email) VALUES('pessoa@exémplo.test')"),
     /supressao_email_ascii_check/u,
   );
-  await assert.rejects(
-    db.query("INSERT INTO supressao(email) VALUES('Upper@example.test')"),
-    /supressao_email_normalizado_check/u,
+  const normalizedSuppression = await row(
+    "INSERT INTO supressao(email) VALUES('Upper@example.test') RETURNING email",
   );
+  assert.equal(normalizedSuppression.email, "upper@example.test");
   await assert.rejects(
     db.query("INSERT INTO contato_desengajamento(email) VALUES('pessoa@exémplo.test')"),
     /contato_desengajamento_email_ascii_check/u,
