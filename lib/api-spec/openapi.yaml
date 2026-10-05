@@ -1345,6 +1345,117 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/email-validation/quote:
+    get:
+      operationId: getCampaignEmailValidationQuote
+      tags: [campaigns]
+      summary: Consulta custo, saldo e cache da validação da fila
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Estimativa atual da fila e eventual validação em andamento
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CampaignEmailValidationQuote" }
+        "401":
+          description: Sessão expirada
+        "404":
+          description: Campanha não encontrada
+        "503":
+          description: ZeroBounce ou banco indisponível
+  /campaigns/{campaignId}/email-validation/jobs:
+    post:
+      operationId: startCampaignEmailValidation
+      tags: [campaigns]
+      summary: Cria uma validação assíncrona da fila pendente
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CampaignEmailValidationStartInput" }
+      responses:
+        "202":
+          description: Validação iniciada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CampaignEmailValidationJob" }
+        "401":
+          description: Sessão expirada
+        "404":
+          description: Campanha não encontrada
+        "409":
+          description: Cotação mudou, saldo insuficiente ou fila em processamento
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CampaignEmailValidationConflict" }
+        "503":
+          description: ZeroBounce ou banco indisponível
+  /campaigns/{campaignId}/email-validation/jobs/{jobId}:
+    get:
+      operationId: getCampaignEmailValidationJob
+      tags: [campaigns]
+      summary: Consulta o progresso persistido de uma validação
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Progresso e resumo por resultado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CampaignEmailValidationJob" }
+        "401":
+          description: Sessão expirada
+        "404":
+          description: Validação não encontrada
+        "503":
+          description: Não foi possível consultar o progresso
+  /campaigns/{campaignId}/email-validation/jobs/{jobId}/resume:
+    post:
+      operationId: resumeCampaignEmailValidationJob
+      tags: [campaigns]
+      summary: Retoma uma validação pausada por saldo ou falhas repetidas
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "202":
+          description: Validação retomada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CampaignEmailValidationJob" }
+        "401":
+          description: Sessão expirada
+        "404":
+          description: Validação não encontrada
+        "409":
+          description: Saldo insuficiente ou validação não pode ser retomada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CampaignEmailValidationConflict" }
+        "503":
+          description: ZeroBounce ou banco indisponível
   /campaigns/{campaignId}/exclusions:
     parameters:
       - name: campaignId
@@ -2503,6 +2614,70 @@ components:
         - destinatarios_salvos
         - recencia
         - amostras_erros
+    CampaignEmailValidationStartInput:
+      type: object
+      properties:
+        custo_confirmado: { type: integer, minimum: 0 }
+        pendentes_confirmados: { type: integer, minimum: 0 }
+      required: [custo_confirmado, pendentes_confirmados]
+    CampaignEmailValidationStatusCounts:
+      type: object
+      properties:
+        valid: { type: integer }
+        invalid: { type: integer }
+        spamtrap: { type: integer }
+        abuse: { type: integer }
+        do_not_mail: { type: integer }
+        catch_all: { type: integer }
+        unknown: { type: integer }
+        formato_invalido: { type: integer }
+        erro: { type: integer }
+        pendente: { type: integer }
+      required: [valid, invalid, spamtrap, abuse, do_not_mail, catch_all, unknown, formato_invalido, erro, pendente]
+    CampaignEmailValidationAutomaticExclusions:
+      type: object
+      properties:
+        catch_all: { type: integer }
+        unknown: { type: integer }
+      required: [catch_all, unknown]
+    CampaignEmailValidationJob:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        campanha_id: { type: string, format: uuid }
+        status: { type: string, enum: [pendente, processando, sem_creditos, erro, concluida] }
+        total_pendentes: { type: integer }
+        processados: { type: integer }
+        custo_estimado: { type: integer }
+        creditos_no_inicio: { type: integer }
+        por_status: { $ref: "#/components/schemas/CampaignEmailValidationStatusCounts" }
+        exclusoes_automaticas: { $ref: "#/components/schemas/CampaignEmailValidationAutomaticExclusions" }
+        erro: { type: ["string", "null"] }
+        proxima_tentativa_em: { type: ["string", "null"], format: date-time }
+        criado_em: { type: string, format: date-time }
+        concluido_em: { type: ["string", "null"], format: date-time }
+      required: [id, campanha_id, status, total_pendentes, processados, custo_estimado, creditos_no_inicio, por_status, exclusoes_automaticas, erro, proxima_tentativa_em, criado_em, concluido_em]
+    CampaignEmailValidationQuote:
+      type: object
+      properties:
+        pendentes: { type: integer }
+        cacheados: { type: integer }
+        a_verificar: { type: integer }
+        formato_invalido: { type: integer }
+        creditos: { type: integer }
+        creditos_faltantes: { type: integer }
+        cache_mais_antigo_em: { type: ["string", "null"], format: date-time }
+        job_ativo:
+          oneOf:
+            - $ref: "#/components/schemas/CampaignEmailValidationJob"
+            - type: "null"
+      required: [pendentes, cacheados, a_verificar, formato_invalido, creditos, creditos_faltantes, cache_mais_antigo_em, job_ativo]
+    CampaignEmailValidationConflict:
+      type: object
+      properties:
+        error: { type: string }
+        cotacao: { $ref: "#/components/schemas/CampaignEmailValidationQuote" }
+      required: [error, cotacao]
     CampaignExclusionInput:
       type: object
       properties:

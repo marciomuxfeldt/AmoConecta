@@ -755,6 +755,78 @@ export interface ImportValidationJob {
   concluido_em: string | null;
 }
 
+export interface CampaignEmailValidationStartInput {
+  /** @minimum 0 */
+  custo_confirmado: number;
+  /** @minimum 0 */
+  pendentes_confirmados: number;
+}
+
+export interface CampaignEmailValidationStatusCounts {
+  valid: number;
+  invalid: number;
+  spamtrap: number;
+  abuse: number;
+  do_not_mail: number;
+  catch_all: number;
+  unknown: number;
+  formato_invalido: number;
+  erro: number;
+  pendente: number;
+}
+
+export interface CampaignEmailValidationAutomaticExclusions {
+  catch_all: number;
+  unknown: number;
+}
+
+export type CampaignEmailValidationJobStatus = typeof CampaignEmailValidationJobStatus[keyof typeof CampaignEmailValidationJobStatus];
+
+
+export const CampaignEmailValidationJobStatus = {
+  pendente: 'pendente',
+  processando: 'processando',
+  sem_creditos: 'sem_creditos',
+  erro: 'erro',
+  concluida: 'concluida',
+} as const;
+
+export interface CampaignEmailValidationJob {
+  id: string;
+  campanha_id: string;
+  status: CampaignEmailValidationJobStatus;
+  total_pendentes: number;
+  processados: number;
+  custo_estimado: number;
+  creditos_no_inicio: number;
+  por_status: CampaignEmailValidationStatusCounts;
+  exclusoes_automaticas: CampaignEmailValidationAutomaticExclusions;
+  /** @nullable */
+  erro: string | null;
+  /** @nullable */
+  proxima_tentativa_em: string | null;
+  criado_em: string;
+  /** @nullable */
+  concluido_em: string | null;
+}
+
+export interface CampaignEmailValidationQuote {
+  pendentes: number;
+  cacheados: number;
+  a_verificar: number;
+  formato_invalido: number;
+  creditos: number;
+  creditos_faltantes: number;
+  /** @nullable */
+  cache_mais_antigo_em: string | null;
+  job_ativo: CampaignEmailValidationJob | null;
+}
+
+export interface CampaignEmailValidationConflict {
+  error: string;
+  cotacao: CampaignEmailValidationQuote;
+}
+
 export type CampaignExclusionInputProvedoresItem = typeof CampaignExclusionInputProvedoresItem[keyof typeof CampaignExclusionInputProvedoresItem];
 
 

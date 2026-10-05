@@ -18,6 +18,7 @@ import {
   type ResendResult,
 } from "./resend-sender";
 import { processBiExportJobs } from "./worker-export";
+import { processCampaignEmailValidationJobs } from "./email-validation-worker";
 import {
   configuredSenderEmail,
   configuredReplyToEmail,
@@ -28,6 +29,11 @@ import {
 } from "./sender-config";
 import { logger } from "./logger";
 import { getTechnicalError } from "./technical-error";
+import {
+  hasEmailFormattingCharacters,
+  isValidEmail,
+  normalizeEmail,
+} from "./csv-import";
 import {
   loadWorkerCampaign,
   maybePauseWorkerCampaign,
@@ -78,7 +84,7 @@ function appBaseUrl(): string {
 }
 
 function normalize(value: string): string {
-  return value.trim().toLowerCase();
+  return normalizeEmail(value);
 }
 
 function base64Url(value: Buffer): string {
@@ -347,7 +353,7 @@ function emailPayload(
   const campaignReplyTo = replyTo(campaign);
   return {
     from: sender(campaign),
-    to: [recipient.email],
+    to: [normalizeEmail(recipient.email)],
     subject: interpolateEmailText(subject ?? campaign.assunto, templateOptions),
     html,
     text: renderEmailText(
@@ -414,7 +420,19 @@ async function markSuppressedOrBlocked(
       });
       continue;
     }
-    if (!isRecipientAllowed(recipient.email)) {
+    const normalizedEmail = normalizeEmail(recipient.email);
+    if (
+      hasEmailFormattingCharacters(recipient.email) ||
+      !isValidEmail(normalizedEmail)
+    ) {
+      await updateRecipient(recipient.id, {
+        status: "bloqueado_validacao_email",
+        processando_em: null,
+        erro: "Bloqueado: endereço inválido por formato antes da validação externa.",
+      });
+      continue;
+    }
+    if (!isRecipientAllowed(normalizedEmail)) {
       await updateRecipient(recipient.id, {
         status: "bloqueado_modo_teste",
         processando_em: null,
@@ -780,6 +798,7 @@ export async function processDueCampaigns(): Promise<number> {
 
   try {
     await processPendingEmailEvents();
+    await processCampaignEmailValidationJobs();
     await refreshChronicDisengagementIfDue();
     await processBiExportJobs();
     await recoverStuckRecipients();

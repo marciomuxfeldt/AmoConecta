@@ -1,13 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isRecipientAllowed } from "./safety-mode";
+import { normalizeEmail } from "./csv-import";
 
 const RECIPIENT_PAGE_SIZE = 1_000;
 const CHRONIC_EMAIL_QUERY_URL_BUDGET = 6_000;
 const CHRONIC_EMAIL_QUERY_CONCURRENCY = 8;
-
-function normalizeEmail(value: string): string {
-  return value.trim().toLowerCase();
-}
 
 function chronicEmailFilter(emails: readonly string[]): string {
   const values = emails

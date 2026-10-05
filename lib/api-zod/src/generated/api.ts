@@ -2236,6 +2236,180 @@ export const GetCampaignImportResponse = zod.object({
 
 
 /**
+ * @summary Consulta custo, saldo e cache da validação da fila
+ */
+export const GetCampaignEmailValidationQuoteParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const GetCampaignEmailValidationQuoteResponse = zod.object({
+  "pendentes": zod.number().int(),
+  "cacheados": zod.number().int(),
+  "a_verificar": zod.number().int(),
+  "formato_invalido": zod.number().int(),
+  "creditos": zod.number().int(),
+  "creditos_faltantes": zod.number().int(),
+  "cache_mais_antigo_em": zod.coerce.date().nullable(),
+  "job_ativo": zod.union([zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid(),
+  "status": zod.enum(['pendente', 'processando', 'sem_creditos', 'erro', 'concluida']),
+  "total_pendentes": zod.number().int(),
+  "processados": zod.number().int(),
+  "custo_estimado": zod.number().int(),
+  "creditos_no_inicio": zod.number().int(),
+  "por_status": zod.object({
+  "valid": zod.number().int(),
+  "invalid": zod.number().int(),
+  "spamtrap": zod.number().int(),
+  "abuse": zod.number().int(),
+  "do_not_mail": zod.number().int(),
+  "catch_all": zod.number().int(),
+  "unknown": zod.number().int(),
+  "formato_invalido": zod.number().int(),
+  "erro": zod.number().int(),
+  "pendente": zod.number().int()
+}),
+  "exclusoes_automaticas": zod.object({
+  "catch_all": zod.number().int(),
+  "unknown": zod.number().int()
+}),
+  "erro": zod.string().nullable(),
+  "proxima_tentativa_em": zod.coerce.date().nullable(),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable()
+}),zod.null()])
+})
+
+
+/**
+ * @summary Cria uma validação assíncrona da fila pendente
+ */
+export const StartCampaignEmailValidationParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const startCampaignEmailValidationBodyCustoConfirmadoMin = 0;
+
+export const startCampaignEmailValidationBodyPendentesConfirmadosMin = 0;
+
+
+
+export const StartCampaignEmailValidationBody = zod.object({
+  "custo_confirmado": zod.number().int().min(startCampaignEmailValidationBodyCustoConfirmadoMin),
+  "pendentes_confirmados": zod.number().int().min(startCampaignEmailValidationBodyPendentesConfirmadosMin)
+})
+
+export const StartCampaignEmailValidationResponse = zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid(),
+  "status": zod.enum(['pendente', 'processando', 'sem_creditos', 'erro', 'concluida']),
+  "total_pendentes": zod.number().int(),
+  "processados": zod.number().int(),
+  "custo_estimado": zod.number().int(),
+  "creditos_no_inicio": zod.number().int(),
+  "por_status": zod.object({
+  "valid": zod.number().int(),
+  "invalid": zod.number().int(),
+  "spamtrap": zod.number().int(),
+  "abuse": zod.number().int(),
+  "do_not_mail": zod.number().int(),
+  "catch_all": zod.number().int(),
+  "unknown": zod.number().int(),
+  "formato_invalido": zod.number().int(),
+  "erro": zod.number().int(),
+  "pendente": zod.number().int()
+}),
+  "exclusoes_automaticas": zod.object({
+  "catch_all": zod.number().int(),
+  "unknown": zod.number().int()
+}),
+  "erro": zod.string().nullable(),
+  "proxima_tentativa_em": zod.coerce.date().nullable(),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Consulta o progresso persistido de uma validação
+ */
+export const GetCampaignEmailValidationJobParams = zod.object({
+  "campaignId": zod.coerce.string().uuid(),
+  "jobId": zod.coerce.string().uuid()
+})
+
+export const GetCampaignEmailValidationJobResponse = zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid(),
+  "status": zod.enum(['pendente', 'processando', 'sem_creditos', 'erro', 'concluida']),
+  "total_pendentes": zod.number().int(),
+  "processados": zod.number().int(),
+  "custo_estimado": zod.number().int(),
+  "creditos_no_inicio": zod.number().int(),
+  "por_status": zod.object({
+  "valid": zod.number().int(),
+  "invalid": zod.number().int(),
+  "spamtrap": zod.number().int(),
+  "abuse": zod.number().int(),
+  "do_not_mail": zod.number().int(),
+  "catch_all": zod.number().int(),
+  "unknown": zod.number().int(),
+  "formato_invalido": zod.number().int(),
+  "erro": zod.number().int(),
+  "pendente": zod.number().int()
+}),
+  "exclusoes_automaticas": zod.object({
+  "catch_all": zod.number().int(),
+  "unknown": zod.number().int()
+}),
+  "erro": zod.string().nullable(),
+  "proxima_tentativa_em": zod.coerce.date().nullable(),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Retoma uma validação pausada por saldo ou falhas repetidas
+ */
+export const ResumeCampaignEmailValidationJobParams = zod.object({
+  "campaignId": zod.coerce.string().uuid(),
+  "jobId": zod.coerce.string().uuid()
+})
+
+export const ResumeCampaignEmailValidationJobResponse = zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid(),
+  "status": zod.enum(['pendente', 'processando', 'sem_creditos', 'erro', 'concluida']),
+  "total_pendentes": zod.number().int(),
+  "processados": zod.number().int(),
+  "custo_estimado": zod.number().int(),
+  "creditos_no_inicio": zod.number().int(),
+  "por_status": zod.object({
+  "valid": zod.number().int(),
+  "invalid": zod.number().int(),
+  "spamtrap": zod.number().int(),
+  "abuse": zod.number().int(),
+  "do_not_mail": zod.number().int(),
+  "catch_all": zod.number().int(),
+  "unknown": zod.number().int(),
+  "formato_invalido": zod.number().int(),
+  "erro": zod.number().int(),
+  "pendente": zod.number().int()
+}),
+  "exclusoes_automaticas": zod.object({
+  "catch_all": zod.number().int(),
+  "unknown": zod.number().int()
+}),
+  "erro": zod.string().nullable(),
+  "proxima_tentativa_em": zod.coerce.date().nullable(),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable()
+})
+
+
+/**
  * @summary Diagnóstico por provedor e exclusões reversíveis
  */
 export const GetCampaignExclusionsParams = zod.object({

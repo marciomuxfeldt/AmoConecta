@@ -8,6 +8,7 @@ import safetyRouter from "./safety";
 import unsubscribeRouter from "./unsubscribe";
 import engagementRouter from "./engagement";
 import recipientExclusionsRouter from "./recipient-exclusions";
+import emailValidationRouter from "./email-validation";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(safetyRouter);
 router.use(unsubscribeRouter);
 router.use(engagementRouter);
 router.use(recipientExclusionsRouter);
+router.use(emailValidationRouter);
 
 export default router;

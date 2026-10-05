@@ -29,6 +29,10 @@ import type {
   CampaignAuditResponse,
   CampaignDefaults,
   CampaignDraftInput,
+  CampaignEmailValidationConflict,
+  CampaignEmailValidationJob,
+  CampaignEmailValidationQuote,
+  CampaignEmailValidationStartInput,
   CampaignExclusionInput,
   CampaignExclusionOverview,
   CampaignExclusionResult,
@@ -3414,6 +3418,330 @@ export function useGetCampaignImport<TData = Awaited<ReturnType<typeof getCampai
 
 
 
+
+export const getGetCampaignEmailValidationQuoteUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/email-validation/quote`
+}
+
+/**
+ * @summary Consulta custo, saldo e cache da validação da fila
+ */
+export const getCampaignEmailValidationQuote = async (campaignId: string, options?: Parameters<typeof customFetch>[1]): Promise<CampaignEmailValidationQuote> => {
+
+  return customFetch<CampaignEmailValidationQuote>(getGetCampaignEmailValidationQuoteUrl(campaignId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCampaignEmailValidationQuoteQueryKey = (campaignId: string,) => {
+    return [
+    `/api/campaigns/${campaignId}/email-validation/quote`
+    ] as const;
+    }
+
+
+export const getGetCampaignEmailValidationQuoteQueryOptions = <TData = Awaited<ReturnType<typeof getCampaignEmailValidationQuote>>, TError = ErrorType<void>>(campaignId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCampaignEmailValidationQuote>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCampaignEmailValidationQuoteQueryKey(campaignId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCampaignEmailValidationQuote>>> = ({ signal }) => getCampaignEmailValidationQuote(campaignId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: campaignId !== null && campaignId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCampaignEmailValidationQuote>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCampaignEmailValidationQuoteQueryResult = NonNullable<Awaited<ReturnType<typeof getCampaignEmailValidationQuote>>>
+export type GetCampaignEmailValidationQuoteQueryError = ErrorType<void>
+
+
+/**
+ * @summary Consulta custo, saldo e cache da validação da fila
+ */
+
+export function useGetCampaignEmailValidationQuote<TData = Awaited<ReturnType<typeof getCampaignEmailValidationQuote>>, TError = ErrorType<void>>(
+ campaignId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCampaignEmailValidationQuote>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCampaignEmailValidationQuoteQueryOptions(campaignId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getStartCampaignEmailValidationUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/email-validation/jobs`
+}
+
+/**
+ * @summary Cria uma validação assíncrona da fila pendente
+ */
+export const startCampaignEmailValidation = async (campaignId: string,
+    campaignEmailValidationStartInput: CampaignEmailValidationStartInput, options?: Parameters<typeof customFetch>[1]): Promise<CampaignEmailValidationJob> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<CampaignEmailValidationJob>(getStartCampaignEmailValidationUrl(campaignId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(campaignEmailValidationStartInput)
+  }
+);}
+
+
+
+
+
+export const getStartCampaignEmailValidationMutationKey = () => ['startCampaignEmailValidation'] as const;
+
+export const getStartCampaignEmailValidationMutationOptions = <TError = ErrorType<void | CampaignEmailValidationConflict>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startCampaignEmailValidation>>, TError,StartCampaignEmailValidationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startCampaignEmailValidation>>, TError,StartCampaignEmailValidationMutationVariables, TContext> => {
+
+const mutationKey = getStartCampaignEmailValidationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startCampaignEmailValidation>>, StartCampaignEmailValidationMutationVariables> = (props) => {
+          const {campaignId,data} = props ?? {};
+
+          return  startCampaignEmailValidation(campaignId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartCampaignEmailValidationMutationResult = NonNullable<Awaited<ReturnType<typeof startCampaignEmailValidation>>>
+    export type StartCampaignEmailValidationMutationBody = BodyType<CampaignEmailValidationStartInput>
+    export type StartCampaignEmailValidationMutationError = ErrorType<void | CampaignEmailValidationConflict>
+    export type StartCampaignEmailValidationMutationVariables = {campaignId: string;data: BodyType<CampaignEmailValidationStartInput>}
+
+    /**
+ * @summary Cria uma validação assíncrona da fila pendente
+ */
+export const useStartCampaignEmailValidation = <TError = ErrorType<void | CampaignEmailValidationConflict>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startCampaignEmailValidation>>, TError,StartCampaignEmailValidationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startCampaignEmailValidation>>,
+        TError,
+        StartCampaignEmailValidationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getStartCampaignEmailValidationMutationOptions(options));
+    }
+
+export const getGetCampaignEmailValidationJobUrl = (campaignId: string,
+    jobId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/email-validation/jobs/${jobId}`
+}
+
+/**
+ * @summary Consulta o progresso persistido de uma validação
+ */
+export const getCampaignEmailValidationJob = async (campaignId: string,
+    jobId: string, options?: Parameters<typeof customFetch>[1]): Promise<CampaignEmailValidationJob> => {
+
+  return customFetch<CampaignEmailValidationJob>(getGetCampaignEmailValidationJobUrl(campaignId,jobId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCampaignEmailValidationJobQueryKey = (campaignId: string,
+    jobId: string,) => {
+    return [
+    `/api/campaigns/${campaignId}/email-validation/jobs/${jobId}`
+    ] as const;
+    }
+
+
+export const getGetCampaignEmailValidationJobQueryOptions = <TData = Awaited<ReturnType<typeof getCampaignEmailValidationJob>>, TError = ErrorType<void>>(campaignId: string,
+    jobId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCampaignEmailValidationJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCampaignEmailValidationJobQueryKey(campaignId,jobId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCampaignEmailValidationJob>>> = ({ signal }) => getCampaignEmailValidationJob(campaignId,jobId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: campaignId !== null && campaignId !== undefined && jobId !== null && jobId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCampaignEmailValidationJob>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCampaignEmailValidationJobQueryResult = NonNullable<Awaited<ReturnType<typeof getCampaignEmailValidationJob>>>
+export type GetCampaignEmailValidationJobQueryError = ErrorType<void>
+
+
+/**
+ * @summary Consulta o progresso persistido de uma validação
+ */
+
+export function useGetCampaignEmailValidationJob<TData = Awaited<ReturnType<typeof getCampaignEmailValidationJob>>, TError = ErrorType<void>>(
+ campaignId: string,
+    jobId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCampaignEmailValidationJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCampaignEmailValidationJobQueryOptions(campaignId,jobId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getResumeCampaignEmailValidationJobUrl = (campaignId: string,
+    jobId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/email-validation/jobs/${jobId}/resume`
+}
+
+/**
+ * @summary Retoma uma validação pausada por saldo ou falhas repetidas
+ */
+export const resumeCampaignEmailValidationJob = async (campaignId: string,
+    jobId: string, options?: Parameters<typeof customFetch>[1]): Promise<CampaignEmailValidationJob> => {
+
+  return customFetch<CampaignEmailValidationJob>(getResumeCampaignEmailValidationJobUrl(campaignId,jobId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getResumeCampaignEmailValidationJobMutationKey = () => ['resumeCampaignEmailValidationJob'] as const;
+
+export const getResumeCampaignEmailValidationJobMutationOptions = <TError = ErrorType<void | CampaignEmailValidationConflict>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeCampaignEmailValidationJob>>, TError,ResumeCampaignEmailValidationJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resumeCampaignEmailValidationJob>>, TError,ResumeCampaignEmailValidationJobMutationVariables, TContext> => {
+
+const mutationKey = getResumeCampaignEmailValidationJobMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resumeCampaignEmailValidationJob>>, ResumeCampaignEmailValidationJobMutationVariables> = (props) => {
+          const {campaignId,jobId} = props ?? {};
+
+          return  resumeCampaignEmailValidationJob(campaignId,jobId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResumeCampaignEmailValidationJobMutationResult = NonNullable<Awaited<ReturnType<typeof resumeCampaignEmailValidationJob>>>
+
+    export type ResumeCampaignEmailValidationJobMutationError = ErrorType<void | CampaignEmailValidationConflict>
+    export type ResumeCampaignEmailValidationJobMutationVariables = {campaignId: string;jobId: string}
+
+    /**
+ * @summary Retoma uma validação pausada por saldo ou falhas repetidas
+ */
+export const useResumeCampaignEmailValidationJob = <TError = ErrorType<void | CampaignEmailValidationConflict>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeCampaignEmailValidationJob>>, TError,ResumeCampaignEmailValidationJobMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resumeCampaignEmailValidationJob>>,
+        TError,
+        ResumeCampaignEmailValidationJobMutationVariables,
+        TContext
+      > => {
+      return useMutation(getResumeCampaignEmailValidationJobMutationOptions(options));
+    }
 
 export const getGetCampaignExclusionsUrl = (campaignId: string,
     params?: GetCampaignExclusionsParams,) => {

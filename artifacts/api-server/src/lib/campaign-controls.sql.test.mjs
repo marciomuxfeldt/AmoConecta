@@ -49,6 +49,7 @@ before(async () => {
   await db.exec(await sqlFile("migrations/202610020017_bounce_terminal_semantics.sql"));
   await db.exec(await sqlFile("migrations/202610030018_bounded_event_matching.sql"));
   await db.exec(await sqlFile("migrations/202610030019_account_campaign_reputation_14d.sql"));
+  await db.exec(await sqlFile("migrations/202610050020_email_validation.sql"));
 });
 after(() => db.close());
 
@@ -283,4 +284,161 @@ test("exclusion restoration is rejected after completion and diagnostics show fo
     NULL,'{}','{}','{}',true)`, [campaign]), /campaign_finished/);
   await db.exec(await sqlFile("functions/worker-reservation.sql"));
   assert.equal((await row("SELECT count(*) AS n FROM reservar_destinatarios($1,100,false)", [campaign])).n, 0);
+});
+
+test("email validation holds the queue, excludes reversible risk groups, and blocks global unsafe results", async () => {
+  const validationCampaign = "00000000-0000-0000-0000-000000000003";
+  await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [validationCampaign]);
+  const addresses = [
+    ["safe@example.test", "valid"],
+    ["bad@example.test", "invalid"],
+    ["catch@example.test", "catch-all"],
+    ["unknown@example.test", "unknown"],
+  ];
+  for (const [email] of addresses) {
+    await db.query(
+      "INSERT INTO destinatario(campanha_id,email,status,is_lembrete) VALUES($1,$2,'pendente',false)",
+      [validationCampaign, email],
+    );
+  }
+  const created = await row(
+    `SELECT criar_job_validacao_email($1,4,4,20,NULL,'Operador',NULL) AS id`,
+    [validationCampaign],
+  );
+  const jobId = created.id;
+  await db.query(
+    "UPDATE validacao_email_job SET status='processando' WHERE id=$1",
+    [jobId],
+  );
+  assert.equal(
+    (await row("SELECT status FROM validacao_email_job WHERE id=$1", [jobId])).status,
+    "processando",
+  );
+  assert.equal(
+    (await row(
+      `SELECT count(*) AS n FROM validacao_email_job
+       WHERE campanha_id=$1 AND status IN ('pendente','processando','sem_creditos','erro')`,
+      [validationCampaign],
+    )).n,
+    1,
+  );
+
+  const held = await row(
+    "SELECT count(*) AS n FROM reservar_destinatarios($1,100,false)",
+    [validationCampaign],
+  );
+  assert.equal(held.n, 0);
+  assert.equal(
+    (await row("SELECT complete_campaign_if_queue_empty($1) AS done", [validationCampaign])).done,
+    false,
+  );
+  await assert.rejects(
+    db.query(
+      `INSERT INTO destinatario(campanha_id,email,status,is_lembrete)
+       VALUES($1,'added-during-validation@example.test','pendente',false)`,
+      [validationCampaign],
+    ),
+    /email_validation_job_active/u,
+  );
+
+  for (const [email, status] of addresses) {
+    await db.query(
+      `INSERT INTO verificacao_email(email,status,resposta_bruta,origem)
+       VALUES($1,$2,$3,'test')`,
+      [email, status, JSON.stringify({ address: email, status })],
+    );
+    await db.query(
+      `UPDATE validacao_email_job_item
+       SET status='validado',email_normalizado=$3,resultado_status=$4,
+           resposta_bruta=$5,verificado_em=now()
+       WHERE job_id=$1 AND email=$2`,
+      [jobId, email, email, status, JSON.stringify({ address: email, status })],
+    );
+  }
+
+  const claimToken = "00000000-0000-0000-0000-000000000099";
+  const firstClaim = await row(
+    "SELECT claim_verificacao_email_batch($1,$2::text[],$3) AS value",
+    [jobId, ["new@example.test"], claimToken],
+  );
+  assert.deepEqual(firstClaim.value.claimed, ["new@example.test"]);
+  const duplicateClaim = await row(
+    "SELECT claim_verificacao_email_batch($1,$2::text[],$3) AS value",
+    [jobId, ["new@example.test"], "00000000-0000-0000-0000-000000000098"],
+  );
+  assert.deepEqual(duplicateClaim.value.busy, ["new@example.test"]);
+  await row("SELECT liberar_verificacao_email_batch($1)", [claimToken]);
+
+  const summary = await row(
+    "SELECT finalizar_job_validacao_email($1) AS value",
+    [jobId],
+  );
+  assert.equal(summary.value.por_status.valid, 1);
+  assert.equal(summary.value.por_status.invalid, 1);
+  assert.equal(summary.value.exclusoes_automaticas.catch_all, 1);
+  assert.equal(summary.value.exclusoes_automaticas.unknown, 1);
+
+  const reserved = await db.query(
+    "SELECT email FROM reservar_destinatarios($1,100,false)",
+    [validationCampaign],
+  );
+  assert.deepEqual(reserved.rows.map((item) => item.email), ["safe@example.test"]);
+  assert.equal(
+    (await row(
+      "SELECT status FROM destinatario WHERE campanha_id=$1 AND email='bad@example.test'",
+      [validationCampaign],
+    )).status,
+    "bloqueado_validacao_email",
+  );
+  assert.ok(
+    (await row(
+      "SELECT excluido_em FROM destinatario WHERE campanha_id=$1 AND email='catch@example.test'",
+      [validationCampaign],
+    )).excluido_em,
+  );
+
+  const laterCampaign = "00000000-0000-0000-0000-000000000004";
+  await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [laterCampaign]);
+  await db.query(
+    `INSERT INTO destinatario(campanha_id,email,status,is_lembrete) VALUES
+     ($1,'bad@example.test','pendente',false),
+     ($1,'trap@example.test','pendente',false)`,
+    [laterCampaign],
+  );
+  await db.query(
+    `INSERT INTO verificacao_email(email,status,resposta_bruta,origem)
+     VALUES('trap@example.test','spamtrap','{"status":"spamtrap"}','test')`,
+  );
+  assert.equal(
+    (await row(
+      "SELECT count(*) AS n FROM reservar_destinatarios($1,100,false)",
+      [laterCampaign],
+    )).n,
+    0,
+  );
+  assert.equal(
+    (await row(
+      "SELECT count(*) AS n FROM destinatario WHERE campanha_id=$1 AND status='bloqueado_validacao_email'",
+      [laterCampaign],
+    )).n,
+    2,
+  );
+
+  await db.exec("SET enable_seqscan=off");
+  const plan = await db.query(
+    `EXPLAIN (FORMAT TEXT)
+     UPDATE destinatario d
+     SET status='bloqueado_validacao_email'
+     FROM verificacao_email v
+     WHERE d.campanha_id=$1
+       AND d.is_lembrete=false
+       AND d.status='pendente'
+       AND d.excluido_em IS NULL
+       AND v.email=d.email
+       AND v.status IN ('invalid','spamtrap','abuse','do_not_mail')`,
+    [validationCampaign],
+  );
+  await db.exec("SET enable_seqscan=on");
+  const reservationPlan = plan.rows.map((item) => item["QUERY PLAN"]).join("\n");
+  assert.match(reservationPlan, /verificacao_email_email_uidx/u);
 });

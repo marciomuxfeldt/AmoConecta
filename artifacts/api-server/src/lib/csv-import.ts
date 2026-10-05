@@ -138,6 +138,19 @@ export function normalizeEmail(value: string): string {
     .toLocaleLowerCase("pt-BR");
 }
 
+export function hasEmailFormattingCharacters(value: string): boolean {
+  return /[\p{Cc}\p{Cf}\u00A0]/u.test(value) || /\s/u.test(value.trim());
+}
+
+export function isSafeEmailForExternalValidation(value: string): boolean {
+  const normalized = normalizeEmail(value);
+  return (
+    !hasEmailFormattingCharacters(value) &&
+    /^[\x00-\x7F]*$/u.test(normalized) &&
+    isValidEmail(normalized)
+  );
+}
+
 function fallbackName(email: string): string | null {
   const localPart = email.split("@", 1)[0] ?? "";
   const parts = localPart.split(/[._-]/u);

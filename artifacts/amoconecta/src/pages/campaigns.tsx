@@ -83,6 +83,7 @@ import {
   auditExtraDescription,
   useCampaignExclusionOverview,
 } from '../components/CampaignExclusionPanel';
+import { CampaignEmailValidationPanel } from '../components/CampaignEmailValidationPanel';
 import { inspectCampaignCsvHeader } from '../lib/campaign-csv-header';
 
 export type SessionUser = { email: string } | null;
@@ -2703,6 +2704,10 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             offset={exclusionOffset}
             onOffsetChange={setExclusionOffset}
             query={exclusionQuery}
+          />
+          <CampaignEmailValidationPanel
+            campaignId={campaignId}
+            campaignStatus={campaign.status}
           />
           <CampaignForm
             campaign={campaign}
