@@ -1,0 +1,138 @@
+# Revisão da migração 202610050020_email_validation.sql
+
+Não aplique a migração até resolver os pontos 1, 2 e 3. Os pontos 4 e 5 podem vir depois, mas me responda sobre eles.
+
+---
+
+## 1. A junção do cache não impede o que deveria impedir
+
+Em `reservar_destinatarios`:
+
+```sql
+AND v.email = d.email
+```
+
+O comentário acima dessa linha afirma que `d.email` é o valor normalizado. A constraint que existe hoje em `destinatario` é:
+
+```
+destinatario_email_normalizado_check
+CHECK ((email = lower(btrim(email)))) NOT VALID
+```
+
+Ela não cobre o caso real. Caracteres de formatação de largura zero — espaço de largura zero, juntor de palavra, BOM — sobrevivem a `lower` e a `btrim`. Quatro endereços desta mesma base chegaram ao banco com um desses caracteres de três bytes colado na frente, vindos de cópia do WhatsApp, e tiveram de ser limpos à mão por SQL.
+
+Um endereço assim passa pela constraint, não casa na junção, o bloqueio por validação não acontece, e o envio sai. Sem erro, sem log. Se o status fosse `spamtrap`, o domínio seria exposto exatamente ao dano que esta fase existe para evitar.
+
+Inclua na migração, antes de criar a função de reserva:
+
+```sql
+ALTER TABLE public.destinatario
+  ADD CONSTRAINT destinatario_email_ascii_check
+  CHECK (email ~ '^[[:ascii:]]+$') NOT VALID;
+
+ALTER TABLE public.destinatario
+  VALIDATE CONSTRAINT destinatario_email_ascii_check;
+
+ALTER TABLE public.destinatario
+  VALIDATE CONSTRAINT destinatario_email_normalizado_check;
+```
+
+Conferi os dados antes de pedir: as 5.756 linhas atuais de `destinatario` estão todas normalizadas e em ASCII puro, sem byte extra. As duas validações passam de imediato e tomam bloqueio leve.
+
+Mantenha as duas constraints separadas em vez de refazer a existente, para que a mensagem de erro diga qual das duas regras foi violada.
+
+Com as duas validadas, `v.email = d.email` passa a ser provadamente correto e continua usando `verificacao_email_email_uidx`. Se por algum motivo você não puder adicionar a constraint, então use a comparação normalizada no lado do destinatário:
+
+```sql
+AND v.email = lower(btrim(d.email))
+```
+
+Depois de implementar, confirme que **todos** os caminhos de escrita de `destinatario` removem caracteres de formatação antes de inserir — não só o importador de CSV, mas também a criação de linhas de lembrete e qualquer rota de API que insira destinatário. Com a constraint validando, um caminho que não limpe passa a falhar em produção, e prefiro que você encontre isso agora. Me diga quais caminhos encontrou e se algum precisou de ajuste.
+
+---
+
+## 2. Um job travado interrompe a campanha em silêncio, para sempre
+
+Em `reservar_destinatarios`:
+
+```sql
+IF EXISTS (
+  SELECT 1 FROM public.validacao_email_job j
+  WHERE j.campanha_id=p_campanha_id
+    AND j.status IN ('pendente','processando','sem_creditos','erro')
+) THEN
+  RETURN;
+END IF;
+```
+
+Um job parado em `erro` ou `sem_creditos` faz a reserva retornar vazio indefinidamente. A campanha permanece com status `enviando`, o worker roda a cada minuto, e nada sai. Nenhum erro, nenhum aviso, nenhuma linha de log.
+
+Essa classe de falha já custou uma manhã inteira neste projeto, quando a pausa automática travava a campanha sem registrar nada. Implemente as três coisas:
+
+- Uma linha de log no worker a cada ciclo em que a reserva for bloqueada por job de validação, dizendo qual campanha, qual job e em que estado ele está.
+- Um aviso visível na tela da campanha: envio bloqueado por validação pendente, com o estado do job, quando começou e quem iniciou.
+- Um jeito de **cancelar** o job, e não só retomá-lo. Hoje `retomar_job_validacao_email` só trata `sem_creditos` e `erro`. Um job preso em `processando`, por queda do worker no meio da execução, não tem saída nenhuma — nem retomar, nem cancelar, e a campanha fica parada para sempre.
+
+A mesma observação vale para `complete_campaign_if_queue_empty`, que também retorna falso enquanto houver job ativo: uma campanha com job travado nunca conclui.
+
+---
+
+## 3. Retentativa sem limite, de novo
+
+`finalizar_job_validacao_email` recusa concluir enquanto houver item em `pendente` ou `erro`:
+
+```sql
+IF EXISTS (
+  SELECT 1 FROM public.validacao_email_job_item
+  WHERE job_id=p_job_id AND status IN ('pendente','erro')
+) THEN
+  RAISE EXCEPTION 'validation_job_items_incomplete';
+END IF;
+```
+
+E `retomar_job_validacao_email` devolve itens em `erro` para `pendente`. Se um endereço falhar sempre — por qualquer motivo persistente — o job nunca conclui e, pelo ponto 2, a campanha nunca volta a enviar.
+
+É o mesmo defeito dos eventos de webhook corrigido há dois dias, em que três mensagens foram retentadas mais de 1.400 vezes cada por não existir limite nem descarte.
+
+O status `ignorado` já está previsto no CHECK de `validacao_email_job_item`. Use-o: após um número de tentativas ou uma janela de tempo, o item vira `ignorado` com o motivo registrado, o job conclui, e o resumo final informa quantos endereços não puderam ser verificados. Esses endereços permanecem sem veredito e não são bloqueados nem liberados por engano.
+
+Me diga qual limite escolheu e por quê.
+
+---
+
+## 4. O gatilho por linha em `destinatario` ameaça a importação
+
+```sql
+CREATE TRIGGER destinatario_guard_validacao_email_queue
+BEFORE INSERT OR DELETE OR UPDATE OF campanha_id,email,is_lembrete
+ON public.destinatario
+FOR EACH ROW EXECUTE FUNCTION public.guard_validacao_email_queue_changes();
+```
+
+A função executa, por linha:
+
+```sql
+PERFORM 1 FROM public.campanha WHERE id=v_campaign_id FOR UPDATE;
+```
+
+Numa importação de 500 mil destinatários isso são 500 mil aquisições de bloqueio de linha sobre o mesmo registro de campanha, serializadas uma após a outra. A base do Amo Ofertas tem mais de 500 mil usuários cadastrados, e é para esse volume que a plataforma existe.
+
+Meça: importe pelo menos 50 mil linhas com o gatilho ativo e sem ele, e me diga os dois tempos. Se a diferença for relevante, troque por gatilho `FOR EACH STATEMENT` ou mova a checagem para a rota de importação, onde ela roda uma vez por arquivo em vez de uma vez por linha.
+
+---
+
+## 5. O novo status e a soma dos cartões
+
+A migração acrescenta `bloqueado_validacao_email` ao CHECK de `destinatario.status`.
+
+Hoje os cartões de status na tela da campanha somam exatamente o total da lista, e essa igualdade é o que usamos para conferir se o painel está íntegro — foi assim que encontramos, semana passada, que faltava o cartão de bounce.
+
+O cartão "Bloqueado" existente contabiliza esse novo status, ou ele fica de fora e quebra a soma? Confirme, e corrija se necessário, mantendo a propriedade de que os cartões somam o total da lista.
+
+Observação sobre a substituição do CHECK: conferi o estado atual do banco e `destinatario_status_check` contém exatamente os mesmos onze status da sua lista nova, que só acrescenta o décimo segundo. A substituição é segura e não vai falhar por linha existente fora da lista.
+
+---
+
+## Ao final
+
+Me entregue a migração corrigida inteira, em bloco de código único, pronta para aplicar. Não aplique nada no banco. Diga também o que mudou nos arquivos que o worker executa.
