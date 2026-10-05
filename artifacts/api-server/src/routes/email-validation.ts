@@ -13,10 +13,8 @@ import {
 import { getSupabaseUser } from "./auth";
 import { findCampaign } from "./campaigns";
 import { supabaseAdminClient } from "../lib/supabase";
-import {
-  isSafeEmailForExternalValidation,
-  normalizeEmail,
-} from "../lib/csv-import";
+import { isSafeEmailForExternalValidation } from "../lib/csv-import";
+import { normalizeEmail } from "../lib/email-normalization";
 import { getZeroBounceCredits, ZeroBounceError } from "../lib/zerobounce";
 import { recordAuditEvent, teamAuditActor } from "../lib/audit-events";
 import { getTechnicalError } from "../lib/technical-error";

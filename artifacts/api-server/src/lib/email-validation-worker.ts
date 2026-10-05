@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdminClient } from "./supabase";
 import {
   isSafeEmailForExternalValidation,
-  normalizeEmail,
 } from "./csv-import";
+import { normalizeEmail } from "./email-normalization";
 import {
   validateZeroBounceBatch,
   type ZeroBounceEmailResult,
@@ -513,11 +513,13 @@ async function processJobBatch(job: ValidationJob): Promise<void> {
       return;
     }
 
-    if (!(await isJobProcessing(job.id))) return;
     const successful = results.flatMap((item) =>
       item.kind === "result" ? [item.value] : [],
     );
+    // A completed ZeroBounce response has value independently of this job.
+    // Persist paid verdicts before checking whether cancellation stopped the job.
     await persistCache(successful, job.id);
+    if (!(await isJobProcessing(job.id))) return;
     const resultByEmail = new Map(
       results.flatMap((item) =>
         item.kind === "global_error"

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isRecipientAllowed } from "./safety-mode";
-import { normalizeEmail } from "./csv-import";
+import { normalizeEmail } from "./email-normalization";
 
 const RECIPIENT_PAGE_SIZE = 1_000;
 const CHRONIC_EMAIL_QUERY_URL_BUDGET = 6_000;

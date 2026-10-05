@@ -32,8 +32,8 @@ import { getTechnicalError } from "./technical-error";
 import {
   hasEmailFormattingCharacters,
   isValidEmail,
-  normalizeEmail,
 } from "./csv-import";
+import { normalizeEmail } from "./email-normalization";
 import {
   loadWorkerCampaign,
   maybePauseWorkerCampaign,

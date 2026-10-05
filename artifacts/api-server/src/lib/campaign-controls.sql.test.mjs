@@ -483,6 +483,14 @@ test("email constraints are validated and reject formatting characters outside A
   );
 });
 
+test("database email normalization removes the same invisible characters as imports", async () => {
+  const result = await row(
+    "SELECT public.normalize_email($1) AS email",
+    ["\u0001\uFEFFANA\u200B\u00A0@EX\u2060AMPLE.COM\uFEFF"],
+  );
+  assert.equal(result.email, "ana@example.com");
+});
+
 test("validation cancellation releases the queue and an exhausted item is ignored", async () => {
   const cancelCampaign = "00000000-0000-0000-0000-000000000005";
   await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [cancelCampaign]);

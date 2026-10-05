@@ -1,4 +1,5 @@
-import { recordsFromStream, ImportValidationError, normalizeEmail, isValidEmail } from "./csv-import";
+import { recordsFromStream, ImportValidationError, isValidEmail } from "./csv-import";
+import { normalizeEmail } from "./email-normalization";
 
 export async function emailsFromExclusionCsv(csv: string): Promise<string[]> {
   const stream = new ReadableStream<Uint8Array>({

@@ -97,7 +97,7 @@ test("removes invisible controls from e-mail before validating and saving", asyn
   const summary = await validateAndImportCsv({
     client: emptyImportClient((rows) => savedRows.push(...rows)) as never,
     stream: streamFromText(
-      "nome,email\nPessoa,ana\u200B\u00A0@ex\u2060ample.com",
+      "nome,email\nPessoa,\u0001\uFEFFANA\u200B\u00A0@EX\u2060AMPLE.COM\uFEFF",
     ),
     campaignId: "00000000-0000-0000-0000-000000000001",
     storagePath: "campaign/invisible-email.csv",

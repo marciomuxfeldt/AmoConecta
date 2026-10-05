@@ -1,5 +1,42 @@
 BEGIN;
 
+-- Canonical database-side equivalent of
+-- artifacts/api-server/src/lib/email-normalization.ts. Strip Cc/Cf characters
+-- and Unicode whitespace before lowercasing; the write trigger and reminder
+-- path both call this function rather than maintaining separate expressions.
+CREATE OR REPLACE FUNCTION public.normalize_email(p_email text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+SET search_path=pg_catalog
+AS $function$
+  SELECT lower(
+    regexp_replace(
+      regexp_replace(
+        p_email,
+        U&'[\0001-\001F\007F-\009F\00AD\0600-\0605\061C\06DD\070F\0890-\0891\08E2\180E\200B-\200F\202A-\202E\2060-\2064\2066-\206F\FEFF\FFF9-\FFFB\+0110BD\+0110CD\+013430-\+01343F\+01BCA0-\+01BCA3\+01D173-\+01D17A\+0E0001\+0E0020-\+0E007F]',
+        '',
+        'g'
+      ),
+      U&'[\0020\00A0\1680\2000-\200A\2028-\2029\202F\205F\3000]+',
+      '',
+      'g'
+    )
+  );
+$function$;
+
+CREATE OR REPLACE FUNCTION public.normalize_email_before_write()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path=public
+AS $function$
+BEGIN
+  NEW.email := nullif(public.normalize_email(NEW.email), '');
+  RETURN NEW;
+END;
+$function$;
+
 CREATE TABLE IF NOT EXISTS public.verificacao_email (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email text NOT NULL,
@@ -550,8 +587,7 @@ BEGIN
 END;
 $$;
 
--- Reminders copy existing recipients, but clean ASCII controls as well so
--- this second recipient-insert path always persists a normalized address.
+-- Reminders and ordinary writes share public.normalize_email().
 CREATE OR REPLACE FUNCTION public.enqueue_campaign_reminders(
   p_campaign_id uuid,
   p_limit integer
@@ -571,8 +607,7 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended(p_campaign_id::text, 0));
 
   WITH candidates AS (
-    SELECT d.*,
-      regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g') AS normalized_email
+    SELECT d.*, public.normalize_email(d.email) AS normalized_email
     FROM public.destinatario d
     JOIN public.campanha c ON c.id=d.campanha_id
     WHERE d.campanha_id=p_campaign_id
@@ -594,20 +629,20 @@ BEGIN
         FROM public.destinatario r
         WHERE r.campanha_id=d.campanha_id
           AND r.is_lembrete=true
-          AND r.email=regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g')
+          AND r.email=public.normalize_email(d.email)
       )
       AND NOT EXISTS (
         SELECT 1
         FROM public.supressao s
         WHERE s.email IS NOT NULL
-          AND s.email=regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g')
+          AND s.email=public.normalize_email(d.email)
       )
       AND (
         c.incluir_desengajados
         OR NOT EXISTS (
           SELECT 1
           FROM public.contato_desengajamento cd
-          WHERE cd.email=regexp_replace(lower(btrim(d.email)), '[[:cntrl:]]', '', 'g')
+          WHERE cd.email=public.normalize_email(d.email)
             AND cd.desengajado_cronico=true
         )
       )

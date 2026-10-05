@@ -12,7 +12,8 @@ import {
   reputationPeriod,
 } from "../lib/campaign-reputation";
 import { emailsFromExclusionCsv } from "../lib/recipient-exclusions";
-import { ImportValidationError, normalizeEmail } from "../lib/csv-import";
+import { ImportValidationError } from "../lib/csv-import";
+import { normalizeEmail } from "../lib/email-normalization";
 import { getTechnicalError } from "../lib/technical-error";
 
 const router: IRouter = Router();

@@ -1,4 +1,4 @@
-import { normalizeEmail } from "./csv-import";
+import { normalizeEmail } from "./email-normalization";
 
 const DEFAULT_API_URL = "https://api.zerobounce.net/v2";
 const EMAIL_STATUSES = new Set([

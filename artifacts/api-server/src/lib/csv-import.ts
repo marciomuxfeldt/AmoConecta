@@ -1,4 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { normalizeEmail } from "./email-normalization";
+
+export { normalizeEmail } from "./email-normalization";
 
 const BLOCK_SIZE = 5_000;
 const EXISTING_EMAIL_PAGE_SIZE = 1_000;
@@ -127,15 +130,6 @@ function normalizeName(value: string): string {
         .join("");
     })
     .join(" ");
-}
-
-export function normalizeEmail(value: string): string {
-  return value
-    .replace(/\u00A0/gu, " ")
-    .replace(/[\p{Cc}\p{Cf}]/gu, "")
-    .trim()
-    .replace(/\s+/gu, "")
-    .toLocaleLowerCase("pt-BR");
 }
 
 export function hasEmailFormattingCharacters(value: string): boolean {
