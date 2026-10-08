@@ -1249,6 +1249,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DetailedError"
+  /campaigns/{campaignId}/imports/mapping-lookup:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: lookupCampaignImportMapping
+      tags: [campaigns]
+      summary: Consulta mapeamento salvo para os cabeçalhos do CSV
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportMappingLookupInput"
+      responses:
+        "200":
+          description: Mapeamento salvo ou ausência de correspondência
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportMappingLookupResponse"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Campanha não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: Falha ao consultar mapeamento
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /campaigns/{campaignId}/imports/validate:
     parameters:
       - name: campaignId
@@ -1296,6 +1341,102 @@ paths:
                 $ref: "#/components/schemas/Error"
         "502":
           description: Falha ao validar ou importar no Supabase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/imports/{importId}/confirm:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: importId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: confirmCampaignImport
+      tags: [campaigns]
+      summary: Confirma importação que contém datas de referência inválidas
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmImportInput"
+      responses:
+        "202":
+          description: Importação retomada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportValidationJob"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Importação não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Importação não aguarda confirmação
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /campaigns/{campaignId}/imports/{importId}/cancel:
+    parameters:
+      - name: campaignId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: importId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: cancelCampaignImport
+      tags: [campaigns]
+      summary: Cancela uma importação que aguarda confirmação
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Importação cancelada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportValidationJob"
+        "401":
+          description: Usuário não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Importação não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Importação não aguarda confirmação
           content:
             application/json:
               schema:
@@ -2045,6 +2186,12 @@ components:
           $ref: "#/components/schemas/RecipientStatusSummary"
         metricas_email_lembrete:
           $ref: "#/components/schemas/CampaignEmailMetrics"
+        data_referencia_tipo:
+          type: ["string", "null"]
+          enum: [compra, acesso, criacao_conta, outro, null]
+        data_referencia_rotulo:
+          type: string
+          description: Rótulo para a data de referência desta lista, sem assumir que seja uma compra.
         desengajados_total:
           type: integer
           minimum: 0
@@ -2058,7 +2205,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RecipientRecencyBucket"
-      required: [campanha_id, total, total_na_lista, suprimidos_no_envio, permitidos_modo_teste, bloqueados_modo_teste, receberao_de_fato, status, reputacao, reputacao_avaliacao, metricas_email, status_lembrete, metricas_email_lembrete, desengajados_total, desengajados_na_lista, bloqueados_desengajados, recencia]
+      required: [campanha_id, total, total_na_lista, suprimidos_no_envio, permitidos_modo_teste, bloqueados_modo_teste, receberao_de_fato, status, reputacao, reputacao_avaliacao, metricas_email, status_lembrete, metricas_email_lembrete, desengajados_total, desengajados_na_lista, bloqueados_desengajados, recencia, data_referencia_tipo, data_referencia_rotulo]
     CampaignRecipientsCleared:
       type: object
       properties:
@@ -2516,11 +2663,68 @@ components:
         deduplicar_por_telefone:
           type: boolean
           default: false
+        cabecalhos:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+            maxLength: 120
+        mapeamento:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/ImportColumnTarget"
+        data_referencia_tipo:
+          anyOf:
+            - $ref: "#/components/schemas/ReferenceDateMeaning"
+            - type: "null"
+        data_referencia_rotulo:
+          type: ["string", "null"]
+          maxLength: 80
       required:
         - storage_path
+        - cabecalhos
+        - mapeamento
+        - data_referencia_tipo
+        - data_referencia_rotulo
+    ImportColumnTarget:
+      type: string
+      enum: [email, name, phone, user_id, region, reference_date, ignore]
+    ReferenceDateMeaning:
+      type: string
+      enum: [compra, acesso, criacao_conta, outro]
+    ImportMappingLookupInput:
+      type: object
+      properties:
+        cabecalhos:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+            maxLength: 120
+      required: [cabecalhos]
+    ImportMappingLookupResponse:
+      type: object
+      properties:
+        mapeamento:
+          anyOf:
+            - type: array
+              items:
+                $ref: "#/components/schemas/ImportColumnTarget"
+            - type: "null"
+      required: [mapeamento]
+    ConfirmImportInput:
+      type: object
+      properties:
+        continuar_com_datas_invalidas:
+          type: boolean
+      required: [continuar_com_datas_invalidas]
     ImportValidationStatus:
       type: string
-      enum: [pendente, processando, concluida, erro]
+      enum: [pendente, processando, aguardando_confirmacao, concluida, erro, cancelada]
     ImportValidationJob:
       type: object
       properties:
@@ -2583,6 +2787,15 @@ components:
       required:
         - linha
         - motivo
+    ImportValidationSample:
+      type: object
+      properties:
+        linha:
+          type: integer
+          minimum: 1
+        valor:
+          type: string
+      required: [linha, valor]
     ImportValidationSummary:
       type: object
       properties:
@@ -2592,6 +2805,29 @@ components:
         datas_ausentes_percentual:
           type: number
           minimum: 0
+        linhas_importadas:
+          type: integer
+          minimum: 0
+        linhas_descartadas:
+          type: integer
+          minimum: 0
+        colunas_ignoradas:
+          type: integer
+          minimum: 0
+        data_referencia_rotulo:
+          type: string
+        amostras_emails_invalidos:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImportValidationSample"
+        amostras_datas_invalidas:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImportValidationSample"
+        amostras_datas_ausentes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImportValidationSample"
         dominios_suspeitos_total:
           type: integer
           minimum: 0
@@ -2656,6 +2892,10 @@ components:
             $ref: "#/components/schemas/ImportValidationError"
       required:
         - storage_path
+        - linhas_importadas
+        - linhas_descartadas
+        - colunas_ignoradas
+        - data_referencia_rotulo
         - total_linhas
         - validos
         - invalidos
@@ -2667,6 +2907,11 @@ components:
         - suprimidos
         - emails_invalidos
         - datas_invalidas
+        - datas_ausentes
+        - datas_ausentes_percentual
+        - amostras_emails_invalidos
+        - amostras_datas_invalidas
+        - amostras_datas_ausentes
         - nomes_ausentes
         - telefones_invalidos
         - destinatarios_salvos

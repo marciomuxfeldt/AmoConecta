@@ -1,0 +1,121 @@
+# Importação com layout flexível — AmoConecta
+
+Execute no Repl **principal**. Ao final, diga o que precisa ser propagado para o Repl do worker.
+
+A plataforma vai receber CSVs exportados de outras ferramentas, com cabeçalhos diferentes a cada origem. O nome do arquivo e os nomes das colunas mudam. Hoje a importação só aceita um layout específico, e isso trava a operação toda vez que a lista vem de outro lugar.
+
+---
+
+## O arquivo que motivou este lote
+
+Exportação real, 484 linhas, que precisa ser aceita:
+
+```
+ID do usuário,Nome,E-mail,Telefone,Cidade do último acesso,Data do último acesso,Data de criação da conta
+6a6cbce8ab2f69c3e5316b99,Milena Vitória,mihvitoria.2911@gmail.com,54991434483,sarandi,"31 julho, 2026, 13:48","31 julho, 2026, 12:19"
+```
+
+Características verificadas:
+
+- **UTF-8 com BOM** — os três bytes `EF BB BF` antes do primeiro cabeçalho
+- Quebra de linha LF, separador vírgula, aspas nos campos que contêm vírgula
+- Cabeçalhos em português, com acento e espaço
+- Datas no formato textual `31 julho, 2026, 13:48`, sem fuso
+- 484 e-mails distintos, nenhum vazio, nenhum com caractere fora de ASCII
+- Telefones com 11 dígitos, todos numéricos
+- 23 endereços `privaterelay.appleid.com`, que são relays da Apple e funcionam normalmente
+
+---
+
+## 1. Tela de mapeamento de colunas
+
+Esta é a parte principal. Não acrescente mais sinônimos à lista de nomes aceitos — a próxima exportação vai trazer um nome que não está nela, e a operação trava de novo às sete da manhã.
+
+Depois de enviar o arquivo e antes de importar, mostre uma tela de mapeamento:
+
+- Uma linha por coluna encontrada no arquivo, com **as três primeiras linhas de exemplo** ao lado, para a pessoa reconhecer o conteúdo.
+- Em cada linha, uma seleção do campo de destino: e-mail, nome, telefone, identificador do usuário, região, data de referência, ou "ignorar".
+- **Palpite automático preenchido**, comparando os nomes sem diferenciar maiúsculas, acentos, espaços, hífens e sublinhados. `E-mail`, `email`, `EMAIL` e `e_mail` devem cair todos em e-mail.
+- Apenas o e-mail é obrigatório. O resto é opcional.
+- Colunas marcadas como "ignorar" são descartadas, e a tela diz quantas foram.
+- Se o palpite não encontrar nenhuma coluna de e-mail, não adivinhe: peça para a pessoa escolher.
+
+**Guarde o mapeamento** associado à assinatura do cabeçalho, para que o próximo arquivo com as mesmas colunas já venha mapeado e a pessoa só confirme.
+
+---
+
+## 2. O BOM
+
+O arquivo começa com `EF BB BF`. Se não for removido, o primeiro cabeçalho vira `﻿ID do usuário` e nenhuma comparação de nome funciona — inclusive o palpite automático.
+
+Remova a marca de ordem de bytes antes de qualquer leitura de cabeçalho. Verifique se o importador atual já faz isso e me diga.
+
+---
+
+## 3. Datas em português
+
+O formato é `31 julho, 2026, 13:48`. Aceite também as variações que aparecem nessas exportações:
+
+- com ou sem a preposição: `31 de julho de 2026`
+- nomes de mês com e sem acento: `marco` e `março`
+- ISO, que já deve funcionar: `2026-07-31T13:48:00-03:00`
+
+**O arquivo não traz fuso horário.** Interprete como `America/Sao_Paulo` e **diga isso na tela**, porque a plataforma inteira acabou de passar por uma correção de fuso e não quero outra suposição silenciosa.
+
+E o mais importante: **linha com data que não foi possível interpretar não pode virar nulo em silêncio.** Conte quantas falharam, mostre três exemplos no resumo da importação e deixe a pessoa decidir se importa assim mesmo. Numa base anterior, 100% das linhas ficaram sem data e ninguém soube até o envio sair fora de ordem.
+
+---
+
+## 4. O que a data significa — e por que isso importa
+
+Esta é a armadilha que mais preocupa.
+
+O arquivo traz **"Data do último acesso"** e **"Data de criação da conta"**. Nenhuma das duas é data de compra. Mas o campo da plataforma chama-se `data_ultima_compra`, e é ele que governa:
+
+- a ordenação do envio, da mais recente para a mais antiga
+- a deduplicação por telefone, que mantém o registro mais recente
+- o painel "Recência da base"
+
+Se o mapeamento jogar "último acesso" dentro de `data_ultima_compra`, todas essas telas passam a dizer "última compra" para um dado que é "último acesso". A ordenação continua funcionando, mas o painel e a exportação para BI mentem — e é esse tipo de erro silencioso que já nos custou tempo três vezes neste projeto.
+
+Resolva assim:
+
+- A seleção da tela de mapeamento chama-se **"data de referência"**, não "data da última compra".
+- Ao escolher, a pessoa informa **o que aquela data é**: compra, acesso, criação da conta, ou outro.
+- Guarde essa informação junto com a lista.
+- O painel de recência e a exportação para BI **exibem o rótulo correspondente**, em vez de assumir compra.
+
+Me diga como você pretende guardar isso e se exige migração. Se a solução exigir refatorar o nome do campo em muitos lugares, me apresente o tamanho do trabalho antes de fazer — pode ser que valha, mas quero decidir sabendo.
+
+---
+
+## 5. O resumo da importação
+
+Ao final, mostre o que foi feito, sem esconder nada:
+
+- linhas lidas, importadas, descartadas
+- duplicadas por e-mail e, se marcado, por telefone
+- recusadas por formato de e-mail inválido, com até três exemplos
+- sem data de referência ou com data ilegível, com até três exemplos
+- colunas ignoradas
+
+---
+
+## Fora do escopo
+
+Não altere a validação pela ZeroBounce, os limites de reputação, a janela de envio nem a exclusão de destinatários. Não mexa em `ENVIO_LIBERADO` nem no modo de segurança.
+
+## Critérios de aceite
+
+- O arquivo descrito acima importa 484 destinatários, com nome, telefone, identificador e região preenchidos.
+- As datas são lidas corretamente e aparecem no painel de recência, com o rótulo dizendo que são de último acesso.
+- Um arquivo com os mesmos dados e cabeçalhos em inglês, ou com `Email` em vez de `E-mail`, importa sem nenhum ajuste de código.
+- Um arquivo sem coluna de e-mail reconhecível pede o mapeamento em vez de falhar.
+- O BOM não impede o reconhecimento do primeiro cabeçalho.
+- Datas ilegíveis aparecem no resumo com exemplos, e não viram nulo em silêncio.
+
+## Ao final
+
+SQL de qualquer migração nova em bloco de código único, o que preciso configurar à mão, e quais arquivos alterados são executados também pelo worker.
+
+Depois de entregar, não aplique nada: vou rodar a migração com `ROLLBACK` no lugar do `COMMIT` antes de valer.
