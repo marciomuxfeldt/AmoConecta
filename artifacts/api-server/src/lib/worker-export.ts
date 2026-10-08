@@ -6,6 +6,7 @@ import {
   deriveBiExportReason,
   type BiExportRow,
 } from "./csv-export";
+import { referenceDateLabel } from "./reference-date-label";
 import { supabaseAdminClient } from "./supabase";
 import { logger } from "./logger";
 import { getTechnicalError, getTechnicalErrorText } from "./technical-error";
@@ -482,12 +483,16 @@ async function processExport(job: ExportJob): Promise<boolean> {
           nome: string | null;
           valor_credito: number | string | null;
           validade_credito: string | null;
+          data_referencia_tipo: string | null;
+          data_referencia_rotulo: string | null;
         }
       >();
       if (campaignIds.length > 0) {
         const { data: campaigns, error: campaignError } = await client
           .from("campanha")
-          .select("id,nome,valor_credito,validade_credito")
+          .select(
+            "id,nome,valor_credito,validade_credito,data_referencia_tipo,data_referencia_rotulo",
+          )
           .in("id", campaignIds)
           .abortSignal(signalBeforeDeadline(deadline));
         if (campaignError) throw campaignError;
@@ -503,6 +508,14 @@ async function processExport(job: ExportJob): Promise<boolean> {
             validade_credito:
               typeof campaign.validade_credito === "string"
                 ? campaign.validade_credito
+                : null,
+            data_referencia_tipo:
+              typeof campaign.data_referencia_tipo === "string"
+                ? campaign.data_referencia_tipo
+                : null,
+            data_referencia_rotulo:
+              typeof campaign.data_referencia_rotulo === "string"
+                ? campaign.data_referencia_rotulo
                 : null,
           });
         }
@@ -581,6 +594,15 @@ async function processExport(job: ExportJob): Promise<boolean> {
               typeof row.data_ultima_compra === "string"
                 ? row.data_ultima_compra
                 : null,
+            data_referencia:
+              typeof row.data_ultima_compra === "string"
+                ? row.data_ultima_compra
+                : null,
+            data_referencia_tipo: campaign?.data_referencia_tipo ?? null,
+            data_referencia_rotulo: referenceDateLabel(
+              campaign?.data_referencia_tipo,
+              campaign?.data_referencia_rotulo,
+            ),
             campanha_id: (row.campanha_id as string | number | null) ?? null,
             campanha_nome: campaign?.nome ?? null,
             valor_credito: campaign?.valor_credito ?? null,

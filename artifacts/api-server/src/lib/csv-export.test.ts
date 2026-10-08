@@ -37,6 +37,8 @@ test("emits a UTF-8 BOM and the exact BI header order", () => {
     "id_usuario",
     "regiao",
     "data_ultima_compra",
+    "data_referencia",
+    "data_referencia_rotulo",
     "campanha_id",
     "campanha_nome",
     "valor_credito",
@@ -73,7 +75,7 @@ test("quotes every field and escapes quotes, commas, newlines, and accents", () 
 
   assert.equal(
     line,
-    `"marina@example.com","João, ""Júnior""\nSul","u-1","São Paulo","2026-01-02","campaign-1","Oferta, verão","25.5","2026-02-28","false","entregue","2026-01-02T15:30:00.000Z","","","","erro: ""timeout"""\r\n`,
+    `"marina@example.com","João, ""Júnior""\nSul","u-1","São Paulo","2026-01-02","2026-01-02","","campaign-1","Oferta, verão","25.5","2026-02-28","false","entregue","2026-01-02T15:30:00.000Z","","","","erro: ""timeout"""\r\n`,
   );
 });
 
@@ -97,7 +99,7 @@ test("renders nulls as empty quoted fields and preserves date-only values", () =
     motivo_nao_envio: null,
   });
 
-  assert.equal(line, `${Array.from({ length: 16 }, () => '""').join(",")}\r\n`);
+  assert.equal(line, `${Array.from({ length: 18 }, () => '""').join(",")}\r\n`);
   assert.match(csvRowLine({
     email: "a@b.test",
     nome: null,
@@ -116,4 +118,33 @@ test("renders nulls as empty quoted fields and preserves date-only values", () =
     clicado_em: null,
     motivo_nao_envio: null,
   }), /"2025-12-31"/u);
+});
+
+test("exports a non-purchase reference date without labeling it as the legacy purchase date", () => {
+  const line = csvRowLine({
+    email: "visitor@example.com",
+    nome: null,
+    id_usuario: null,
+    regiao: null,
+    data_ultima_compra: "2026-07-31",
+    data_referencia: "2026-07-31",
+    data_referencia_tipo: "acesso",
+    data_referencia_rotulo: "Último acesso",
+    campanha_id: "campaign-2",
+    campanha_nome: "Acessos recentes",
+    valor_credito: null,
+    validade_credito: null,
+    is_lembrete: false,
+    status: "entregue",
+    enviado_em: null,
+    entregue_em: null,
+    aberto_em: null,
+    clicado_em: null,
+    motivo_nao_envio: null,
+  });
+
+  const columns = line.trimEnd().slice(1, -1).split('","');
+  assert.equal(columns[4], "");
+  assert.equal(columns[5], "2026-07-31");
+  assert.equal(columns[6], "Último acesso");
 });

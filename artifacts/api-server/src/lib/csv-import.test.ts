@@ -1,18 +1,79 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner requires the explicit TypeScript extension.
-import { getPublicImportValidationErrorMessage, ImportValidationError, normalizeEmail, normalizePhone, validateAndImportCsv, suggestEmailDomain } from "./csv-import.ts";
+import { campaignImportHeaderSignature, getPublicImportValidationErrorMessage, ImportValidationError, normalizeEmail, normalizePhone, parseReferenceDate, suggestEmailDomain, validateAndImportCsv as validateCsvWithMapping, type ImportColumnTarget } from "./csv-import.ts";
 
-function streamFromText(value: string): ReadableStream<Uint8Array> {
-  return new ReadableStream({
+const UNLABELED_REFERENCE_DATE = "Data de referência (sem rótulo)";
+
+type TestCsvStream = ReadableStream<Uint8Array> & { testCsvSource: string };
+
+function streamFromText(value: string): TestCsvStream {
+  const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(new TextEncoder().encode(value));
       controller.close();
     },
   });
+  return Object.assign(stream, { testCsvSource: value });
 }
 
-function emptyImportClient(onUpsert?: (rows: unknown[]) => void) {
+function testTarget(header: string): ImportColumnTarget {
+  const normalized = header
+    .replace(/^\uFEFF/u, "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("pt-BR")
+    .replace(/[_-]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (["email", "e mail", "user email"].includes(normalized)) return "email";
+  if (["nome", "name", "user name"].includes(normalized)) return "name";
+  if (["telefone", "phone", "user phone"].includes(normalized)) return "phone";
+  if (["id", "user id"].includes(normalized)) return "user_id";
+  if (["region", "regiao", "last order region"].includes(normalized)) return "region";
+  if (
+    ["last order date", "data ultima compra", "data_ultima_compra", "date"].includes(
+      normalized,
+    )
+  ) return "reference_date";
+  return "ignore";
+}
+
+type TestImportOptions = Omit<
+  Parameters<typeof validateCsvWithMapping>[0],
+  "expectedHeaders" | "columnMapping" | "referenceDateLabel"
+> & Partial<
+  Pick<
+    Parameters<typeof validateCsvWithMapping>[0],
+    "expectedHeaders" | "columnMapping" | "referenceDateLabel"
+  >
+>;
+
+async function validateAndImportCsv(options: TestImportOptions) {
+  const firstRecord =
+    options.stream instanceof ReadableStream
+      ? (options.stream as TestCsvStream).testCsvSource
+          .replace(/^\uFEFF/u, "")
+          .split(/\r\n|\n|\r/u, 1)[0] ?? ""
+      : "";
+  const separator = firstRecord.includes(";")
+    ? ";"
+    : firstRecord.includes("\t")
+      ? "\t"
+      : ",";
+  const parsedHeaders = firstRecord.split(separator);
+  return validateCsvWithMapping({
+    ...options,
+    expectedHeaders: options.expectedHeaders ?? parsedHeaders,
+    columnMapping:
+      options.columnMapping ?? parsedHeaders.map((header) => testTarget(header)),
+    referenceDateLabel: options.referenceDateLabel ?? UNLABELED_REFERENCE_DATE,
+  });
+}
+
+function emptyImportClient(
+  onUpsert?: (rows: Array<Record<string, unknown>>) => void,
+) {
   return {
     from(table: string) {
       if (table === "supressao") {
@@ -30,7 +91,7 @@ function emptyImportClient(onUpsert?: (rows: unknown[]) => void) {
             }),
           }),
         }),
-        upsert: async (rows: unknown[]) => {
+        upsert: async (rows: Array<Record<string, unknown>>) => {
           onUpsert?.(rows);
           return { error: null };
         },
@@ -248,14 +309,14 @@ test("reports the detected separator and found columns for missing headers", asy
       campaignId: "00000000-0000-0000-0000-000000000001",
       storagePath: "campaign/missing-name.csv",
       deduplicatePhone: false,
+      columnMapping: ["ignore", "phone"],
     });
   } catch (error) {
     thrown = error;
   }
 
   assert.ok(thrown instanceof ImportValidationError);
-  assert.match(thrown.message, /ponto e vírgula \(;\)/u);
-  assert.match(thrown.message, /Colunas encontradas: user_email \| user_phone/u);
+  assert.match(thrown.message, /Escolha qual coluna contém o e-mail/u);
 });
 
 test("only exposes persisted parser-validation messages at the API boundary", () => {
@@ -274,4 +335,110 @@ test("only exposes persisted parser-validation messages at the API boundary", ()
     null,
   );
   assert.equal(getPublicImportValidationErrorMessage("not-json"), null);
+});
+
+test("parses Brazilian written dates and converts ISO offsets to the São Paulo calendar day", () => {
+  assert.equal(parseReferenceDate("31 julho, 2026, 13:48").date, "2026-07-31");
+  assert.equal(parseReferenceDate("31 de julho de 2026").date, "2026-07-31");
+  assert.equal(parseReferenceDate("31 de março de 2026").date, "2026-03-31");
+  assert.equal(parseReferenceDate("31 de marco de 2026").date, "2026-03-31");
+  assert.equal(parseReferenceDate("2026-08-01T01:00:00Z").date, "2026-07-31");
+  assert.equal(parseReferenceDate("2026-08-01T01:00:00-03:00").date, "2026-08-01");
+  assert.equal(parseReferenceDate("31 de fevereiro de 2026").date, null);
+});
+
+test("preflight reports invalid and missing reference dates without writing rows", async () => {
+  const savedRows: Array<Record<string, unknown>> = [];
+  const result = await validateAndImportCsv({
+    client: emptyImportClient((rows) => savedRows.push(...rows)) as never,
+    stream: streamFromText(
+      "email,nome,date\n" +
+        "bad-date@example.com,Data inválida,31 de fevereiro de 2026\n" +
+        "missing-date@example.com,Data ausente,",
+    ),
+    campaignId: "00000000-0000-0000-0000-000000000001",
+    storagePath: "campaign/date-preflight.csv",
+    deduplicatePhone: false,
+    expectedHeaders: ["email", "nome", "date"],
+    columnMapping: ["email", "name", "reference_date"],
+    referenceDateLabel: "Último acesso",
+    previewOnly: true,
+  });
+
+  assert.equal(savedRows.length, 0);
+  assert.equal(result.datas_invalidas, 1);
+  assert.equal(result.datas_ausentes, 1);
+  assert.deepEqual(result.amostras_datas_invalidas, [
+    { linha: 2, valor: "31 de fevereiro de 2026", email: "bad-date@example.com" },
+  ]);
+  assert.deepEqual(result.amostras_datas_ausentes, [
+    { linha: 3, valor: "", email: "missing-date@example.com" },
+  ]);
+});
+
+test("imports a BOM-prefixed 484-row Portuguese export with Apple relays and a selected access date", async () => {
+  const savedRows: Array<Record<string, unknown>> = [];
+  const rows = Array.from({ length: 484 }, (_, index) => {
+    const email =
+      index < 23
+        ? `relay${index}@privaterelay.appleid.com`
+        : `contact${index}@example.com`;
+    const phone = String(54991434483 + index);
+    return `user-${index},Pessoa ${index},${email},${phone},sarandi,"31 julho, 2026, 13:48","31 julho, 2026, 12:19"`;
+  });
+  const csv = [
+    "\uFEFFID do usuário,Nome,E-mail,Telefone,Cidade do último acesso,Data do último acesso,Data de criação da conta",
+    ...rows,
+  ].join("\n");
+  const result = await validateAndImportCsv({
+    client: emptyImportClient((batch) => savedRows.push(...batch)) as never,
+    stream: streamFromText(csv),
+    campaignId: "00000000-0000-0000-0000-000000000001",
+    storagePath: "campaign/mapped-484.csv",
+    deduplicatePhone: true,
+    expectedHeaders: [
+      "ID do usuário",
+      "Nome",
+      "E-mail",
+      "Telefone",
+      "Cidade do último acesso",
+      "Data do último acesso",
+      "Data de criação da conta",
+    ],
+    columnMapping: [
+      "user_id",
+      "name",
+      "email",
+      "phone",
+      "region",
+      "reference_date",
+      "ignore",
+    ],
+    referenceDateLabel: "Último acesso",
+  });
+
+  assert.equal(result.validos, 484);
+  assert.equal(result.novos, 484);
+  assert.equal(result.linhas_importadas, 484);
+  assert.equal(result.datas_invalidas, 0);
+  assert.equal(savedRows.length, 484);
+  assert.equal(
+    savedRows.filter((row) =>
+      String(row.email).endsWith("@privaterelay.appleid.com"),
+    ).length,
+    23,
+  );
+  assert.equal(savedRows[0].email, "relay0@privaterelay.appleid.com");
+  assert.equal(savedRows[0].id_usuario, "user-0");
+  assert.equal(savedRows[0].regiao, "sarandi");
+  assert.equal(savedRows[0].nome, "Pessoa 0");
+  assert.equal(savedRows[0].telefone, "54991434483");
+  assert.equal(savedRows[0].data_ultima_compra, "2026-07-31");
+});
+
+test("header signatures are stable across case, accents, and surrounding whitespace", () => {
+  assert.equal(
+    campaignImportHeaderSignature(["E-mail", "Data do último acesso"]),
+    campaignImportHeaderSignature(["E-MAIL", " Data do ultimo acesso "]),
+  );
 });

@@ -36,7 +36,9 @@ import {
   type CampaignListItem,
   type CreateCampaignInput,
   type ImportValidationJob,
+  type ImportColumnTarget,
   type ImportValidationSummary,
+  type ReferenceDateMeaning,
   type UpdateCampaignInput,
   getGetCampaignQueryKey,
   getGetCampaignRecipientSummaryQueryKey,
@@ -54,6 +56,9 @@ import {
   useGetCampaign,
   useGetCampaignRecipientSummary,
   useGetCampaignImport,
+  useLookupCampaignImportMapping,
+  useConfirmCampaignImport,
+  useCancelCampaignImport,
   useListCampaigns,
   useGetSafetyMode,
   useGetCampaignAudit,
@@ -84,7 +89,12 @@ import {
   useCampaignExclusionOverview,
 } from '../components/CampaignExclusionPanel';
 import { CampaignEmailValidationPanel } from '../components/CampaignEmailValidationPanel';
-import { inspectCampaignCsvHeader } from '../lib/campaign-csv-header';
+import { CampaignCsvMappingPanel } from '../components/CampaignCsvMappingPanel';
+import {
+  inspectCampaignCsvHeader,
+  suggestCampaignCsvMapping,
+  type CampaignCsvImportTarget,
+} from '../lib/campaign-csv-header';
 
 export type SessionUser = { email: string } | null;
 
@@ -1312,7 +1322,13 @@ function CampaignForm({
   );
 }
 
-function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
+function ImportSummary({
+  summary,
+  isPreview = false,
+}: {
+  summary: ImportValidationSummary;
+  isPreview?: boolean;
+}) {
   const maxRecency = Math.max(...(summary.recencia?.map((item) => item.quantidade) ?? [1]), 1);
   const hasDeliverySnapshot =
     typeof summary.total_na_lista === 'number' &&
@@ -1321,25 +1337,29 @@ function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
   const issueRows = [
     ['E-mails inválidos', summary.emails_invalidos],
     ['Datas inválidas', summary.datas_invalidas],
+    ['Datas ausentes', summary.datas_ausentes],
     ['Nomes ausentes', summary.nomes_ausentes],
     ['Telefones inválidos', summary.telefones_invalidos],
     ['Duplicados no arquivo', summary.duplicados_no_arquivo],
+    ['Duplicados por e-mail', summary.duplicados_email],
     ['Duplicados por telefone', summary.duplicados_telefone],
     ['Suprimidos na validação', summary.suprimidos],
   ];
   return (
     <div className="mt-6 border-t border-[#eee7dc] pt-6" data-testid="import-validation-summary">
-      <div className="mb-5 flex flex-col justify-between gap-2 sm:flex-row sm:items-end"><div><p className="section-kicker">Resultado da validação</p><h3 className="mt-2 text-xl font-extrabold tracking-[-.05em] text-[#263044]">Base pronta para uma decisão.</h3></div><span className="font-mono text-[9px] text-[#989498]" data-testid="text-import-storage-path">{summary.storage_path}</span></div>
-       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+       <div className="mb-5 flex flex-col justify-between gap-2 sm:flex-row sm:items-end"><div><p className="section-kicker">{isPreview ? 'Prévia da validação' : 'Resultado da importação'}</p><h3 className="mt-2 text-xl font-extrabold tracking-[-.05em] text-[#263044]">{isPreview ? 'Confira os dados antes de confirmar.' : 'Resumo da importação concluída.'}</h3></div><span className="font-mono text-[9px] text-[#989498]" data-testid="text-import-storage-path">{summary.storage_path}</span></div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-9">
         <div className="metric-tile"><strong>{formatNumber(summary.total_linhas)}</strong><span>Linhas lidas</span></div>
-        <div className="metric-tile border-[#cfe4c7] bg-[#f2f8ee]"><strong className="text-[#417846]">{formatNumber(summary.validos)}</strong><span>Válidos</span></div>
+         <div className="metric-tile border-[#cfe4c7] bg-[#f2f8ee]"><strong className="text-[#417846]">{formatNumber(summary.linhas_importadas)}</strong><span>{isPreview ? 'Importáveis' : 'Importadas'}</span></div>
+         <div className="metric-tile border-[#efc9ba] bg-[#fff3ee]"><strong className="text-[#a64220]">{formatNumber(summary.linhas_descartadas)}</strong><span>Descartadas</span></div>
         <div className="metric-tile border-[#efc9ba] bg-[#fff3ee]"><strong className="text-[#a64220]">{formatNumber(summary.invalidos)}</strong><span>Inválidos</span></div>
-         <div className="metric-tile border-[#cfe4c7] bg-[#f2f8ee]"><strong className="text-[#417846]">{formatNumber(summary.novos)}</strong><span>Salvos</span></div>
-         <div className="metric-tile"><strong>{formatNumber(summary.atualizados)}</strong><span>Atualizados</span></div>
+          <div className="metric-tile border-[#cfe4c7] bg-[#f2f8ee]"><strong className="text-[#417846]">{formatNumber(summary.novos)}</strong><span>{isPreview ? 'Novos previstos' : 'Salvos'}</span></div>
+          <div className="metric-tile"><strong>{formatNumber(summary.atualizados)}</strong><span>{isPreview ? 'Atualizações previstas' : 'Atualizados'}</span></div>
          <div className="metric-tile border-[#f1dfb8] bg-[#fff9e9]"><strong className="text-[#9b6b17]">{formatNumber(summary.duplicados_no_arquivo)}</strong><span>Duplicados</span></div>
+          <div className="metric-tile"><strong>{formatNumber(summary.colunas_ignoradas)}</strong><span>Colunas ignoradas</span></div>
          <div className="metric-tile"><strong>{formatNumber(summary.suprimidos)}</strong><span>Suprimidos na validação</span></div>
       </div>
-       {hasDeliverySnapshot ? (
+        {!isPreview && (hasDeliverySnapshot ? (
          <div className="mt-6 rounded-xl border border-[#d9e3e0] bg-[#f1f7f5] p-4" data-testid="import-current-delivery-summary">
            <div className="flex items-center justify-between gap-3"><h4 className="text-sm font-extrabold text-[#263044]">Situação da lista ao concluir</h4><ShieldCheck size={15} className="text-[#247b79]" /></div>
            <p className="mt-1 text-xs leading-5 text-[#6d7180]">Números calculados cruzando a lista com as regras de envio no momento em que a importação foi concluída.</p>
@@ -1353,15 +1373,54 @@ function ImportSummary({ summary }: { summary: ImportValidationSummary }) {
          <div className="mt-6 rounded-xl border border-[#f1dfb8] bg-[#fff9e9] p-4 text-xs leading-5 text-[#74561c]" role="status" data-testid="import-current-delivery-summary-unavailable">
            A importação foi concluída e os resultados estão salvos, mas não foi possível calcular a situação de entrega desta lista agora.
          </div>
-       )}
-      <ImportDataQualityNotices summary={summary} />
+        ))}
+       <div className="mt-6 rounded-xl border border-[#e5ddd0] bg-[#fffdf9] p-4" data-testid="import-data-examples">
+         <div className="flex items-center justify-between gap-3">
+           <h4 className="text-sm font-extrabold text-[#263044]">Exemplos para revisão</h4>
+           <span className="font-mono text-[9px] uppercase tracking-[.1em] text-[#989498]">até 3 por tipo</span>
+         </div>
+         <div className="mt-4 grid gap-4 lg:grid-cols-3">
+           {[
+             {
+               title: 'E-mails inválidos',
+               samples: summary.amostras_emails_invalidos ?? [],
+             },
+             {
+               title: `Datas inválidas · ${summary.data_referencia_rotulo || 'referência'}`,
+               samples: summary.amostras_datas_invalidas ?? [],
+             },
+             {
+               title: `Datas ausentes · ${summary.data_referencia_rotulo || 'referência'}`,
+               samples: summary.amostras_datas_ausentes ?? [],
+             },
+           ].map((group) => (
+             <section key={group.title} className="min-w-0 rounded-lg border border-[#eee7dc] bg-[#f8f3ec] p-3">
+               <h5 className="text-xs font-extrabold text-[#42495b]">{group.title}</h5>
+               {group.samples.length === 0 ? (
+                 <p className="mt-2 text-[11px] text-[#7d7e87]">Nenhum exemplo.</p>
+               ) : (
+                 <ul className="mt-2 space-y-2">
+                   {group.samples.map((item, index) => (
+                     <li key={`${item.linha}-${index}`} className="break-words text-[11px] leading-5 text-[#626876]" data-testid={`import-example-${group.title}-${index}`}>
+                       <span className="font-mono font-bold text-[#a64220]">Linha {item.linha}:</span>{" "}
+                       <span>{item.valor || '(vazio)'}</span>
+                       {item.email && <span className="block text-[#747783]">E-mail associado: {item.email}</span>}
+                     </li>
+                   ))}
+                 </ul>
+               )}
+             </section>
+           ))}
+         </div>
+       </div>
+       <ImportDataQualityNotices summary={summary} />
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <div className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4">
           <div className="flex items-center justify-between"><h4 className="text-sm font-extrabold text-[#263044]">Pontos de atenção</h4><CircleAlert size={15} className="text-[#d35f2a]" /></div>
           <div className="mt-4 space-y-3">{issueRows.map(([label, value]) => <div key={label as string} className="flex items-center justify-between gap-3 text-xs"><span className="text-[#6d7180]">{label}</span><span className={`font-mono font-medium ${Number(value) > 0 ? 'text-[#a64220]' : 'text-[#8a8790]'}`}>{formatNumber(Number(value))}</span></div>)}</div>
         </div>
         <div className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4">
-          <div className="flex items-center justify-between"><h4 className="text-sm font-extrabold text-[#263044]">Recência da base</h4><Clock3 size={15} className="text-[#247b79]" /></div>
+           <div className="flex items-center justify-between gap-3"><h4 className="text-sm font-extrabold text-[#263044]">Recência: {summary.data_referencia_rotulo || 'data de referência'}</h4><Clock3 size={15} className="shrink-0 text-[#247b79]" /></div>
           <div className="mt-5 space-y-4">{(summary.recencia ?? []).length === 0 ? <p className="text-xs text-[#7d7e87]">A API não retornou distribuição de recência.</p> : summary.recencia.map((bucket) => <div key={bucket.faixa}><div className="mb-1.5 flex justify-between gap-3 font-mono text-[9px] uppercase tracking-[.08em] text-[#7d7e87]"><span>{bucket.faixa}</span><span>{formatNumber(bucket.quantidade)}</span></div><div className="h-2 overflow-hidden rounded-full bg-[#e6ded3]"><div className="h-full rounded-full bg-[#247b79] transition-[width] duration-500" style={{ width: `${Math.max(4, (bucket.quantidade / maxRecency) * 100)}%` }} /></div></div>)}</div>
         </div>
       </div>
@@ -1377,44 +1436,81 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
   const queryClient = useQueryClient();
   const requestUpload = useRequestCampaignImportUploadUrl();
   const validateImport = useValidateCampaignImport();
+  const lookupImportMapping = useLookupCampaignImportMapping();
+  const confirmImportMutation = useConfirmCampaignImport();
+  const cancelImportMutation = useCancelCampaignImport();
   const recipientSummaryQuery = useGetCampaignRecipientSummary(campaignId, {
     query: {
       enabled: Boolean(campaignId),
       queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId),
     },
   });
+  const existingReferenceDateType =
+    recipientSummaryQuery.data?.data_referencia_tipo ?? null;
+  const existingReferenceDateLabel = existingReferenceDateType
+    ? recipientSummaryQuery.data?.data_referencia_rotulo ?? null
+    : null;
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [deduplicatePhone, setDeduplicatePhone] = useState(false);
   const [summary, setSummary] = useState<ImportValidationSummary | null>(null);
   const [importJobId, setImportJobId] = useState<string | null>(null);
-  const [phase, setPhase] = useState<'idle' | 'requesting' | 'uploading' | 'processing'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'requesting' | 'uploading' | 'processing' | 'awaiting-confirmation'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [importConfirmed, setImportConfirmed] = useState(false);
   const [headerInspection, setHeaderInspection] = useState<Awaited<ReturnType<typeof inspectCampaignCsvHeader>> | null>(null);
   const [headerInspectionError, setHeaderInspectionError] = useState<string | null>(null);
   const [headerInspecting, setHeaderInspecting] = useState(false);
-  const [missingDateConfirmed, setMissingDateConfirmed] = useState(false);
+  const [columnMapping, setColumnMapping] = useState<CampaignCsvImportTarget[]>([]);
+  const [referenceDateType, setReferenceDateType] = useState<'' | ReferenceDateMeaning>('');
+  const [referenceDateLabel, setReferenceDateLabel] = useState('');
+  const [awaitingDateConfirmation, setAwaitingDateConfirmation] = useState(false);
+  const [mappingLookupLoading, setMappingLookupLoading] = useState(false);
+  const [mappingLookupError, setMappingLookupError] = useState<string | null>(null);
+  const [cancelStatus, setCancelStatus] = useState<string | null>(null);
   const headerInspectionRequest = useRef(0);
+  const mappingManuallyEditedFor = useRef<number | null>(null);
   const importJobQuery = useGetCampaignImport(campaignId, importJobId ?? '', {
     query: {
       enabled: Boolean(importJobId),
       queryKey: getGetCampaignImportQueryKey(campaignId, importJobId ?? ''),
       refetchInterval: (query) => {
         const status = query.state.data?.status;
-        if (status === 'concluida' || status === 'erro') return false;
+        if (
+          status === 'concluida' ||
+          status === 'erro' ||
+          status === 'aguardando_confirmacao' ||
+          status === 'cancelada'
+        ) return false;
         return query.state.error ? 3000 : 1000;
       },
     },
   });
 
   useEffect(() => {
+    setReferenceDateType(existingReferenceDateType ?? '');
+    setReferenceDateLabel(
+      existingReferenceDateType === 'outro'
+        ? existingReferenceDateLabel ?? ''
+        : '',
+    );
+  }, [campaignId, existingReferenceDateLabel, existingReferenceDateType]);
+
+  useEffect(() => {
     const job = importJobQuery.data;
     if (!job) return;
+    if (job.status === 'aguardando_confirmacao') {
+      setSummary(job.resultado);
+      setError(null);
+      setAwaitingDateConfirmation(true);
+      setPhase('awaiting-confirmation');
+      return;
+    }
     if (job.status === 'concluida') {
       setSummary(job.resultado);
       setError(null);
+      setAwaitingDateConfirmation(false);
       setImportJobId(null);
       setPhase('idle');
       queryClient.invalidateQueries({ queryKey: getGetCampaignRecipientSummaryQueryKey(campaignId) });
@@ -1423,10 +1519,17 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
     }
     if (job.status === 'erro') {
       setError(job.erro ?? 'Não foi possível validar o arquivo.');
+      setAwaitingDateConfirmation(false);
+      setImportJobId(null);
+      setPhase('idle');
+      return;
+    }
+    if (job.status === 'cancelada') {
+      setAwaitingDateConfirmation(false);
       setImportJobId(null);
       setPhase('idle');
     }
-  }, [importJobQuery.data]);
+  }, [campaignId, importJobQuery.data, queryClient]);
 
   useEffect(() => {
     if (!importJobQuery.isError || !importJobId) return;
@@ -1444,8 +1547,14 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
       setHeaderInspection(null);
       setHeaderInspectionError(null);
       setHeaderInspecting(false);
-      setMissingDateConfirmed(false);
+       setColumnMapping([]);
+       setMappingLookupError(null);
+       setMappingLookupLoading(false);
+       setAwaitingDateConfirmation(false);
+       setReferenceDateType(existingReferenceDateType ?? '');
+       setReferenceDateLabel('');
       setImportConfirmed(false);
+       setCancelStatus(null);
       if (inputRef.current) inputRef.current.value = '';
       return;
     }
@@ -1453,15 +1562,65 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
     setSummary(null);
     setImportJobId(null);
     setImportConfirmed(false);
-    setMissingDateConfirmed(false);
+    setAwaitingDateConfirmation(false);
+    setCancelStatus(null);
     setHeaderInspection(null);
     setHeaderInspectionError(null);
+    setColumnMapping([]);
+    setMappingLookupError(null);
+    setMappingLookupLoading(false);
+    mappingManuallyEditedFor.current = null;
+    setReferenceDateType(existingReferenceDateType ?? '');
+    setReferenceDateLabel(
+      existingReferenceDateType === 'outro'
+        ? existingReferenceDateLabel ?? ''
+        : '',
+    );
     setHeaderInspecting(true);
     setFile(nextFile);
     void inspectCampaignCsvHeader(nextFile)
       .then((inspection) => {
         if (requestId === headerInspectionRequest.current) {
           setHeaderInspection(inspection);
+          const suggestedMapping = suggestCampaignCsvMapping(inspection.columns);
+          setColumnMapping(suggestedMapping);
+          if (inspection.columns.length === 0) return;
+          setMappingLookupLoading(true);
+          void lookupImportMapping
+            .mutateAsync({
+              campaignId,
+              data: { cabecalhos: inspection.columns },
+            })
+            .then((savedMapping) => {
+              if (
+                requestId !== headerInspectionRequest.current ||
+                mappingManuallyEditedFor.current === requestId
+              ) return;
+              const stored = savedMapping.mapeamento;
+              const uniqueTargets =
+                stored !== null &&
+                new Set(stored.filter((target) => target !== 'ignore')).size ===
+                  stored.filter((target) => target !== 'ignore').length;
+              if (stored && stored.length === inspection.columns.length && uniqueTargets) {
+                setColumnMapping(stored as CampaignCsvImportTarget[]);
+              } else if (stored) {
+                setMappingLookupError(
+                  'O mapeamento salvo não corresponde a este arquivo; revise as sugestões.',
+                );
+              }
+            })
+            .catch(() => {
+              if (requestId === headerInspectionRequest.current) {
+                setMappingLookupError(
+                  'Não foi possível carregar o mapeamento salvo. Revise as sugestões antes de importar.',
+                );
+              }
+            })
+            .finally(() => {
+              if (requestId === headerInspectionRequest.current) {
+                setMappingLookupLoading(false);
+              }
+            });
         }
       })
       .catch((inspectionError: unknown) => {
@@ -1485,8 +1644,18 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
     setHeaderInspection(null);
     setHeaderInspectionError(null);
     setHeaderInspecting(false);
-    setMissingDateConfirmed(false);
+    setColumnMapping([]);
+    setMappingLookupError(null);
+    setMappingLookupLoading(false);
+    setAwaitingDateConfirmation(false);
+    setReferenceDateType(existingReferenceDateType ?? '');
+    setReferenceDateLabel(
+      existingReferenceDateType === 'outro'
+        ? existingReferenceDateLabel ?? ''
+        : '',
+    );
     setImportConfirmed(false);
+    setCancelStatus(null);
     setSummary(null);
     setError(null);
     if (inputRef.current) inputRef.current.value = '';
@@ -1509,8 +1678,21 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
       setError(headerInspectionError ?? 'Não foi possível confirmar o cabeçalho do CSV.');
       return;
     }
-    if (!headerInspection.hasLastOrderDate && !missingDateConfirmed) {
-      setError('Confirme se deseja continuar sem a coluna de data da última compra.');
+    if (columnMapping.length !== headerInspection.columns.length) {
+      setError('Confira o mapeamento de todas as colunas antes de continuar.');
+      return;
+    }
+    if (!columnMapping.includes('email')) {
+      setError('Associe uma coluna ao campo de e-mail. Esse é o único campo obrigatório.');
+      return;
+    }
+    const hasReferenceDate = columnMapping.includes('reference_date');
+    if (hasReferenceDate && !referenceDateType) {
+      setError('Escolha o significado da data de referência.');
+      return;
+    }
+    if (hasReferenceDate && referenceDateType === 'outro' && !referenceDateLabel.trim()) {
+      setError('Informe o nome do significado da data de referência.');
       return;
     }
     if (recipientSummaryQuery.isLoading || recipientSummaryQuery.isError) {
@@ -1555,9 +1737,23 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
       }
        setPhase('processing');
        transferStage = 'import-validation';
-       const job = await validateImport.mutateAsync({ campaignId, data: { storage_path: upload.path, deduplicar_por_telefone: deduplicatePhone } });
+        const job = await validateImport.mutateAsync({
+          campaignId,
+          data: {
+            storage_path: upload.path,
+            deduplicar_por_telefone: deduplicatePhone,
+            cabecalhos: headerInspection.columns,
+            mapeamento: columnMapping as ImportColumnTarget[],
+            data_referencia_tipo: hasReferenceDate
+              ? referenceDateType || null
+              : null,
+            data_referencia_rotulo:
+              hasReferenceDate && referenceDateType === 'outro'
+                ? referenceDateLabel.trim() || null
+                : null,
+          },
+        });
        setImportJobId(job.id);
-       queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
        queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
     } catch (uploadError) {
       setPhase('idle');
@@ -1582,15 +1778,81 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
       ));
     }
   };
+  const updateColumnMapping = (
+    index: number,
+    target: CampaignCsvImportTarget,
+  ) => {
+    mappingManuallyEditedFor.current = headerInspectionRequest.current;
+    setColumnMapping((current) => {
+      const next = [...current];
+      if (target !== 'ignore') {
+        next.forEach((assignedTarget, candidateIndex) => {
+          if (candidateIndex !== index && assignedTarget === target) {
+            next[candidateIndex] = 'ignore';
+          }
+        });
+      }
+      next[index] = target;
+      return next;
+    });
+  };
+  const confirmInvalidDateImport = async () => {
+    if (!importJobId) return;
+    setError(null);
+    try {
+      const confirmedJob = await confirmImportMutation.mutateAsync({
+        campaignId,
+        importId: importJobId,
+        data: { continuar_com_datas_invalidas: true },
+      });
+      queryClient.setQueryData(
+        getGetCampaignImportQueryKey(campaignId, importJobId),
+        confirmedJob,
+      );
+      setSummary(null);
+      setAwaitingDateConfirmation(false);
+      setPhase('processing');
+      queryClient.invalidateQueries({
+        queryKey: getGetCampaignAuditQueryKey(campaignId),
+      });
+    } catch (confirmationError) {
+      setError(
+        getErrorMessage(
+          confirmationError,
+          'Não foi possível confirmar a importação com datas inválidas.',
+        ),
+      );
+    }
+  };
+  const cancelInvalidDateImport = async () => {
+    if (!importJobId) return;
+    setError(null);
+    try {
+      const cancelledJob = await cancelImportMutation.mutateAsync({
+        campaignId,
+        importId: importJobId,
+      });
+      queryClient.setQueryData(
+        getGetCampaignImportQueryKey(campaignId, importJobId),
+        cancelledJob,
+      );
+      setImportJobId(null);
+      setSummary(null);
+      setAwaitingDateConfirmation(false);
+      setPhase('idle');
+      setCancelStatus(
+        'Importação cancelada antes de salvar destinatários. Nenhuma linha foi importada.',
+      );
+    } catch (cancellationError) {
+      setError(
+        getErrorMessage(
+          cancellationError,
+          'Não foi possível cancelar a importação em análise.',
+        ),
+      );
+    }
+  };
   const isBusy = phase !== 'idle';
-  const missingOrderDate = Boolean(
-    headerInspection && !headerInspection.hasLastOrderDate,
-  );
-  const visibleFoundHeaders = headerInspection?.columns.slice(0, 40) ?? [];
-  const remainingFoundHeaderCount = Math.max(
-    0,
-    (headerInspection?.columns.length ?? 0) - visibleFoundHeaders.length,
-  );
   const existingRecipients =
     recipientSummaryQuery.data?.total_na_lista ??
     recipientSummaryQuery.data?.total ??
@@ -1605,7 +1867,9 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
       ? 'Enviando arquivo...'
       : phase === 'processing'
         ? 'Processando destinatários...'
-        : 'Validar CSV';
+        : phase === 'awaiting-confirmation'
+          ? 'Aguardando decisão...'
+          : 'Validar CSV';
 
   return (
     <section className="panel p-5 sm:p-7" data-testid="panel-import">
@@ -1627,28 +1891,35 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
           <span>{headerInspectionError} Selecione outro CSV ou tente novamente.</span>
         </div>
       )}
-      {file && missingOrderDate && !missingDateConfirmed && phase === 'idle' && (
-        <div className="mt-5 rounded-xl border-2 border-[#d85c25] bg-[#fff0e8] px-4 py-4 text-sm leading-6 text-[#8f351c]" role="alert" data-testid="status-missing-order-date-warning">
-          <div className="flex items-start gap-3">
-            <CircleAlert size={19} className="mt-1 shrink-0" />
-            <div>
-              <p className="font-extrabold">{headerInspection?.headerComplete ? 'Atenção: o CSV não tem uma coluna de data da última compra (`last_order_date`).' : 'Atenção: não foi possível confirmar se o CSV contém a coluna de data da última compra (`last_order_date`).'}</p>
-              <p className="mt-1">Sem essa coluna, a ordenação por recência não funciona e o aquecimento de reputação perde o efeito. O arquivo não será recusado; confirme se deseja continuar sem essa informação.</p>
-              <p className="mt-1 text-xs">Separador detectado: {headerInspection?.separatorLabel}. Colunas encontradas: {visibleFoundHeaders.length ? `${visibleFoundHeaders.join(' · ')}${remainingFoundHeaderCount ? ` · … (+${remainingFoundHeaderCount})` : ''}` : '(nenhuma)'}.</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" onClick={() => setMissingDateConfirmed(true)} disabled={missingDateConfirmed || headerInspecting} className="action-button action-button-secondary !border-[#d98b67] !bg-[#fffaf6] !text-[#8f351c] disabled:opacity-60" data-testid="button-confirm-missing-order-date">
-                  {missingDateConfirmed ? <><CheckCircle2 size={14} /> Continuar confirmado</> : 'Continuar sem a coluna'}
-                </button>
-                <button type="button" onClick={clearSelectedFile} disabled={isBusy} className="action-button action-button-secondary !border-[#d8c2b7] !bg-white !text-[#626876]" data-testid="button-cancel-missing-order-date">Cancelar importação</button>
-              </div>
-            </div>
-          </div>
+      {file && headerInspection && (
+        <CampaignCsvMappingPanel
+          inspection={headerInspection}
+          mapping={columnMapping}
+          onMappingChange={updateColumnMapping}
+          referenceDateType={referenceDateType}
+          onReferenceDateTypeChange={setReferenceDateType}
+          referenceDateLabel={referenceDateLabel}
+          onReferenceDateLabelChange={setReferenceDateLabel}
+          existingReferenceDateType={existingReferenceDateType}
+          existingReferenceDateLabel={existingReferenceDateLabel}
+          hasExistingRecipients={existingRecipients > 0}
+          disabled={isBusy || headerInspecting}
+        />
+      )}
+      {mappingLookupLoading && (
+        <p className="mt-3 text-xs text-[#737783]" role="status" data-testid="status-mapping-lookup">
+          Consultando o mapeamento salvo para estes cabeçalhos...
+        </p>
+      )}
+      {mappingLookupError && (
+        <div className="mt-3 rounded-lg border border-[#e8c56f] bg-[#fff7dc] px-3 py-2 text-xs text-[#74561c]" role="status" data-testid="status-mapping-lookup-error">
+          {mappingLookupError} A importação continua disponível com o mapeamento atual.
         </div>
       )}
       {file && existingRecipients > 0 && (
         <div className="mt-5 flex flex-col gap-3 rounded-xl border-2 border-[#e8c56f] bg-[#fff7dc] px-4 py-4 text-sm leading-6 text-[#74561c] sm:flex-row sm:items-center sm:justify-between" role="alert" data-testid="status-existing-recipients-warning">
           <p><strong>Esta campanha já contém {formatNumber(existingRecipients)} destinatários. A importação vai somar a eles.</strong></p>
-          <button type="button" onClick={() => setImportConfirmed(true)} disabled={importConfirmed} className="action-button action-button-secondary shrink-0 !border-[#d6b95c] !bg-[#fffdf1] !text-[#74561c] disabled:opacity-60" data-testid="button-confirm-import-sum">{importConfirmed ? <><CheckCircle2 size={14} /> Soma confirmada</> : 'Continuar e somar'}</button>
+           <button type="button" onClick={() => setImportConfirmed(true)} disabled={importConfirmed || isBusy} className="action-button action-button-secondary shrink-0 !border-[#d6b95c] !bg-[#fffdf1] !text-[#74561c] disabled:opacity-60" data-testid="button-confirm-import-sum">{importConfirmed ? <><CheckCircle2 size={14} /> Soma confirmada</> : 'Continuar e somar'}</button>
         </div>
       )}
       {recipientSummaryQuery.isError && (
@@ -1659,7 +1930,7 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
       )}
       <div className="mt-5 flex flex-col justify-between gap-4 border-t border-[#eee7dc] pt-5 sm:flex-row sm:items-center">
         <label className="flex items-start gap-3 text-xs text-[#626876]"><input type="checkbox" checked={deduplicatePhone} onChange={(event) => setDeduplicatePhone(event.target.checked)} className="mt-0.5 accent-[#e96527]" data-testid="checkbox-deduplicate-phone" /><span><strong className="block text-[#263044]">Deduplicar por telefone</strong><span className="mt-1 block leading-5">Além do e-mail, considera o telefone na validação.</span></span></label>
-          <button type="button" onClick={validate} disabled={!file || isBusy || headerInspecting || Boolean(headerInspectionError) || !headerInspection || (missingOrderDate && !missingDateConfirmed) || recipientSummaryQuery.isLoading || recipientSummaryQuery.isError || (existingRecipients > 0 && !importConfirmed)} className="action-button action-button-primary" data-testid="button-validate-import">{isBusy ? <><LoaderCircle size={16} className="animate-spin" /> {phaseLabel}</> : <><FileCheck2 size={16} /> {phaseLabel}</>}</button>
+           <button type="button" onClick={validate} disabled={!file || isBusy || headerInspecting || mappingLookupLoading || Boolean(headerInspectionError) || !headerInspection || !columnMapping.includes('email') || (columnMapping.includes('reference_date') && (!referenceDateType || (referenceDateType === 'outro' && !referenceDateLabel.trim()))) || recipientSummaryQuery.isLoading || recipientSummaryQuery.isError || (existingRecipients > 0 && !importConfirmed)} className="action-button action-button-primary" data-testid="button-validate-import">{isBusy ? <><LoaderCircle size={16} className="animate-spin" /> {phaseLabel}</> : <><FileCheck2 size={16} /> {phaseLabel}</>}</button>
       </div>
       {phase === 'processing' && job && <div className="mt-5 rounded-xl border border-[#d9e3e0] bg-[#f1f7f5] p-4" data-testid="import-progress">
         <div className="flex items-center justify-between gap-3 text-xs font-bold text-[#247b79]">
@@ -1671,8 +1942,50 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
         </div>
         <p className="mt-2 text-[11px] text-[#6d7f7c]">{job.total_linhas == null ? 'Lendo o arquivo e contando linhas...' : `${formatNumber(job.linhas_processadas)} de ${formatNumber(job.total_linhas)} linhas`}</p>
       </div>}
+      {awaitingDateConfirmation && summary && (
+        <section className="mt-5 rounded-xl border-2 border-[#d85c25] bg-[#fff0e8] p-4 text-sm leading-6 text-[#8f351c]" role="alert" data-testid="panel-invalid-date-confirmation">
+          <div className="flex items-start gap-3">
+            <CircleAlert size={19} className="mt-1 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <h3 className="font-extrabold">Há {formatNumber(summary.datas_invalidas)} data(s) não reconhecida(s)</h3>
+              <p className="mt-1">
+                Nenhum destinatário foi salvo. Se continuar, as datas inválidas ficarão vazias; e-mails válidos e os demais campos serão importados.
+              </p>
+              <ul className="mt-3 space-y-1 text-xs" data-testid="list-invalid-date-examples">
+                {(summary.amostras_datas_invalidas ?? []).map((sample, index) => (
+                  <li key={`${sample.linha}-${index}`} className="break-words">
+                    <strong>Linha {sample.linha}:</strong> {sample.valor || '(vazio)'}
+                    {sample.email && <span className="block">E-mail: {sample.email}</span>}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={confirmInvalidDateImport}
+                  disabled={confirmImportMutation.isPending || cancelImportMutation.isPending}
+                  className="action-button action-button-primary disabled:opacity-60"
+                  data-testid="button-confirm-invalid-dates"
+                >
+                  {confirmImportMutation.isPending ? <><LoaderCircle size={15} className="animate-spin" /> Confirmando...</> : 'Importar mesmo assim'}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelInvalidDateImport}
+                  disabled={confirmImportMutation.isPending || cancelImportMutation.isPending}
+                  className="action-button action-button-secondary !border-[#d8c2b7] !bg-white !text-[#626876] disabled:opacity-60"
+                  data-testid="button-cancel-invalid-dates"
+                >
+                  {cancelImportMutation.isPending ? <><LoaderCircle size={15} className="animate-spin" /> Cancelando...</> : 'Cancelar importação'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+      {cancelStatus && <p className="mt-4 rounded-lg border border-[#cfe4c7] bg-[#f2f8ee] px-3 py-2 text-xs text-[#417846]" role="status" data-testid="status-import-cancelled">{cancelStatus}</p>}
       {error && <div className="mt-5 flex items-start gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-import-error"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{error}</span><button type="button" onClick={() => setError(null)} className="ml-auto rounded p-1" aria-label="Fechar erro de importação" data-testid="button-dismiss-import-error"><X size={14} /></button></div>}
-      {summary && <ImportSummary summary={summary} />}
+      {summary && <ImportSummary summary={summary} isPreview={awaitingDateConfirmation} />}
     </section>
   );
 }
@@ -1879,7 +2192,7 @@ export function RecipientSummaryPanel({
              </div>
            </div>
           <div className="mt-5 rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4">
-            <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-extrabold text-[#263044]">Recência da base</h3><p className="mt-1 text-xs text-[#7d7e87]">Distribuição por data da última compra.</p></div><Clock3 size={16} className="text-[#247b79]" /></div>
+             <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-extrabold text-[#263044]">Recência: {summary?.data_referencia_rotulo || 'data de referência'}</h3><p className="mt-1 text-xs text-[#7d7e87]">Distribuição por {summary?.data_referencia_rotulo || 'data de referência'}.</p></div><Clock3 size={16} className="text-[#247b79]" /></div>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               {summary?.recencia.map((bucket) => (
                 <div key={bucket.faixa}>

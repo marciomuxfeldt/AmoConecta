@@ -51,6 +51,7 @@ import {
   noEligibleRecipientsScheduleMessage,
 } from "../lib/campaign-schedule-policy";
 import { recipientDeliveryProjection } from "../lib/recipient-delivery-projection";
+import { referenceDateLabel } from "../lib/reference-date-label";
 import {
   CAMPAIGN_SEND_TIME_ZONE,
   DEFAULT_CAMPAIGN_SEND_WINDOW_END,
@@ -80,7 +81,7 @@ import {
 
 const router: IRouter = Router();
 const CAMPAIGN_COLUMNS =
-  "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,janela_envio_inicio,janela_envio_fim,status,agendada_para,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em,criado_por_id,criado_por_nome,criado_por_email,agendado_por_id,agendado_por_nome,agendado_por_email,agendado_em,pausado_por_id,pausado_por_nome,pausado_por_email,retomada_em,retomada_enviados_base,retomado_por_nome,retomado_por_email";
+  "id,nome,assunto,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,preheader,reply_to,valor_credito,validade_credito,teto_hora,teto_dia,janela_envio_inicio,janela_envio_fim,status,agendada_para,lembrete_horas,teste_enviado,teste_enviado_em,corpo,criado_em,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,pausada_em,criado_por_id,criado_por_nome,criado_por_email,agendado_por_id,agendado_por_nome,agendado_por_email,agendado_em,pausado_por_id,pausado_por_nome,pausado_por_email,retomada_em,retomada_enviados_base,retomado_por_nome,retomado_por_email,data_referencia_tipo,data_referencia_rotulo";
 // Public by design: this bucket contains only e-mail image assets.
 // Never reuse the private CSV bucket from routes/imports.ts here.
 const EMAIL_ASSET_BUCKET = "amoconecta-assets";
@@ -604,12 +605,27 @@ async function loadCampaignEmailRollups(
 }
 
 function dateOnlyDaysAgo(days: number): string {
-  const date = new Date();
-  date.setUTCDate(date.getUTCDate() - days);
-  return date.toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: string) =>
+    Number(parts.find((item) => item.type === type)?.value ?? 0);
+  return new Date(
+    Date.UTC(part("year"), part("month") - 1, part("day") - days),
+  )
+    .toISOString()
+    .slice(0, 10);
 }
 
-async function recipientSummary(campaignId: string, resumedAt: string | null) {
+async function recipientSummary(
+  campaignId: string,
+  resumedAt: string | null,
+  referenceType: string | null,
+  referenceCustomLabel: string | null,
+) {
   const today = dateOnlyDaysAgo(0);
   const statusQueries = [
     ["pendente", ["pendente", "processando"]],
@@ -675,6 +691,11 @@ async function recipientSummary(campaignId: string, resumedAt: string | null) {
 
   return GetCampaignRecipientSummaryResponse.parse({
     campanha_id: campaignId,
+    data_referencia_tipo: referenceType,
+    data_referencia_rotulo: referenceDateLabel(
+      referenceType,
+      referenceCustomLabel,
+    ),
     total: deliveryProjection.total_na_lista,
     total_na_lista: deliveryProjection.total_na_lista,
     excluidos: excludedCount ?? 0,
@@ -790,7 +811,7 @@ async function findCampaign(campaignId: string) {
   const { data, error } = await supabaseAdminClient()
     .from("campanha")
     .select(
-      "id,status,assunto,preheader,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,janela_envio_inicio,janela_envio_fim,lembrete_horas,teste_enviado,corpo,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,retomada_em",
+      "id,status,assunto,preheader,assunto_lembrete,corpo_lembrete,cor_botao_snapshot,incluir_desengajados,remetente_nome,remetente_email,reply_to,valor_credito,validade_credito,agendada_para,janela_envio_inicio,janela_envio_fim,lembrete_horas,teste_enviado,corpo,pausa_motivo,pausa_taxa_bounce,pausa_taxa_reclamacao,retomada_em,data_referencia_tipo,data_referencia_rotulo",
     )
     .eq("id", campaignId)
     .maybeSingle();
@@ -1060,7 +1081,14 @@ router.get("/campaigns/:campaignId/recipients/summary", async (req, res) => {
       res.status(404).json({ error: "Campanha não encontrada." });
       return;
     }
-    res.json(await recipientSummary(params.data.campaignId, campaign.retomada_em));
+    res.json(
+      await recipientSummary(
+        params.data.campaignId,
+        campaign.retomada_em,
+        campaign.data_referencia_tipo ?? null,
+        campaign.data_referencia_rotulo ?? null,
+      ),
+    );
   } catch (error) {
     logSupabaseError(req, "Campaign recipient summary failed", error);
     res.status(502).json({ error: "Não foi possível consultar os destinatários." });

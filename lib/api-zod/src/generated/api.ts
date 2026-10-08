@@ -2057,6 +2057,8 @@ export const GetCampaignRecipientSummaryResponse = zod.object({
   "percentual": zod.number().min(getCampaignRecipientSummaryResponseMetricasEmailLembreteDescadastrosPercentualMin).describe('Percentual sobre a base de referência da métrica, de 0 a 100.')
 })
 }),
+  "data_referencia_tipo": zod.union([zod.literal('compra'),zod.literal('acesso'),zod.literal('criacao_conta'),zod.literal('outro'),zod.literal(null)]).nullable(),
+  "data_referencia_rotulo": zod.string().describe('Rótulo para a data de referência desta lista, sem assumir que seja uma compra.'),
   "desengajados_total": zod.number().int().min(getCampaignRecipientSummaryResponseDesengajadosTotalMin),
   "desengajados_na_lista": zod.number().int().min(getCampaignRecipientSummaryResponseDesengajadosNaListaMin),
   "bloqueados_desengajados": zod.number().int().min(getCampaignRecipientSummaryResponseBloqueadosDesengajadosMin),
@@ -2135,6 +2137,28 @@ export const RequestCampaignImportUploadUrlResponse = zod.object({
 
 
 /**
+ * @summary Consulta mapeamento salvo para os cabeçalhos do CSV
+ */
+export const LookupCampaignImportMappingParams = zod.object({
+  "campaignId": zod.coerce.string().uuid()
+})
+
+export const lookupCampaignImportMappingBodyCabecalhosItemMax = 500;
+
+export const lookupCampaignImportMappingBodyCabecalhosMax = 100;
+
+
+
+export const LookupCampaignImportMappingBody = zod.object({
+  "cabecalhos": zod.array(zod.string().max(lookupCampaignImportMappingBodyCabecalhosItemMax)).min(1).max(lookupCampaignImportMappingBodyCabecalhosMax)
+})
+
+export const LookupCampaignImportMappingResponse = zod.object({
+  "mapeamento": zod.union([zod.array(zod.enum(['email', 'name', 'phone', 'user_id', 'region', 'reference_date', 'ignore'])),zod.null()])
+})
+
+
+/**
  * @summary Valida e importa um CSV de destinatários
  */
 export const ValidateCampaignImportParams = zod.object({
@@ -2143,10 +2167,23 @@ export const ValidateCampaignImportParams = zod.object({
 
 
 export const validateCampaignImportBodyDeduplicarPorTelefoneDefault = false;
+export const validateCampaignImportBodyCabecalhosItemMax = 500;
+
+export const validateCampaignImportBodyCabecalhosMax = 100;
+
+export const validateCampaignImportBodyMapeamentoMax = 100;
+
+export const validateCampaignImportBodyDataReferenciaRotuloMax = 80;
+
+
 
 export const ValidateCampaignImportBody = zod.object({
   "storage_path": zod.string().min(1),
-  "deduplicar_por_telefone": zod.boolean().default(validateCampaignImportBodyDeduplicarPorTelefoneDefault)
+  "deduplicar_por_telefone": zod.boolean().default(validateCampaignImportBodyDeduplicarPorTelefoneDefault),
+  "cabecalhos": zod.array(zod.string().max(validateCampaignImportBodyCabecalhosItemMax)).min(1).max(validateCampaignImportBodyCabecalhosMax),
+  "mapeamento": zod.array(zod.enum(['email', 'name', 'phone', 'user_id', 'region', 'reference_date', 'ignore'])).min(1).max(validateCampaignImportBodyMapeamentoMax),
+  "data_referencia_tipo": zod.union([zod.enum(['compra', 'acesso', 'criacao_conta', 'outro']),zod.null()]),
+  "data_referencia_rotulo": zod.string().max(validateCampaignImportBodyDataReferenciaRotuloMax).nullable()
 })
 
 export const validateCampaignImportResponseLinhasProcessadasMin = 0;
@@ -2156,6 +2193,15 @@ export const validateCampaignImportResponseTotalLinhasMin = 0;
 export const validateCampaignImportResponseResultadoOneDatasAusentesMin = 0;
 
 export const validateCampaignImportResponseResultadoOneDatasAusentesPercentualMin = 0;
+
+export const validateCampaignImportResponseResultadoOneLinhasImportadasMin = 0;
+
+export const validateCampaignImportResponseResultadoOneLinhasDescartadasMin = 0;
+
+export const validateCampaignImportResponseResultadoOneColunasIgnoradasMin = 0;
+
+
+
 
 export const validateCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin = 0;
 
@@ -2171,12 +2217,31 @@ export const ValidateCampaignImportResponse = zod.object({
   "id": zod.string().uuid(),
   "campanha_id": zod.string().uuid(),
   "caminho_arquivo": zod.string(),
-  "status": zod.enum(['pendente', 'processando', 'concluida', 'erro']),
+  "status": zod.enum(['pendente', 'processando', 'aguardando_confirmacao', 'concluida', 'erro', 'cancelada']),
   "linhas_processadas": zod.number().int().min(validateCampaignImportResponseLinhasProcessadasMin),
   "total_linhas": zod.number().int().min(validateCampaignImportResponseTotalLinhasMin).nullable(),
   "resultado": zod.union([zod.object({
-  "datas_ausentes": zod.number().int().min(validateCampaignImportResponseResultadoOneDatasAusentesMin).optional(),
-  "datas_ausentes_percentual": zod.number().min(validateCampaignImportResponseResultadoOneDatasAusentesPercentualMin).optional(),
+  "datas_ausentes": zod.number().int().min(validateCampaignImportResponseResultadoOneDatasAusentesMin),
+  "datas_ausentes_percentual": zod.number().min(validateCampaignImportResponseResultadoOneDatasAusentesPercentualMin),
+  "linhas_importadas": zod.number().int().min(validateCampaignImportResponseResultadoOneLinhasImportadasMin),
+  "linhas_descartadas": zod.number().int().min(validateCampaignImportResponseResultadoOneLinhasDescartadasMin),
+  "colunas_ignoradas": zod.number().int().min(validateCampaignImportResponseResultadoOneColunasIgnoradasMin),
+  "data_referencia_rotulo": zod.string(),
+  "amostras_emails_invalidos": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
+  "amostras_datas_invalidas": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
+  "amostras_datas_ausentes": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
   "dominios_suspeitos_total": zod.number().int().min(validateCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin).optional(),
   "dominios_suspeitos": zod.array(zod.object({
   "linha": zod.number().int(),
@@ -2217,6 +2282,216 @@ export const ValidateCampaignImportResponse = zod.object({
 
 
 /**
+ * @summary Confirma importação que contém datas de referência inválidas
+ */
+export const ConfirmCampaignImportParams = zod.object({
+  "campaignId": zod.coerce.string().uuid(),
+  "importId": zod.coerce.string().uuid()
+})
+
+export const ConfirmCampaignImportBody = zod.object({
+  "continuar_com_datas_invalidas": zod.boolean()
+})
+
+export const confirmCampaignImportResponseLinhasProcessadasMin = 0;
+
+export const confirmCampaignImportResponseTotalLinhasMin = 0;
+
+export const confirmCampaignImportResponseResultadoOneDatasAusentesMin = 0;
+
+export const confirmCampaignImportResponseResultadoOneDatasAusentesPercentualMin = 0;
+
+export const confirmCampaignImportResponseResultadoOneLinhasImportadasMin = 0;
+
+export const confirmCampaignImportResponseResultadoOneLinhasDescartadasMin = 0;
+
+export const confirmCampaignImportResponseResultadoOneColunasIgnoradasMin = 0;
+
+
+
+
+export const confirmCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin = 0;
+
+export const confirmCampaignImportResponseResultadoOneTotalNaListaMin = 0;
+
+export const confirmCampaignImportResponseResultadoOneSuprimidosNoEnvioMin = 0;
+
+export const confirmCampaignImportResponseResultadoOneReceberaoDeFatoMin = 0;
+
+
+
+export const ConfirmCampaignImportResponse = zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid(),
+  "caminho_arquivo": zod.string(),
+  "status": zod.enum(['pendente', 'processando', 'aguardando_confirmacao', 'concluida', 'erro', 'cancelada']),
+  "linhas_processadas": zod.number().int().min(confirmCampaignImportResponseLinhasProcessadasMin),
+  "total_linhas": zod.number().int().min(confirmCampaignImportResponseTotalLinhasMin).nullable(),
+  "resultado": zod.union([zod.object({
+  "datas_ausentes": zod.number().int().min(confirmCampaignImportResponseResultadoOneDatasAusentesMin),
+  "datas_ausentes_percentual": zod.number().min(confirmCampaignImportResponseResultadoOneDatasAusentesPercentualMin),
+  "linhas_importadas": zod.number().int().min(confirmCampaignImportResponseResultadoOneLinhasImportadasMin),
+  "linhas_descartadas": zod.number().int().min(confirmCampaignImportResponseResultadoOneLinhasDescartadasMin),
+  "colunas_ignoradas": zod.number().int().min(confirmCampaignImportResponseResultadoOneColunasIgnoradasMin),
+  "data_referencia_rotulo": zod.string(),
+  "amostras_emails_invalidos": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
+  "amostras_datas_invalidas": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
+  "amostras_datas_ausentes": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
+  "dominios_suspeitos_total": zod.number().int().min(confirmCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin).optional(),
+  "dominios_suspeitos": zod.array(zod.object({
+  "linha": zod.number().int(),
+  "email": zod.string(),
+  "sugestao": zod.string()
+})).optional(),
+  "storage_path": zod.string(),
+  "total_linhas": zod.number().int(),
+  "validos": zod.number().int(),
+  "invalidos": zod.number().int(),
+  "novos": zod.number().int(),
+  "atualizados": zod.number().int(),
+  "duplicados_no_arquivo": zod.number().int(),
+  "duplicados_email": zod.number().int(),
+  "duplicados_telefone": zod.number().int(),
+  "suprimidos": zod.number().int(),
+  "total_na_lista": zod.number().int().min(confirmCampaignImportResponseResultadoOneTotalNaListaMin).optional().describe('Total atual de destinatários na lista da campanha após a importação.'),
+  "suprimidos_no_envio": zod.number().int().min(confirmCampaignImportResponseResultadoOneSuprimidosNoEnvioMin).optional().describe('Destinatários da lista atualmente presentes na tabela de supressão.'),
+  "receberao_de_fato": zod.number().int().min(confirmCampaignImportResponseResultadoOneReceberaoDeFatoMin).optional().describe('Total atual da lista menos as supressões atuais.'),
+  "emails_invalidos": zod.number().int(),
+  "datas_invalidas": zod.number().int(),
+  "nomes_ausentes": zod.number().int(),
+  "telefones_invalidos": zod.number().int(),
+  "destinatarios_salvos": zod.number().int(),
+  "recencia": zod.array(zod.object({
+  "faixa": zod.string(),
+  "quantidade": zod.number().int()
+})),
+  "amostras_erros": zod.array(zod.object({
+  "linha": zod.number().int(),
+  "motivo": zod.string()
+}))
+}),zod.null()]),
+  "erro": zod.string().nullable(),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Cancela uma importação que aguarda confirmação
+ */
+export const CancelCampaignImportParams = zod.object({
+  "campaignId": zod.coerce.string().uuid(),
+  "importId": zod.coerce.string().uuid()
+})
+
+export const cancelCampaignImportResponseLinhasProcessadasMin = 0;
+
+export const cancelCampaignImportResponseTotalLinhasMin = 0;
+
+export const cancelCampaignImportResponseResultadoOneDatasAusentesMin = 0;
+
+export const cancelCampaignImportResponseResultadoOneDatasAusentesPercentualMin = 0;
+
+export const cancelCampaignImportResponseResultadoOneLinhasImportadasMin = 0;
+
+export const cancelCampaignImportResponseResultadoOneLinhasDescartadasMin = 0;
+
+export const cancelCampaignImportResponseResultadoOneColunasIgnoradasMin = 0;
+
+
+
+
+export const cancelCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin = 0;
+
+export const cancelCampaignImportResponseResultadoOneTotalNaListaMin = 0;
+
+export const cancelCampaignImportResponseResultadoOneSuprimidosNoEnvioMin = 0;
+
+export const cancelCampaignImportResponseResultadoOneReceberaoDeFatoMin = 0;
+
+
+
+export const CancelCampaignImportResponse = zod.object({
+  "id": zod.string().uuid(),
+  "campanha_id": zod.string().uuid(),
+  "caminho_arquivo": zod.string(),
+  "status": zod.enum(['pendente', 'processando', 'aguardando_confirmacao', 'concluida', 'erro', 'cancelada']),
+  "linhas_processadas": zod.number().int().min(cancelCampaignImportResponseLinhasProcessadasMin),
+  "total_linhas": zod.number().int().min(cancelCampaignImportResponseTotalLinhasMin).nullable(),
+  "resultado": zod.union([zod.object({
+  "datas_ausentes": zod.number().int().min(cancelCampaignImportResponseResultadoOneDatasAusentesMin),
+  "datas_ausentes_percentual": zod.number().min(cancelCampaignImportResponseResultadoOneDatasAusentesPercentualMin),
+  "linhas_importadas": zod.number().int().min(cancelCampaignImportResponseResultadoOneLinhasImportadasMin),
+  "linhas_descartadas": zod.number().int().min(cancelCampaignImportResponseResultadoOneLinhasDescartadasMin),
+  "colunas_ignoradas": zod.number().int().min(cancelCampaignImportResponseResultadoOneColunasIgnoradasMin),
+  "data_referencia_rotulo": zod.string(),
+  "amostras_emails_invalidos": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
+  "amostras_datas_invalidas": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
+  "amostras_datas_ausentes": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
+  "dominios_suspeitos_total": zod.number().int().min(cancelCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin).optional(),
+  "dominios_suspeitos": zod.array(zod.object({
+  "linha": zod.number().int(),
+  "email": zod.string(),
+  "sugestao": zod.string()
+})).optional(),
+  "storage_path": zod.string(),
+  "total_linhas": zod.number().int(),
+  "validos": zod.number().int(),
+  "invalidos": zod.number().int(),
+  "novos": zod.number().int(),
+  "atualizados": zod.number().int(),
+  "duplicados_no_arquivo": zod.number().int(),
+  "duplicados_email": zod.number().int(),
+  "duplicados_telefone": zod.number().int(),
+  "suprimidos": zod.number().int(),
+  "total_na_lista": zod.number().int().min(cancelCampaignImportResponseResultadoOneTotalNaListaMin).optional().describe('Total atual de destinatários na lista da campanha após a importação.'),
+  "suprimidos_no_envio": zod.number().int().min(cancelCampaignImportResponseResultadoOneSuprimidosNoEnvioMin).optional().describe('Destinatários da lista atualmente presentes na tabela de supressão.'),
+  "receberao_de_fato": zod.number().int().min(cancelCampaignImportResponseResultadoOneReceberaoDeFatoMin).optional().describe('Total atual da lista menos as supressões atuais.'),
+  "emails_invalidos": zod.number().int(),
+  "datas_invalidas": zod.number().int(),
+  "nomes_ausentes": zod.number().int(),
+  "telefones_invalidos": zod.number().int(),
+  "destinatarios_salvos": zod.number().int(),
+  "recencia": zod.array(zod.object({
+  "faixa": zod.string(),
+  "quantidade": zod.number().int()
+})),
+  "amostras_erros": zod.array(zod.object({
+  "linha": zod.number().int(),
+  "motivo": zod.string()
+}))
+}),zod.null()]),
+  "erro": zod.string().nullable(),
+  "criado_em": zod.coerce.date(),
+  "concluido_em": zod.coerce.date().nullable()
+})
+
+
+/**
  * @summary Consulta o progresso de uma validação
  */
 export const GetCampaignImportParams = zod.object({
@@ -2232,6 +2507,15 @@ export const getCampaignImportResponseResultadoOneDatasAusentesMin = 0;
 
 export const getCampaignImportResponseResultadoOneDatasAusentesPercentualMin = 0;
 
+export const getCampaignImportResponseResultadoOneLinhasImportadasMin = 0;
+
+export const getCampaignImportResponseResultadoOneLinhasDescartadasMin = 0;
+
+export const getCampaignImportResponseResultadoOneColunasIgnoradasMin = 0;
+
+
+
+
 export const getCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin = 0;
 
 export const getCampaignImportResponseResultadoOneTotalNaListaMin = 0;
@@ -2246,12 +2530,31 @@ export const GetCampaignImportResponse = zod.object({
   "id": zod.string().uuid(),
   "campanha_id": zod.string().uuid(),
   "caminho_arquivo": zod.string(),
-  "status": zod.enum(['pendente', 'processando', 'concluida', 'erro']),
+  "status": zod.enum(['pendente', 'processando', 'aguardando_confirmacao', 'concluida', 'erro', 'cancelada']),
   "linhas_processadas": zod.number().int().min(getCampaignImportResponseLinhasProcessadasMin),
   "total_linhas": zod.number().int().min(getCampaignImportResponseTotalLinhasMin).nullable(),
   "resultado": zod.union([zod.object({
-  "datas_ausentes": zod.number().int().min(getCampaignImportResponseResultadoOneDatasAusentesMin).optional(),
-  "datas_ausentes_percentual": zod.number().min(getCampaignImportResponseResultadoOneDatasAusentesPercentualMin).optional(),
+  "datas_ausentes": zod.number().int().min(getCampaignImportResponseResultadoOneDatasAusentesMin),
+  "datas_ausentes_percentual": zod.number().min(getCampaignImportResponseResultadoOneDatasAusentesPercentualMin),
+  "linhas_importadas": zod.number().int().min(getCampaignImportResponseResultadoOneLinhasImportadasMin),
+  "linhas_descartadas": zod.number().int().min(getCampaignImportResponseResultadoOneLinhasDescartadasMin),
+  "colunas_ignoradas": zod.number().int().min(getCampaignImportResponseResultadoOneColunasIgnoradasMin),
+  "data_referencia_rotulo": zod.string(),
+  "amostras_emails_invalidos": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
+  "amostras_datas_invalidas": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
+  "amostras_datas_ausentes": zod.array(zod.object({
+  "linha": zod.number().int().min(1),
+  "valor": zod.string(),
+  "email": zod.string().optional()
+})),
   "dominios_suspeitos_total": zod.number().int().min(getCampaignImportResponseResultadoOneDominiosSuspeitosTotalMin).optional(),
   "dominios_suspeitos": zod.array(zod.object({
   "linha": zod.number().int(),

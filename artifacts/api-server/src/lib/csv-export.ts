@@ -12,6 +12,8 @@ export const BI_EXPORT_COLUMNS = [
   "id_usuario",
   "regiao",
   "data_ultima_compra",
+  "data_referencia",
+  "data_referencia_rotulo",
   "campanha_id",
   "campanha_nome",
   "valor_credito",
@@ -33,6 +35,9 @@ export type BiExportRow = {
   id_usuario: string | number | null;
   regiao: string | null;
   data_ultima_compra: string | null;
+  data_referencia?: string | null;
+  data_referencia_rotulo?: string | null;
+  data_referencia_tipo?: string | null;
   campanha_id: string | number | null;
   campanha_nome: string | null;
   valor_credito: string | number | null;
@@ -127,7 +132,14 @@ export function csvRowLine(row: BiExportRow): string {
     nullableValue(row.nome),
     nullableValue(row.id_usuario),
     nullableValue(row.regiao),
-    normalizeExportDate(row.data_ultima_compra),
+    normalizeExportDate(
+      row.data_referencia_tipo === undefined ||
+        row.data_referencia_tipo === "compra"
+        ? row.data_ultima_compra
+        : null,
+    ),
+    normalizeExportDate(row.data_referencia ?? row.data_ultima_compra),
+    nullableValue(row.data_referencia_rotulo),
     nullableValue(row.campanha_id),
     nullableValue(row.campanha_nome),
     nullableValue(row.valor_credito),

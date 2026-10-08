@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
 import { normalizeEmail } from "./email-normalization";
 
 export { normalizeEmail } from "./email-normalization";
@@ -45,7 +46,20 @@ type ImportCandidate = {
   row: ImportRow;
   line: number;
   purchaseDate: string | null;
+  rawReferenceDate: string;
+  referenceDateInvalid: boolean;
 };
+
+export const IMPORT_COLUMN_TARGETS = [
+  "email",
+  "name",
+  "phone",
+  "user_id",
+  "region",
+  "reference_date",
+  "ignore",
+] as const;
+export type ImportColumnTarget = (typeof IMPORT_COLUMN_TARGETS)[number];
 
 export class ImportValidationError extends Error {
   constructor(message: string) {
@@ -59,9 +73,19 @@ type ImportError = {
   motivo: string;
 };
 
+type ImportSample = {
+  linha: number;
+  valor: string;
+  email?: string;
+};
+
 export type ImportSummary = {
   storage_path: string;
   total_linhas: number;
+  linhas_importadas: number;
+  linhas_descartadas: number;
+  colunas_ignoradas: number;
+  data_referencia_rotulo: string;
   validos: number;
   invalidos: number;
   novos: number;
@@ -84,6 +108,9 @@ export type ImportSummary = {
   destinatarios_salvos: number;
   recencia: Array<{ faixa: string; quantidade: number }>;
   amostras_erros: ImportError[];
+  amostras_emails_invalidos: ImportSample[];
+  amostras_datas_invalidas: ImportSample[];
+  amostras_datas_ausentes: ImportSample[];
 };
 
 type CsvRecord = {
@@ -173,24 +200,89 @@ export function isValidEmail(value: string): boolean {
   );
 }
 
-function parseDate(value: string): { date: string | null; invalid: boolean } {
+function validCalendarDate(year: number, month: number, day: number): boolean {
+  if (!month || year < 1900 || year > 2200) return false;
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+function formatSaoPauloDate(value: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: string) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+export function parseReferenceDate(
+  value: string,
+): { date: string | null; invalid: boolean } {
   const input = value.trim();
   if (!input) return { date: null, invalid: false };
 
   let day: number;
   let month: number;
   let year: number;
+  const zonedIso = input.match(
+    /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/u,
+  );
+  if (zonedIso) {
+    const isoYear = Number(zonedIso[1]);
+    const isoMonth = Number(zonedIso[2]);
+    const isoDay = Number(zonedIso[3]);
+    const hour = Number(zonedIso[4]);
+    const minute = Number(zonedIso[5]);
+    const second = Number(zonedIso[6] ?? 0);
+    const instant = new Date(input);
+    if (
+      !validCalendarDate(isoYear, isoMonth, isoDay) ||
+      hour > 23 ||
+      minute > 59 ||
+      second > 59 ||
+      !Number.isFinite(instant.getTime())
+    ) {
+      return { date: null, invalid: true };
+    }
+    return { date: formatSaoPauloDate(instant), invalid: false };
+  }
+
+  const naiveIso = input.match(
+    /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/u,
+  );
+  if (naiveIso) {
+    const isoYear = Number(naiveIso[1]);
+    const isoMonth = Number(naiveIso[2]);
+    const isoDay = Number(naiveIso[3]);
+    if (
+      !validCalendarDate(isoYear, isoMonth, isoDay) ||
+      Number(naiveIso[4]) > 23 ||
+      Number(naiveIso[5]) > 59 ||
+      Number(naiveIso[6] ?? 0) > 59
+    ) {
+      return { date: null, invalid: true };
+    }
+    return {
+      date: `${naiveIso[1]}-${naiveIso[2]}-${naiveIso[3]}`,
+      invalid: false,
+    };
+  }
+
   const iso = input.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/u);
   const numeric = input.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/u);
   const writtenInput = input
     .toLocaleLowerCase("pt-BR")
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "");
-  const writtenWithTime = writtenInput.match(
-    /^(\d{1,2})\s+([a-z]+),\s*(\d{4}),\s*\d{1,2}:\d{2}$/u,
-  );
   const written = writtenInput.match(
-    /^(\d{1,2})\s+(?:de\s+)?([a-z]+)(?:\s+de)?\s+(\d{4})$/u,
+    /^(\d{1,2})\s+(?:de\s+)?([a-z]+)(?:\s+de)?(?:,\s*|\s+)(\d{4})(?:,\s*\d{1,2}:\d{2})?$/u,
   );
 
   if (iso) {
@@ -201,27 +293,15 @@ function parseDate(value: string): { date: string | null; invalid: boolean } {
     day = Number(numeric[1]);
     month = Number(numeric[2]);
     year = Number(numeric[3]);
-  } else if (writtenWithTime || written) {
-    const match = writtenWithTime ?? written;
-    if (!match) return { date: null, invalid: true };
-    day = Number(match[1]);
-    month = MONTHS[match[2]];
-    year = Number(match[3]);
+  } else if (written) {
+    day = Number(written[1]);
+    month = MONTHS[written[2]];
+    year = Number(written[3]);
   } else {
     return { date: null, invalid: true };
   }
 
-  if (!month || year < 1900 || year > 2200) {
-    return { date: null, invalid: true };
-  }
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() !== month - 1 ||
-    parsed.getUTCDate() !== day
-  ) {
-    return { date: null, invalid: true };
-  }
+  if (!validCalendarDate(year, month, day)) return { date: null, invalid: true };
   return {
     date: `${year.toString().padStart(4, "0")}-${month
       .toString()
@@ -232,11 +312,18 @@ function parseDate(value: string): { date: string | null; invalid: boolean } {
 
 function recencyBucket(date: string | null): string {
   if (!date) return "sem data";
-  const today = new Date();
+  const todayParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: string) =>
+    todayParts.find((item) => item.type === type)?.value ?? "0";
   const current = Date.UTC(
-    today.getUTCFullYear(),
-    today.getUTCMonth(),
-    today.getUTCDate(),
+    Number(part("year")),
+    Number(part("month")) - 1,
+    Number(part("day")),
   );
   const parsed = Date.parse(`${date}T00:00:00.000Z`);
   const days = Math.max(0, Math.floor((current - parsed) / 86_400_000));
@@ -251,9 +338,9 @@ function headerKey(value: string): string {
   return normalizeText(value.replace(/^\uFEFF/u, ""));
 }
 
-function resolveHeader(headers: string[], aliases: string[]): number {
-  const normalizedAliases = aliases.map(headerKey);
-  return headers.findIndex((header) => normalizedAliases.includes(header));
+export function campaignImportHeaderSignature(headers: readonly string[]): string {
+  const normalized = headers.map(headerKey);
+  return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }
 
 function addError(summary: ImportSummary, line: number, reason: string): void {
@@ -343,6 +430,7 @@ export async function* recordsFromStream(
   let recordLine = 1;
   let separator: CsvSeparator | null = null;
   let separatorDetected = false;
+  let firstRecord = true;
   const parseRecord = (raw: string, recordNumber: number): CsvRecord => {
     if (separator === null) {
       const detection = detectCsvSeparator(raw);
@@ -350,8 +438,13 @@ export async function* recordsFromStream(
       separatorDetected = detection.detected;
     }
     const resolvedSeparator = separator ?? ",";
+    const values = parseCsvRecord(raw, resolvedSeparator);
+    if (firstRecord) {
+      values[0] = (values[0] ?? "").replace(/^\uFEFF/u, "");
+      firstRecord = false;
+    }
     return {
-      values: parseCsvRecord(raw, resolvedSeparator),
+      values,
       line: recordNumber,
       separator: resolvedSeparator,
       separatorDetected,
@@ -435,10 +528,18 @@ async function loadExistingCampaignEmails(
   return emails;
 }
 
-function buildSummary(storagePath: string): ImportSummary {
+function buildSummary(
+  storagePath: string,
+  referenceDateLabel: string,
+  ignoredColumns: number,
+): ImportSummary {
   return {
     storage_path: storagePath,
     total_linhas: 0,
+    linhas_importadas: 0,
+    linhas_descartadas: 0,
+    colunas_ignoradas: ignoredColumns,
+    data_referencia_rotulo: referenceDateLabel,
     validos: 0,
     invalidos: 0,
     novos: 0,
@@ -458,6 +559,9 @@ function buildSummary(storagePath: string): ImportSummary {
     destinatarios_salvos: 0,
     recencia: RECENCY_BUCKETS.map((faixa) => ({ faixa, quantidade: 0 })),
     amostras_erros: [],
+    amostras_emails_invalidos: [],
+    amostras_datas_invalidas: [],
+    amostras_datas_ausentes: [],
   };
 }
 
@@ -467,6 +571,11 @@ export async function validateAndImportCsv({
   campaignId,
   storagePath,
   deduplicatePhone,
+  expectedHeaders,
+  columnMapping,
+  referenceDateLabel,
+  previewOnly = false,
+  beforeCommit,
   onProgress,
 }: {
   client: SupabaseClient;
@@ -474,9 +583,18 @@ export async function validateAndImportCsv({
   campaignId: string;
   storagePath: string;
   deduplicatePhone: boolean;
+  expectedHeaders: string[];
+  columnMapping: ImportColumnTarget[];
+  referenceDateLabel: string;
+  previewOnly?: boolean;
+  beforeCommit?: () => Promise<void>;
   onProgress?: (linesProcessed: number) => Promise<void>;
 }): Promise<ImportSummary> {
-  const summary = buildSummary(storagePath);
+  const summary = buildSummary(
+    storagePath,
+    referenceDateLabel,
+    columnMapping.filter((target) => target === "ignore").length,
+  );
   const suppression = await loadSuppression(client);
   const candidates: ImportCandidate[] = [];
   const iterator = recordsFromStream(stream);
@@ -499,46 +617,53 @@ export async function validateAndImportCsv({
     );
   }
 
-  const headers = first.value.values.map(headerKey);
+  const cleanHeaders = first.value.values.map((value, index) =>
+    index === 0 ? value.replace(/^\uFEFF/u, "") : value,
+  );
+  const headers = cleanHeaders.map(headerKey);
   const displayHeaders = first.value.values
     .map((value) => value.replace(/^\uFEFF/u, "").trim())
-    .filter(Boolean);
-  const userIdIndex = resolveHeader(headers, ["user_id", "id"]);
-  const nameIndex = resolveHeader(headers, [
-    "user_name",
-    "nome",
-    "nome completo",
-    "name",
-    "cliente",
-  ]);
-  const emailIndex = resolveHeader(headers, ["user_email", "email", "e mail", "e-mail"]);
-  const phoneIndex = resolveHeader(headers, [
-    "user_phone",
-    "telefone",
-    "celular",
-    "phone",
-    "whatsapp",
-  ]);
-  const regionIndex = resolveHeader(headers, ["last_order_region", "regiao", "região"]);
-  const purchaseDateIndex = resolveHeader(headers, [
-    "last_order_date",
-    "data ultima compra",
-    "ultima compra",
-    "data compra",
-    "data",
-  ]);
+    ;
 
-  if (nameIndex < 0 || emailIndex < 0) {
-    const missing = [
-      nameIndex < 0 ? "nome (user_name)" : null,
-      emailIndex < 0 ? "e-mail (user_email)" : null,
-    ].filter((value): value is string => Boolean(value));
+  if (
+    expectedHeaders.length !== cleanHeaders.length ||
+    campaignImportHeaderSignature(expectedHeaders) !==
+      campaignImportHeaderSignature(cleanHeaders)
+  ) {
     throw new ImportValidationError(
-      `Colunas obrigatórias ausentes: ${missing.join(", ")}. ` +
+      "O cabeçalho do arquivo mudou depois da leitura. Selecione o CSV novamente. " +
         `Separador detectado: ${describeCsvSeparator(first.value)}. ` +
         `Colunas encontradas: ${formatFoundHeaders(displayHeaders)}.`,
     );
   }
+  if (columnMapping.length !== cleanHeaders.length) {
+    throw new ImportValidationError(
+      "O mapeamento não corresponde às colunas do arquivo. Selecione o CSV novamente.",
+    );
+  }
+  const targetIndexes = new Map<ImportColumnTarget, number>();
+  for (const [index, target] of columnMapping.entries()) {
+    if (!IMPORT_COLUMN_TARGETS.includes(target)) {
+      throw new ImportValidationError("O mapeamento contém um campo desconhecido.");
+    }
+    if (target !== "ignore" && targetIndexes.has(target)) {
+      throw new ImportValidationError(
+        "Cada campo pode ser associado a apenas uma coluna do CSV.",
+      );
+    }
+    if (target !== "ignore") targetIndexes.set(target, index);
+  }
+  const emailIndex = targetIndexes.get("email") ?? -1;
+  if (emailIndex < 0) {
+    throw new ImportValidationError(
+      "Escolha qual coluna contém o e-mail antes de importar.",
+    );
+  }
+  const userIdIndex = targetIndexes.get("user_id") ?? -1;
+  const nameIndex = targetIndexes.get("name") ?? -1;
+  const phoneIndex = targetIndexes.get("phone") ?? -1;
+  const regionIndex = targetIndexes.get("region") ?? -1;
+  const referenceDateIndex = targetIndexes.get("reference_date") ?? -1;
 
   const existingEmails = await loadExistingCampaignEmails(client, campaignId);
   let block: ImportRow[] = [];
@@ -546,10 +671,12 @@ export async function validateAndImportCsv({
   let blockUpdatedCount = 0;
   const flush = async () => {
     if (block.length === 0) return;
-    const { error } = await client.from("destinatario").upsert(block, {
-      onConflict: "campanha_id,email,is_lembrete",
-    });
-    if (error) throw error;
+    if (!previewOnly) {
+      const { error } = await client.from("destinatario").upsert(block, {
+        onConflict: "campanha_id,email,is_lembrete",
+      });
+      if (error) throw error;
+    }
     summary.novos += blockNewCount;
     summary.atualizados += blockUpdatedCount;
     summary.destinatarios_salvos = summary.novos;
@@ -561,27 +688,31 @@ export async function validateAndImportCsv({
   for await (const record of iterator) {
     summary.total_linhas += 1;
     const rawUserId = userIdIndex >= 0 ? record.values[userIdIndex] ?? "" : "";
-    const rawName = record.values[nameIndex] ?? "";
+    const rawName = nameIndex >= 0 ? record.values[nameIndex] ?? "" : "";
     const rawEmail = record.values[emailIndex] ?? "";
     const rawPhone = phoneIndex >= 0 ? record.values[phoneIndex] ?? "" : "";
     const rawRegion = regionIndex >= 0 ? record.values[regionIndex] ?? "" : "";
     const rawDate =
-      purchaseDateIndex >= 0 ? record.values[purchaseDateIndex] ?? "" : "";
+      referenceDateIndex >= 0 ? record.values[referenceDateIndex] ?? "" : "";
     const idUsuario = rawUserId.trim() || null;
     const email = normalizeEmail(rawEmail);
     const normalizedName = normalizeName(rawName);
     const nome = normalizedName || fallbackName(email);
     const telefone = rawPhone.trim() ? normalizePhone(rawPhone) : null;
     const regiao = rawRegion.trim() || null;
-    const parsedDate = parseDate(rawDate);
-    if (!rawDate.trim()) summary.datas_ausentes += 1;
-
+    const parsedDate = parseReferenceDate(rawDate);
     if (!normalizedName) {
       summary.nomes_ausentes += 1;
     }
     if (!isValidEmail(email)) {
       summary.emails_invalidos += 1;
       summary.invalidos += 1;
+      if (summary.amostras_emails_invalidos.length < 3) {
+        summary.amostras_emails_invalidos.push({
+          linha: record.line,
+          valor: rawEmail.trim() || "(vazio)",
+        });
+      }
       addError(
         summary,
         record.line,
@@ -592,9 +723,6 @@ export async function validateAndImportCsv({
     }
     if (rawPhone.trim() && !telefone) {
       summary.telefones_invalidos += 1;
-    }
-    if (parsedDate.invalid) {
-      summary.datas_invalidas += 1;
     }
     const suggestion = suggestEmailDomain(email);
     if (suggestion) {
@@ -612,6 +740,8 @@ export async function validateAndImportCsv({
     candidates.push({
       line: record.line,
       purchaseDate: parsedDate.date,
+      rawReferenceDate: rawDate.trim(),
+      referenceDateInvalid: parsedDate.invalid,
       row: {
         campanha_id: campaignId,
         id_usuario: idUsuario,
@@ -670,8 +800,29 @@ export async function validateAndImportCsv({
     selected.push(candidate);
   }
 
+  if (!previewOnly && beforeCommit && selected.length > 0) await beforeCommit();
+
   for (const candidate of selected) {
     summary.validos += 1;
+    if (!candidate.rawReferenceDate) {
+      summary.datas_ausentes += 1;
+      if (summary.amostras_datas_ausentes.length < 3) {
+        summary.amostras_datas_ausentes.push({
+          linha: candidate.line,
+          valor: "",
+          email: candidate.row.email,
+        });
+      }
+    } else if (candidate.referenceDateInvalid) {
+      summary.datas_invalidas += 1;
+      if (summary.amostras_datas_invalidas.length < 3) {
+        summary.amostras_datas_invalidas.push({
+          linha: candidate.line,
+          valor: candidate.rawReferenceDate,
+          email: candidate.row.email,
+        });
+      }
+    }
     const faixa = recencyBucket(candidate.purchaseDate);
     const bucket = summary.recencia.find((item) => item.faixa === faixa);
     if (bucket) bucket.quantidade += 1;
@@ -686,6 +837,11 @@ export async function validateAndImportCsv({
     }
   }
   await flush();
+  summary.linhas_importadas = summary.novos + summary.atualizados;
+  summary.linhas_descartadas = Math.max(
+    0,
+    summary.total_linhas - summary.linhas_importadas,
+  );
   summary.datas_ausentes_percentual = summary.total_linhas > 0
     ? summary.datas_ausentes / summary.total_linhas * 100
     : 0;

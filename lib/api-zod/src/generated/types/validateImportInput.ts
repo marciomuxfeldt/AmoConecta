@@ -5,9 +5,28 @@
  * API do AmoConecta
  * OpenAPI spec version: 0.1.0
  */
+import type { ImportColumnTarget } from './importColumnTarget';
+import type { ReferenceDateMeaning } from './referenceDateMeaning';
 
 export interface ValidateImportInput {
   /** @minLength 1 */
   storage_path: string;
   deduplicar_por_telefone?: boolean;
+  /**
+     * @minItems 1
+     * @maxItems 100
+     * @items.maxLength 500
+     */
+  cabecalhos: string[];
+  /**
+     * @minItems 1
+     * @maxItems 100
+     */
+  mapeamento: ImportColumnTarget[];
+  data_referencia_tipo: ReferenceDateMeaning | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  data_referencia_rotulo: string | null;
 }

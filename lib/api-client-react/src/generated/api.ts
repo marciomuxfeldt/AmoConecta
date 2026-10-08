@@ -42,6 +42,7 @@ import type {
   CampaignRestoreInput,
   CampaignResumeInput,
   CompletePasswordRecoveryInput,
+  ConfirmImportInput,
   CreateCampaignInput,
   DetailedError,
   EmailBranding,
@@ -52,6 +53,8 @@ import type {
   Error,
   GetCampaignExclusionsParams,
   HealthStatus,
+  ImportMappingLookupInput,
+  ImportMappingLookupResponse,
   ImportUploadUrl,
   ImportValidationJob,
   LoginInput,
@@ -3248,6 +3251,95 @@ export const useRequestCampaignImportUploadUrl = <TError = ErrorType<Error | Det
       return useMutation(getRequestCampaignImportUploadUrlMutationOptions(options));
     }
 
+export const getLookupCampaignImportMappingUrl = (campaignId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/imports/mapping-lookup`
+}
+
+/**
+ * @summary Consulta mapeamento salvo para os cabeçalhos do CSV
+ */
+export const lookupCampaignImportMapping = async (campaignId: string,
+    importMappingLookupInput: ImportMappingLookupInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportMappingLookupResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportMappingLookupResponse>(getLookupCampaignImportMappingUrl(campaignId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importMappingLookupInput)
+  }
+);}
+
+
+
+
+
+export const getLookupCampaignImportMappingMutationKey = () => ['lookupCampaignImportMapping'] as const;
+
+export const getLookupCampaignImportMappingMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof lookupCampaignImportMapping>>, TError,LookupCampaignImportMappingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof lookupCampaignImportMapping>>, TError,LookupCampaignImportMappingMutationVariables, TContext> => {
+
+const mutationKey = getLookupCampaignImportMappingMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof lookupCampaignImportMapping>>, LookupCampaignImportMappingMutationVariables> = (props) => {
+          const {campaignId,data} = props ?? {};
+
+          return  lookupCampaignImportMapping(campaignId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LookupCampaignImportMappingMutationResult = NonNullable<Awaited<ReturnType<typeof lookupCampaignImportMapping>>>
+    export type LookupCampaignImportMappingMutationBody = BodyType<ImportMappingLookupInput>
+    export type LookupCampaignImportMappingMutationError = ErrorType<Error>
+    export type LookupCampaignImportMappingMutationVariables = {campaignId: string;data: BodyType<ImportMappingLookupInput>}
+
+    /**
+ * @summary Consulta mapeamento salvo para os cabeçalhos do CSV
+ */
+export const useLookupCampaignImportMapping = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof lookupCampaignImportMapping>>, TError,LookupCampaignImportMappingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof lookupCampaignImportMapping>>,
+        TError,
+        LookupCampaignImportMappingMutationVariables,
+        TContext
+      > => {
+      return useMutation(getLookupCampaignImportMappingMutationOptions(options));
+    }
+
 export const getValidateCampaignImportUrl = (campaignId: string,) => {
 
 
@@ -3335,6 +3427,173 @@ export const useValidateCampaignImport = <TError = ErrorType<Error>,
         TContext
       > => {
       return useMutation(getValidateCampaignImportMutationOptions(options));
+    }
+
+export const getConfirmCampaignImportUrl = (campaignId: string,
+    importId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/imports/${importId}/confirm`
+}
+
+/**
+ * @summary Confirma importação que contém datas de referência inválidas
+ */
+export const confirmCampaignImport = async (campaignId: string,
+    importId: string,
+    confirmImportInput: ConfirmImportInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportValidationJob> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportValidationJob>(getConfirmCampaignImportUrl(campaignId,importId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(confirmImportInput)
+  }
+);}
+
+
+
+
+
+export const getConfirmCampaignImportMutationKey = () => ['confirmCampaignImport'] as const;
+
+export const getConfirmCampaignImportMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmCampaignImport>>, TError,ConfirmCampaignImportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmCampaignImport>>, TError,ConfirmCampaignImportMutationVariables, TContext> => {
+
+const mutationKey = getConfirmCampaignImportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmCampaignImport>>, ConfirmCampaignImportMutationVariables> = (props) => {
+          const {campaignId,importId,data} = props ?? {};
+
+          return  confirmCampaignImport(campaignId,importId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmCampaignImportMutationResult = NonNullable<Awaited<ReturnType<typeof confirmCampaignImport>>>
+    export type ConfirmCampaignImportMutationBody = BodyType<ConfirmImportInput>
+    export type ConfirmCampaignImportMutationError = ErrorType<Error>
+    export type ConfirmCampaignImportMutationVariables = {campaignId: string;importId: string;data: BodyType<ConfirmImportInput>}
+
+    /**
+ * @summary Confirma importação que contém datas de referência inválidas
+ */
+export const useConfirmCampaignImport = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmCampaignImport>>, TError,ConfirmCampaignImportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof confirmCampaignImport>>,
+        TError,
+        ConfirmCampaignImportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConfirmCampaignImportMutationOptions(options));
+    }
+
+export const getCancelCampaignImportUrl = (campaignId: string,
+    importId: string,) => {
+
+
+
+
+  return `/api/campaigns/${campaignId}/imports/${importId}/cancel`
+}
+
+/**
+ * @summary Cancela uma importação que aguarda confirmação
+ */
+export const cancelCampaignImport = async (campaignId: string,
+    importId: string, options?: Parameters<typeof customFetch>[1]): Promise<ImportValidationJob> => {
+
+  return customFetch<ImportValidationJob>(getCancelCampaignImportUrl(campaignId,importId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCancelCampaignImportMutationKey = () => ['cancelCampaignImport'] as const;
+
+export const getCancelCampaignImportMutationOptions = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelCampaignImport>>, TError,CancelCampaignImportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelCampaignImport>>, TError,CancelCampaignImportMutationVariables, TContext> => {
+
+const mutationKey = getCancelCampaignImportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelCampaignImport>>, CancelCampaignImportMutationVariables> = (props) => {
+          const {campaignId,importId} = props ?? {};
+
+          return  cancelCampaignImport(campaignId,importId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelCampaignImportMutationResult = NonNullable<Awaited<ReturnType<typeof cancelCampaignImport>>>
+
+    export type CancelCampaignImportMutationError = ErrorType<Error>
+    export type CancelCampaignImportMutationVariables = {campaignId: string;importId: string}
+
+    /**
+ * @summary Cancela uma importação que aguarda confirmação
+ */
+export const useCancelCampaignImport = <TError = ErrorType<Error>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelCampaignImport>>, TError,CancelCampaignImportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelCampaignImport>>,
+        TError,
+        CancelCampaignImportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCancelCampaignImportMutationOptions(options));
     }
 
 export const getGetCampaignImportUrl = (campaignId: string,

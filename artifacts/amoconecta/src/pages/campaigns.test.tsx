@@ -14,11 +14,18 @@ import { creditContentWarning } from "../lib/credit-content-warning";
 const campaignId = "campaign-under-test";
 const recipientSummaryUrl = `/api/campaigns/${campaignId}/recipients/summary`;
 const uploadUrlEndpoint = `/api/campaigns/${campaignId}/imports/upload-url`;
+const mappingLookupEndpoint = `/api/campaigns/${campaignId}/imports/mapping-lookup`;
 const validateEndpoint = `/api/campaigns/${campaignId}/imports/validate`;
+const importJobEndpoint = `/api/campaigns/${campaignId}/imports/import-job-under-test`;
+const confirmEndpoint = `${importJobEndpoint}/confirm`;
+const cancelEndpoint = `${importJobEndpoint}/cancel`;
 const signedUploadUrl = "https://storage.example.test/signed-upload";
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let existingRecipientCount = 0;
+let savedMapping: string[] | null = null;
+let validateJobResponse: Record<string, unknown>;
+let importJobResponse: Record<string, unknown>;
 
 function responseJson(value: unknown) {
   return new Response(JSON.stringify(value), {
@@ -38,6 +45,58 @@ function makeCsvFile(header: string) {
     "destinatarios.csv",
     { type: "text/csv" },
   );
+}
+
+function makeImportSummary(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    storage_path: `${campaignId}/destinatarios.csv`,
+    total_linhas: 1,
+    linhas_importadas: 1,
+    linhas_descartadas: 0,
+    colunas_ignoradas: 0,
+    data_referencia_rotulo: "Último acesso",
+    amostras_emails_invalidos: [],
+    amostras_datas_invalidas: [],
+    amostras_datas_ausentes: [],
+    validos: 1,
+    invalidos: 0,
+    novos: 1,
+    atualizados: 0,
+    duplicados_no_arquivo: 0,
+    duplicados_email: 0,
+    duplicados_telefone: 0,
+    suprimidos: 0,
+    emails_invalidos: 0,
+    datas_invalidas: 1,
+    datas_ausentes: 0,
+    datas_ausentes_percentual: 0,
+    nomes_ausentes: 0,
+    telefones_invalidos: 0,
+    destinatarios_salvos: 1,
+    recencia: [],
+    amostras_erros: [],
+    ...overrides,
+  };
+}
+
+function makeImportJob(
+  status: string,
+  resultado: Record<string, unknown> | null = null,
+): Record<string, unknown> {
+  return {
+    id: "import-job-under-test",
+    campanha_id: campaignId,
+    caminho_arquivo: `${campaignId}/destinatarios.csv`,
+    status,
+    linhas_processadas: 0,
+    total_linhas: status === "aguardando_confirmacao" ? 1 : null,
+    resultado,
+    erro: null,
+    criado_em: "2026-10-08T12:00:00.000Z",
+    concluido_em: null,
+  };
 }
 
 function renderImportPanel() {
@@ -70,6 +129,9 @@ function mutationRequests(endpoint: string) {
 
 beforeEach(() => {
   existingRecipientCount = 0;
+  savedMapping = null;
+  validateJobResponse = makeImportJob("pendente");
+  importJobResponse = makeImportJob("pendente");
   fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = getRequestUrl(input);
@@ -79,7 +141,12 @@ beforeEach(() => {
         return responseJson({
           total_na_lista: existingRecipientCount,
           total: existingRecipientCount,
+          data_referencia_tipo: null,
+          data_referencia_rotulo: "Data de referência (sem rótulo)",
         });
+      }
+      if (url === mappingLookupEndpoint && method === "POST") {
+        return responseJson({ mapeamento: savedMapping });
       }
       if (url === uploadUrlEndpoint && method === "POST") {
         return responseJson({
@@ -91,23 +158,21 @@ beforeEach(() => {
         return new Response(null, { status: 200 });
       }
       if (url === validateEndpoint && method === "POST") {
-        return responseJson({
-          id: "import-job-under-test",
-          status: "pendente",
-          linhas_processadas: 0,
-          total_linhas: null,
-        });
+        return responseJson(validateJobResponse);
       }
       if (
-        url === `/api/campaigns/${campaignId}/imports/import-job-under-test` &&
+        url === importJobEndpoint &&
         method === "GET"
       ) {
-        return responseJson({
-          id: "import-job-under-test",
-          status: "pendente",
-          linhas_processadas: 0,
-          total_linhas: null,
-        });
+        return responseJson(importJobResponse);
+      }
+      if (url === confirmEndpoint && method === "POST") {
+        importJobResponse = makeImportJob("pendente");
+        return responseJson(importJobResponse);
+      }
+      if (url === cancelEndpoint && method === "POST") {
+        importJobResponse = makeImportJob("cancelada");
+        return responseJson(importJobResponse);
       }
 
       throw new Error(`Unexpected fetch in import panel test: ${method} ${url}`);
@@ -122,35 +187,48 @@ afterEach(() => {
 });
 
 describe("campaign CSV import confirmation", () => {
-  it("waits for the missing-date decision before upload and keeps recipient confirmation separate", async () => {
+  it("requires only an email mapping and keeps the existing-list decision separate", async () => {
     existingRecipientCount = 4;
     renderImportPanel();
     await selectCsv("user_name;user_email;user_phone");
 
-    const dateWarning = await screen.findByTestId(
-      "status-missing-order-date-warning",
-    );
-    expect(dateWarning.textContent).toContain("ponto e vírgula (;)");
+    await screen.findByTestId("panel-csv-mapping");
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId("select-import-target-1") as HTMLSelectElement).value,
+      ).toBe("email");
+    });
+    expect(screen.queryByTestId("status-missing-order-date-warning")).toBeNull();
     expect(screen.getByTestId("status-existing-recipients-warning")).toBeTruthy();
+    expect(
+      screen.getByTestId("status-import-email-mapping").textContent,
+    ).toContain("único campo obrigatório");
 
     const validateButton = screen.getByTestId("button-validate-import");
     expect((validateButton as HTMLButtonElement).disabled).toBe(true);
     expect(mutationRequests(uploadUrlEndpoint)).toHaveLength(0);
     expect(mutationRequests(validateEndpoint)).toHaveLength(0);
 
-    fireEvent.click(screen.getByTestId("button-confirm-missing-order-date"));
-    expect((validateButton as HTMLButtonElement).disabled).toBe(true);
-    expect(mutationRequests(uploadUrlEndpoint)).toHaveLength(0);
-    expect(mutationRequests(validateEndpoint)).toHaveLength(0);
-
     fireEvent.click(screen.getByTestId("button-confirm-import-sum"));
-    expect((validateButton as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => {
+      expect((validateButton as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(validateButton);
 
     await waitFor(() => {
       expect(mutationRequests(uploadUrlEndpoint)).toHaveLength(1);
       expect(mutationRequests(validateEndpoint)).toHaveLength(1);
     });
+    const validationBody = JSON.parse(
+      (mutationRequests(validateEndpoint)[0][1] as RequestInit).body as string,
+    ) as Record<string, unknown>;
+    expect(validationBody.cabecalhos).toEqual([
+      "user_name",
+      "user_email",
+      "user_phone",
+    ]);
+    expect(validationBody.mapeamento).toEqual(["name", "email", "phone"]);
+    expect(validationBody.data_referencia_tipo).toBeNull();
     expect(
       fetchMock.mock.calls.some(
         ([input, init]) =>
@@ -160,49 +238,86 @@ describe("campaign CSV import confirmation", () => {
     ).toBe(true);
   });
 
-  it("clears the selected CSV when the operator cancels the missing-date warning", async () => {
+  it("reuses a saved mapping for matching normalized headers", async () => {
+    savedMapping = ["email", "ignore", "ignore"];
     renderImportPanel();
-    await selectCsv("user_name;user_email;user_phone");
-
-    await screen.findByTestId("status-missing-order-date-warning");
-    fireEvent.click(screen.getByTestId("button-cancel-missing-order-date"));
+    await selectCsv("Mystery;Contact;Extra");
 
     await waitFor(() => {
-      expect(screen.queryByTestId("status-missing-order-date-warning")).toBeNull();
-      expect(screen.getByText("Solte o CSV aqui ou escolha um arquivo")).toBeTruthy();
+      expect(
+        (screen.getByTestId("select-import-target-0") as HTMLSelectElement).value,
+      ).toBe("email");
     });
-    expect((screen.getByTestId("input-import-csv") as HTMLInputElement).value).toBe(
-      "",
-    );
-    expect((screen.getByTestId("button-validate-import") as HTMLButtonElement).disabled).toBe(
-      true,
-    );
-    expect(mutationRequests(uploadUrlEndpoint)).toHaveLength(0);
-    expect(mutationRequests(validateEndpoint)).toHaveLength(0);
+    expect(mutationRequests(mappingLookupEndpoint)).toHaveLength(1);
   });
 
-  it("does not show the date warning for a dated CSV and still requires the existing-recipient decision", async () => {
-    existingRecipientCount = 3;
+  it("requires a date meaning and an explicit decision before importing unparseable dates", async () => {
+    validateJobResponse = makeImportJob("pendente");
+    importJobResponse = makeImportJob(
+      "aguardando_confirmacao",
+      makeImportSummary({
+        amostras_datas_invalidas: [
+          {
+            linha: 2,
+            valor: "31 de fevereiro de 2026",
+            email: "joana@example.com",
+          },
+        ],
+      }),
+    );
     renderImportPanel();
-    await selectCsv("user_name;user_email;last_order_date");
+    await selectCsv("Email;Nome;Data do último acesso");
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("status-missing-order-date-warning")).toBeNull();
-      expect(screen.getByTestId("status-existing-recipients-warning")).toBeTruthy();
-    });
+    await screen.findByTestId("panel-csv-mapping");
     const validateButton = screen.getByTestId("button-validate-import");
     expect((validateButton as HTMLButtonElement).disabled).toBe(true);
-    expect(mutationRequests(uploadUrlEndpoint)).toHaveLength(0);
-    expect(mutationRequests(validateEndpoint)).toHaveLength(0);
-
-    fireEvent.click(screen.getByTestId("button-confirm-import-sum"));
-    expect((validateButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByTestId("select-import-reference-date-type"), {
+      target: { value: "acesso" },
+    });
+    await waitFor(() => {
+      expect((validateButton as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(validateButton);
 
+    const decision = await screen.findByTestId("panel-invalid-date-confirmation");
+    expect(decision.textContent).toContain("1 data(s) não reconhecida(s)");
+    expect(decision.textContent).toContain("31 de fevereiro de 2026");
+    expect(decision.textContent).toContain("Nenhum destinatário foi salvo");
+
+    fireEvent.click(screen.getByTestId("button-confirm-invalid-dates"));
     await waitFor(() => {
-      expect(mutationRequests(uploadUrlEndpoint)).toHaveLength(1);
-      expect(mutationRequests(validateEndpoint)).toHaveLength(1);
+      expect(mutationRequests(confirmEndpoint)).toHaveLength(1);
     });
+    expect(
+      JSON.parse(
+        (mutationRequests(confirmEndpoint)[0][1] as RequestInit).body as string,
+      ),
+    ).toEqual({ continuar_com_datas_invalidas: true });
+  });
+
+  it("cancels an invalid-date preflight without importing recipients", async () => {
+    importJobResponse = makeImportJob(
+      "aguardando_confirmacao",
+      makeImportSummary({
+        amostras_datas_invalidas: [
+          { linha: 2, valor: "not a date", email: "joana@example.com" },
+        ],
+      }),
+    );
+    renderImportPanel();
+    await selectCsv("Email;Nome;Data do último acesso");
+    await screen.findByTestId("panel-csv-mapping");
+    fireEvent.change(screen.getByTestId("select-import-reference-date-type"), {
+      target: { value: "acesso" },
+    });
+    fireEvent.click(screen.getByTestId("button-validate-import"));
+
+    await screen.findByTestId("panel-invalid-date-confirmation");
+    fireEvent.click(screen.getByTestId("button-cancel-invalid-dates"));
+    await screen.findByTestId("status-import-cancelled");
+
+    expect(mutationRequests(cancelEndpoint)).toHaveLength(1);
+    expect(mutationRequests(confirmEndpoint)).toHaveLength(0);
   });
 });
 

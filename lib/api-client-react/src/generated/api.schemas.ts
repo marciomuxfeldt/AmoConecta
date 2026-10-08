@@ -291,6 +291,19 @@ export interface RecipientRecencyBucket {
   quantidade: number;
 }
 
+/**
+ * @nullable
+ */
+export type CampaignRecipientSummaryDataReferenciaTipo = typeof CampaignRecipientSummaryDataReferenciaTipo[keyof typeof CampaignRecipientSummaryDataReferenciaTipo] | null;
+
+
+export const CampaignRecipientSummaryDataReferenciaTipo = {
+  compra: 'compra',
+  acesso: 'acesso',
+  criacao_conta: 'criacao_conta',
+  outro: 'outro',
+} as const;
+
 export interface CampaignRecipientSummary {
   /** @minimum 0 */
   excluidos?: number;
@@ -328,6 +341,10 @@ export interface CampaignRecipientSummary {
   metricas_email: CampaignEmailMetrics;
   status_lembrete: RecipientStatusSummary;
   metricas_email_lembrete: CampaignEmailMetrics;
+  /** @nullable */
+  data_referencia_tipo: CampaignRecipientSummaryDataReferenciaTipo;
+  /** Rótulo para a data de referência desta lista, sem assumir que seja uma compra. */
+  data_referencia_rotulo: string;
   /** @minimum 0 */
   desengajados_total: number;
   /** @minimum 0 */
@@ -690,10 +707,67 @@ export interface ImportUploadUrl {
   expires_in: number;
 }
 
+export type ImportColumnTarget = typeof ImportColumnTarget[keyof typeof ImportColumnTarget];
+
+
+export const ImportColumnTarget = {
+  email: 'email',
+  name: 'name',
+  phone: 'phone',
+  user_id: 'user_id',
+  region: 'region',
+  reference_date: 'reference_date',
+  ignore: 'ignore',
+} as const;
+
+export type ReferenceDateMeaning = typeof ReferenceDateMeaning[keyof typeof ReferenceDateMeaning];
+
+
+export const ReferenceDateMeaning = {
+  compra: 'compra',
+  acesso: 'acesso',
+  criacao_conta: 'criacao_conta',
+  outro: 'outro',
+} as const;
+
 export interface ValidateImportInput {
   /** @minLength 1 */
   storage_path: string;
   deduplicar_por_telefone?: boolean;
+  /**
+     * @minItems 1
+     * @maxItems 100
+     * @items.maxLength 500
+     */
+  cabecalhos: string[];
+  /**
+     * @minItems 1
+     * @maxItems 100
+     */
+  mapeamento: ImportColumnTarget[];
+  data_referencia_tipo: ReferenceDateMeaning | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  data_referencia_rotulo: string | null;
+}
+
+export interface ImportMappingLookupInput {
+  /**
+     * @minItems 1
+     * @maxItems 100
+     * @items.maxLength 500
+     */
+  cabecalhos: string[];
+}
+
+export interface ImportMappingLookupResponse {
+  mapeamento: ImportColumnTarget[] | null;
+}
+
+export interface ConfirmImportInput {
+  continuar_com_datas_invalidas: boolean;
 }
 
 export type ImportValidationStatus = typeof ImportValidationStatus[keyof typeof ImportValidationStatus];
@@ -702,9 +776,18 @@ export type ImportValidationStatus = typeof ImportValidationStatus[keyof typeof 
 export const ImportValidationStatus = {
   pendente: 'pendente',
   processando: 'processando',
+  aguardando_confirmacao: 'aguardando_confirmacao',
   concluida: 'concluida',
   erro: 'erro',
+  cancelada: 'cancelada',
 } as const;
+
+export interface ImportValidationSample {
+  /** @minimum 1 */
+  linha: number;
+  valor: string;
+  email?: string;
+}
 
 export interface RecencyBucket {
   faixa: string;
@@ -724,9 +807,19 @@ export type ImportValidationSummaryDominiosSuspeitosItem = {
 
 export interface ImportValidationSummary {
   /** @minimum 0 */
-  datas_ausentes?: number;
+  datas_ausentes: number;
   /** @minimum 0 */
-  datas_ausentes_percentual?: number;
+  datas_ausentes_percentual: number;
+  /** @minimum 0 */
+  linhas_importadas: number;
+  /** @minimum 0 */
+  linhas_descartadas: number;
+  /** @minimum 0 */
+  colunas_ignoradas: number;
+  data_referencia_rotulo: string;
+  amostras_emails_invalidos: ImportValidationSample[];
+  amostras_datas_invalidas: ImportValidationSample[];
+  amostras_datas_ausentes: ImportValidationSample[];
   /** @minimum 0 */
   dominios_suspeitos_total?: number;
   dominios_suspeitos?: ImportValidationSummaryDominiosSuspeitosItem[];

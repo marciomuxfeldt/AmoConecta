@@ -12,6 +12,8 @@ export type ImportValidationStatus = typeof ImportValidationStatus[keyof typeof 
 export const ImportValidationStatus = {
   pendente: 'pendente',
   processando: 'processando',
+  aguardando_confirmacao: 'aguardando_confirmacao',
   concluida: 'concluida',
   erro: 'erro',
+  cancelada: 'cancelada',
 } as const;

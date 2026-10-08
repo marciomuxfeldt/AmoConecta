@@ -6,14 +6,25 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ImportValidationError } from './importValidationError';
+import type { ImportValidationSample } from './importValidationSample';
 import type { ImportValidationSummaryDominiosSuspeitosItem } from './importValidationSummaryDominiosSuspeitosItem';
 import type { RecencyBucket } from './recencyBucket';
 
 export interface ImportValidationSummary {
   /** @minimum 0 */
-  datas_ausentes?: number;
+  datas_ausentes: number;
   /** @minimum 0 */
-  datas_ausentes_percentual?: number;
+  datas_ausentes_percentual: number;
+  /** @minimum 0 */
+  linhas_importadas: number;
+  /** @minimum 0 */
+  linhas_descartadas: number;
+  /** @minimum 0 */
+  colunas_ignoradas: number;
+  data_referencia_rotulo: string;
+  amostras_emails_invalidos: ImportValidationSample[];
+  amostras_datas_invalidas: ImportValidationSample[];
+  amostras_datas_ausentes: ImportValidationSample[];
   /** @minimum 0 */
   dominios_suspeitos_total?: number;
   dominios_suspeitos?: ImportValidationSummaryDominiosSuspeitosItem[];

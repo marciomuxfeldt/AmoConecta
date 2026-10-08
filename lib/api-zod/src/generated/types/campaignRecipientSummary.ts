@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CampaignEmailMetrics } from './campaignEmailMetrics';
+import type { CampaignRecipientSummaryDataReferenciaTipo } from './campaignRecipientSummaryDataReferenciaTipo';
 import type { CampaignReputationEvaluation } from './campaignReputationEvaluation';
 import type { RecipientRecencyBucket } from './recipientRecencyBucket';
 import type { RecipientReputationSummary } from './recipientReputationSummary';
@@ -48,6 +49,10 @@ export interface CampaignRecipientSummary {
   metricas_email: CampaignEmailMetrics;
   status_lembrete: RecipientStatusSummary;
   metricas_email_lembrete: CampaignEmailMetrics;
+  /** @nullable */
+  data_referencia_tipo: CampaignRecipientSummaryDataReferenciaTipo;
+  /** Rótulo para a data de referência desta lista, sem assumir que seja uma compra. */
+  data_referencia_rotulo: string;
   /** @minimum 0 */
   desengajados_total: number;
   /** @minimum 0 */

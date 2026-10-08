@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner requires the explicit TypeScript extension.
-import { inspectCampaignCsvHeader } from "./campaign-csv-header.ts";
+import {
+  inspectCampaignCsvHeader,
+  suggestCampaignCsvMapping,
+} from "./campaign-csv-header.ts";
 
 for (const { separator, label } of [
   { separator: ",", label: "vírgula" },
@@ -18,59 +21,66 @@ for (const { separator, label } of [
 
     assert.equal(inspection.separator, separator);
     assert.equal(inspection.separatorDetected, true);
-    assert.equal(inspection.hasLastOrderDate, true);
+    assert.deepEqual(inspection.columns, [
+      "user_name",
+      "user_email",
+      "last_order_date",
+    ]);
   });
 }
 
-test("warns for a semicolon dashboard export without a purchase-date column", async () => {
+test("removes a UTF-8 BOM and samples the first three logical CSV rows", async () => {
   const file = new File(
-    ["user_id;user_name;user_email;user_phone"],
+    [
+      "\uFEFFEmail,Nome,Observação\r\n" +
+        'ana@example.com,Ana,"texto, com vírgula"\r\n' +
+        "bia@example.com,Bia,normal\n" +
+        "cris@example.com,Cris,normal\n" +
+        "dora@example.com,Dora,fora da amostra",
+    ],
     "export.csv",
     { type: "text/csv" },
   );
   const inspection = await inspectCampaignCsvHeader(file);
 
-  assert.equal(inspection.separatorLabel, "ponto e vírgula (;)");
-  assert.deepEqual(inspection.columns, [
-    "user_id",
-    "user_name",
-    "user_email",
-    "user_phone",
+  assert.equal(inspection.columns[0], "Email");
+  assert.deepEqual(inspection.samples, [
+    ["ana@example.com", "Ana", "texto, com vírgula"],
+    ["bia@example.com", "Bia", "normal"],
+    ["cris@example.com", "Cris", "normal"],
   ]);
-  assert.equal(inspection.hasLastOrderDate, false);
 });
 
-test("recognizes the existing localized date-column alias", async () => {
-  const file = new File(
-    ["user_name;user_email;Data última compra"],
-    "export.csv",
-    { type: "text/csv" },
+test("normalizes common email header spellings for auto-suggestions", () => {
+  for (const header of ["E-mail", "email", "EMAIL", "e_mail"]) {
+    assert.equal(suggestCampaignCsvMapping([header])[0], "email", header);
+  }
+});
+
+test("does not guess an email column and prefers last access over account creation", () => {
+  assert.deepEqual(
+    suggestCampaignCsvMapping([
+      "ID do usuário",
+      "Nome",
+      "Data de criação da conta",
+      "Data do último acesso",
+      "Telefone",
+      "Cidade do último acesso",
+    ]),
+    ["user_id", "name", "ignore", "reference_date", "phone", "region"],
   );
-  const inspection = await inspectCampaignCsvHeader(file);
-
-  assert.equal(inspection.hasLastOrderDate, true);
+  assert.equal(suggestCampaignCsvMapping(["Contato"])[0], "ignore");
 });
 
-test("skips a leading blank line and inspects the first actual header record", async () => {
-  const file = new File(
-    ["\uFEFF\r\nuser_name;user_email;last_order_date"],
-    "export.csv",
-    { type: "text/csv" },
-  );
-  const inspection = await inspectCampaignCsvHeader(file);
-
-  assert.equal(inspection.separator, ";");
-  assert.equal(inspection.hasLastOrderDate, true);
-});
-
-test("lets the operator decide when the header is too long to fully inspect", async () => {
+test("rejects an excessively long header instead of sending truncated headers", async () => {
   const file = new File(
     [`user_name;user_email;${"x".repeat(1024 * 1024)}`],
     "large-header.csv",
     { type: "text/csv" },
   );
-  const inspection = await inspectCampaignCsvHeader(file);
 
-  assert.equal(inspection.headerComplete, false);
-  assert.equal(inspection.hasLastOrderDate, false);
+  await assert.rejects(
+    inspectCampaignCsvHeader(file),
+    /ultrapassa 500 caracteres/u,
+  );
 });
