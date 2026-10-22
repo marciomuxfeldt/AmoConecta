@@ -1,3 +1,5 @@
+BEGIN;
+
 CREATE OR REPLACE FUNCTION public.correct_campaign_recipient_domain(
   p_campaign_id uuid,
   p_original_email text,
@@ -20,8 +22,8 @@ BEGIN
     RAISE EXCEPTION 'campaign_finished';
   END IF;
   IF p_original_email IS NULL OR p_corrected_email IS NULL
-     OR p_original_email <> lower(btrim(p_original_email))
-     OR p_corrected_email <> lower(btrim(p_corrected_email))
+     OR public.normalize_email(p_original_email) <> p_original_email
+     OR public.normalize_email(p_corrected_email) <> p_corrected_email
      OR p_corrected_email !~ '^[\x21-\x7E]+$'
      OR p_corrected_email ~ '[[:space:]]'
      OR p_corrected_email !~ '^[^@]+@[^@]+\.[^@]+$'
@@ -53,7 +55,13 @@ BEGIN
         'email_corrigido',p_corrected_email,'resultado','destinatario_removido_duplicado'
       )
     );
-    DELETE FROM public.destinatario WHERE id=v_recipient.id;
+    UPDATE public.destinatario
+    SET excluido_em=clock_timestamp(),
+        exclusao_motivo='duplicado apos correcao de dominio',
+        excluido_por_id=p_actor_id,
+        excluido_por_nome=p_actor_name,
+        excluido_por_email=p_actor_email
+    WHERE id=v_recipient.id;
     RETURN jsonb_build_object('resultado','duplicado_removido','email',p_corrected_email);
   END IF;
 
@@ -152,3 +160,5 @@ REVOKE ALL ON FUNCTION public.criar_validacao_unitaria_destinatario(uuid,text,in
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.criar_validacao_unitaria_destinatario(uuid,text,integer,uuid,text,text)
   TO service_role;
+
+COMMIT;

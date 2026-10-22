@@ -108,6 +108,12 @@ export function ImportDataQualityNotices({
 }) {
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [correctionResults, setCorrectionResults] = useState<Array<{
+    original_email?: string;
+    email?: string;
+    resultado?: string;
+    mensagem?: string;
+  }>>([]);
   const [resolved, setResolved] = useState<string[]>([]);
   const [unverified, setUnverified] = useState<string[]>([]);
   const [validationStarted, setValidationStarted] = useState<string[]>([]);
@@ -161,16 +167,17 @@ export function ImportDataQualityNotices({
       const payload = await response.json() as { results?: Array<{ email?: string; original_email?: string; resultado?: string; mensagem?: string }>; error?: string };
       if (!response.ok) throw new Error(payload.error || 'Não foi possível corrigir os endereços.');
       const results = payload.results ?? [];
+      setCorrectionResults(results);
       const accepted = results.filter((result) => ['corrigido', 'nao_verificado', 'suprimido', 'bloqueado', 'duplicado_removido'].includes(result.resultado ?? ''));
       setResolved((current) => [...new Set([...current, ...accepted.map((result) => result.original_email ?? '')])]);
       const unverified = results.filter((result) => result.resultado === 'nao_verificado').length;
       setUnverified((current) => [...new Set([...current, ...results.filter((result) => result.resultado === 'nao_verificado').map((result) => result.email ?? '')])]);
       const duplicate = results.filter((result) => result.resultado === 'duplicado_removido').length;
       const blocked = results.filter((result) => result.resultado === 'bloqueado' || result.resultado === 'suprimido').length;
-      const rejected = results.filter((result) => result.resultado === 'rejeitado');
+      const rejected = results.filter((result) => result.resultado === 'falhado');
       setNotice([
         `${accepted.length} de ${items.length} sugestão(ões) aplicada(s).`,
-        duplicate ? `${duplicate} endereço(s) duplicado(s) já constavam na campanha e foram removidos da lista.` : '',
+        duplicate ? `${duplicate} endereço(s) duplicado(s) já constavam na campanha; o registro original foi excluído de forma reversível.` : '',
         blocked ? `${blocked} endereço(s) ficaram bloqueado(s).` : '',
         unverified ? `${unverified} endereço(s) estão sem verificação ZeroBounce.` : '',
         ...rejected.map((result) => result.mensagem ?? 'Uma correção não foi aplicada.'),
@@ -201,34 +208,53 @@ export function ImportDataQualityNotices({
       setValidationBusy(null);
     }
   };
-  if (!(pct > MISSING_DATE_WARNING_PERCENT) && typoTotal === 0) return null;
+  if (!(pct > MISSING_DATE_WARNING_PERCENT) && typoTotal === 0 && correctionResults.length === 0 && unverified.length === 0) return null;
   return (
     <div className="mt-6 space-y-3" data-testid="import-data-quality-notices">
       <MissingDateWarning percent={pct} count={missing} testId="status-import-missing-dates-warning" />
-      {typoTotal > 0 && (
+      {(typoTotal > 0 || correctionResults.length > 0 || unverified.length > 0 || notice) && (
         <div className="rounded-xl border border-[#e8c56f] bg-[#fff9e9] p-4 text-xs leading-5 text-[#74561c]" data-testid="status-import-suspicious-domains">
-          <strong>{nf(typoTotal)} endereços com domínio possivelmente digitado errado.</strong>{' '}
-          Nada foi corrigido automaticamente. Confira cada sugestão antes de aceitá-la.
-          {campaignId && !isPreview && eligibleTypos.length > 1 && (
-            <button type="button" onClick={() => void applyCorrections(eligibleTypos)} disabled={working} className="ml-3 rounded-lg bg-[#247b79] px-3 py-1.5 font-bold text-white disabled:opacity-60" data-testid="button-accept-all-domain-suggestions">
-              {working ? 'Aplicando...' : `Aceitar todas as sugestões (${eligibleTypos.length})`}
-            </button>
-          )}
-          <ul className="mt-3 divide-y divide-[#f1dfb8] rounded-lg border border-[#f1dfb8] bg-white/60">
-            {typos.map((item) => (
-              <li key={`${item.linha}-${item.email}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2" data-testid={`row-suspicious-domain-${item.linha}`}>
-                <span className="font-mono text-[10px] text-[#8a6b2c]">linha {item.linha}</span>
-                <span className="min-w-0 flex-1 truncate font-semibold">{item.email}</span>
-                <span className="text-[#417846]">sugestão: {item.sugestao}</span>
-                {campaignId && !isPreview && recipientStatuses[item.email] === 'pendente' && !['concluida','cancelada'].includes(campaignStatus ?? '') && <button type="button" onClick={() => void applyCorrections([item])} disabled={working} className="rounded-lg border border-[#247b79] px-3 py-1 font-bold text-[#247b79] disabled:opacity-60" data-testid={`button-accept-domain-suggestion-${item.linha}`}>Usar a sugestão</button>}
-                {campaignId && recipientStatuses[item.email] && recipientStatuses[item.email] !== 'pendente' && <span className="text-[#8a6b2c]">Correção indisponível: destinatário já saiu da fila ({recipientStatuses[item.email]}).</span>}
-                {campaignId && !isPreview && statusCheckDone && !statusCheckFailed && !recipientStatuses[item.email] && <span className="text-[#8a6b2c]">Endereço não encontrado na lista atual.</span>}
-                {campaignId && !isPreview && statusCheckFailed && <span className="text-[#8a6b2c]">Não foi possível consultar o estado atual; atualize a página antes de corrigir.</span>}
-                {campaignId && !isPreview && recipientStatuses[item.email] === 'pendente' && ['concluida','cancelada'].includes(campaignStatus ?? '') && <span className="text-[#8a6b2c]">Correção indisponível: a campanha foi concluída ou cancelada.</span>}
-              </li>
-            ))}
-          </ul>
+          {typoTotal > 0 && <>
+            <strong>{nf(typoTotal)} endereços com domínio possivelmente digitado errado.</strong>{' '}
+            Nada foi corrigido automaticamente. Confira cada sugestão antes de aceitá-la.
+            {campaignId && !isPreview && eligibleTypos.length > 1 && (
+              <button type="button" onClick={() => void applyCorrections(eligibleTypos)} disabled={working} className="ml-3 rounded-lg bg-[#247b79] px-3 py-1.5 font-bold text-white disabled:opacity-60" data-testid="button-accept-all-domain-suggestions">
+                {working ? 'Aplicando...' : `Aceitar todas as sugestões (${eligibleTypos.length})`}
+              </button>
+            )}
+            <ul className="mt-3 divide-y divide-[#f1dfb8] rounded-lg border border-[#f1dfb8] bg-white/60">
+              {typos.map((item) => (
+                <li key={`${item.linha}-${item.email}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2" data-testid={`row-suspicious-domain-${item.linha}`}>
+                  <span className="font-mono text-[10px] text-[#8a6b2c]">linha {item.linha}</span>
+                  <span className="min-w-0 flex-1 truncate font-semibold">{item.email}</span>
+                  <span className="text-[#417846]">sugestão: {item.sugestao}</span>
+                  {campaignId && !isPreview && recipientStatuses[item.email] === 'pendente' && !['concluida','cancelada'].includes(campaignStatus ?? '') && <button type="button" onClick={() => void applyCorrections([item])} disabled={working} className="rounded-lg border border-[#247b79] px-3 py-1 font-bold text-[#247b79] disabled:opacity-60" data-testid={`button-accept-domain-suggestion-${item.linha}`}>Usar a sugestão</button>}
+                  {campaignId && recipientStatuses[item.email] && recipientStatuses[item.email] !== 'pendente' && <span className="text-[#8a6b2c]">Correção indisponível: destinatário já saiu da fila ({recipientStatuses[item.email]}).</span>}
+                  {campaignId && !isPreview && statusCheckDone && !statusCheckFailed && !recipientStatuses[item.email] && <span className="text-[#8a6b2c]">Endereço não encontrado na lista atual.</span>}
+                  {campaignId && !isPreview && statusCheckFailed && <span className="text-[#8a6b2c]">Não foi possível consultar o estado atual; atualize a página antes de corrigir.</span>}
+                  {campaignId && !isPreview && recipientStatuses[item.email] === 'pendente' && ['concluida','cancelada'].includes(campaignStatus ?? '') && <span className="text-[#8a6b2c]">Correção indisponível: a campanha foi concluída ou cancelada.</span>}
+                </li>
+              ))}
+            </ul>
+          </>}
           {notice && <p className="mt-3" role="status" data-testid="status-domain-correction">{notice}</p>}
+          {correctionResults.length > 0 && <ul className="mt-3 space-y-1 rounded-lg bg-white/70 p-3" aria-label="Resultado por endereço corrigido" data-testid="list-domain-correction-results">
+            {correctionResults.map((result, index) => {
+              const labels: Record<string, string> = {
+                corrigido: 'Corrigido',
+                nao_verificado: 'Corrigido — sem verificação',
+                bloqueado: 'Corrigido — bloqueado pelo veredito',
+                suprimido: 'Corrigido — suprimido',
+                duplicado_removido: 'Duplicidade — registro original excluído de forma reversível',
+                falhado: 'Falhou',
+              };
+              return <li key={`${result.original_email ?? result.email}-${index}`} className="break-words text-[11px]">
+                <strong>{result.original_email ?? 'Endereço'}{result.email && result.email !== result.original_email ? ` → ${result.email}` : ''}:</strong>{' '}
+                {labels[result.resultado ?? ''] ?? result.resultado ?? 'Resultado desconhecido'}
+                {result.mensagem ? ` — ${result.mensagem}` : ''}
+              </li>;
+            })}
+          </ul>}
           {unverified.length > 0 && <ul className="mt-3 space-y-2" data-testid="list-domain-correction-unverified">
             {unverified.map((email) => <li key={email} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-2">
               <span><strong>{email}</strong> — sem verificação ZeroBounce</span>

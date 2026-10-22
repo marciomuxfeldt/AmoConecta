@@ -87,26 +87,43 @@ router.post("/campaigns/:campaignId/recipient-domain-corrections", async (req, r
       const proposed = typeof item?.sugestao === "string" ? normalizeEmail(item.sugestao) : "";
       if (!original || !proposed || !/^[\x21-\x7e]+$/u.test(proposed) || /\s/u.test(proposed) ||
           suggestEmailDomain(original) !== proposed) {
-        results.push({ email: original, resultado: "rejeitado", mensagem: "Sugestão inválida: confira o endereço e tente novamente." });
+        results.push({ original_email: original, email: proposed, resultado: "falhado", mensagem: "Sugestão inválida: confira o endereço e tente novamente." });
         continue;
       }
-      const { data, error } = await supabaseAdminClient().rpc("correct_campaign_recipient_domain", {
-        p_campaign_id: campaignId,
-        p_original_email: original,
-        p_corrected_email: proposed,
-        p_actor_id: session.user.id,
-        p_actor_name: session.user.name,
-        p_actor_email: session.user.email,
-      });
-      if (error) {
-        const messages: Record<string, string> = {
-          campaign_finished: "A campanha já foi concluída ou cancelada.",
-          recipient_not_correctable: "Este destinatário não está mais pendente.",
-          invalid_correction: "O endereço corrigido não passou pela validação de formato.",
-        };
-        results.push({ email: original, resultado: "rejeitado", mensagem: messages[error.message] ?? "Não foi possível aplicar esta correção." });
-      } else {
-        results.push({ original_email: original, ...data });
+      try {
+        const { data, error } = await supabaseAdminClient().rpc("correct_campaign_recipient_domain", {
+          p_campaign_id: campaignId,
+          p_original_email: original,
+          p_corrected_email: proposed,
+          p_actor_id: session.user.id,
+          p_actor_name: session.user.name,
+          p_actor_email: session.user.email,
+        });
+        if (error) {
+          let message = "Não foi possível aplicar esta correção.";
+          if (/email_validation_job_active/u.test(error.message)) {
+            const { data: job } = await supabaseAdminClient().from("validacao_email_job")
+              .select("status,total_pendentes,processados")
+              .eq("campanha_id", campaignId)
+              .in("status", ["pendente", "processando", "sem_creditos", "erro"])
+              .order("criado_em", { ascending: false }).limit(1).maybeSingle();
+            message = job
+              ? `Há uma validação de e-mails ${job.status} (${job.processados} de ${job.total_pendentes} processados). A correção ficará disponível quando ela terminar; não há previsão de término.`
+              : "Há uma validação de e-mails em andamento. Tente novamente quando ela terminar.";
+          } else if (/campaign_finished/u.test(error.message)) {
+            message = "A campanha já foi concluída ou cancelada.";
+          } else if (/recipient_not_correctable/u.test(error.message)) {
+            message = "Este destinatário não está mais pendente.";
+          } else if (/invalid_correction/u.test(error.message)) {
+            message = "O endereço corrigido não passou pela validação de formato.";
+          }
+          results.push({ original_email: original, email: proposed, resultado: "falhado", mensagem: message });
+        } else {
+          results.push({ original_email: original, ...(data as Record<string, unknown>) });
+        }
+      } catch (itemError) {
+        req.log.error({ technicalError: getTechnicalError(itemError) }, "A single recipient domain correction failed");
+        results.push({ original_email: original, email: proposed, resultado: "falhado", mensagem: "Erro técnico ao corrigir este endereço; as demais sugestões foram processadas." });
       }
     }
     res.json({ results });
