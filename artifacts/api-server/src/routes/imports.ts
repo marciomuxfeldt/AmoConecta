@@ -21,7 +21,9 @@ import {
   ImportValidationError,
   campaignImportHeaderSignature,
   validateAndImportCsv,
+  suggestEmailDomain,
 } from "../lib/csv-import";
+import { normalizeEmail } from "../lib/email-normalization";
 import { logger } from "../lib/logger";
 import {
   getPublicTechnicalError,
@@ -47,6 +49,72 @@ const IMPORT_JOB_STATUSES = [
   "erro",
   "cancelada",
 ] as const;
+
+router.post("/campaigns/:campaignId/recipient-domain-corrections/status", async (req, res) => {
+  const session = await getSupabaseUser(req, res);
+  if (!session) { res.status(401).json({ error: "Sessão expirada." }); return; }
+  const campaignId = String(req.params.campaignId ?? "");
+  const emails = Array.isArray(req.body?.emails)
+    ? [...new Set(req.body.emails.filter((email: unknown): email is string => typeof email === "string").map(normalizeEmail))]
+    : [];
+  if (emails.length > 500) { res.status(422).json({ error: "Muitas sugestões para consultar." }); return; }
+  try {
+    const campaign = await findCampaign(campaignId);
+    if (!campaign) { res.status(404).json({ error: "Campanha não encontrada." }); return; }
+    const { data, error } = await supabaseAdminClient().from("destinatario")
+      .select("email,status").eq("campanha_id", campaignId).eq("is_lembrete", false).in("email", emails);
+    if (error) throw error;
+    res.json({ campaign_status: campaign.status, recipients: data ?? [] });
+  } catch (error) {
+    logSupabaseError(req, "Recipient domain correction status failed", error);
+    res.status(503).json({ error: "Não foi possível consultar os destinatários." });
+  }
+});
+
+router.post("/campaigns/:campaignId/recipient-domain-corrections", async (req, res) => {
+  const session = await getSupabaseUser(req, res);
+  if (!session) { res.status(401).json({ error: "Sessão expirada." }); return; }
+  const campaignId = String(req.params.campaignId ?? "");
+  const corrections = req.body?.corrections;
+  if (!Array.isArray(corrections) || corrections.length < 1 || corrections.length > 500) {
+    res.status(422).json({ error: "Informe de 1 a 500 sugestões." }); return;
+  }
+  try {
+    if (!(await findCampaign(campaignId))) { res.status(404).json({ error: "Campanha não encontrada." }); return; }
+    const results = [];
+    for (const item of corrections) {
+      const original = typeof item?.email === "string" ? normalizeEmail(item.email) : "";
+      const proposed = typeof item?.sugestao === "string" ? normalizeEmail(item.sugestao) : "";
+      if (!original || !proposed || !/^[\x21-\x7e]+$/u.test(proposed) || /\s/u.test(proposed) ||
+          suggestEmailDomain(original) !== proposed) {
+        results.push({ email: original, resultado: "rejeitado", mensagem: "Sugestão inválida: confira o endereço e tente novamente." });
+        continue;
+      }
+      const { data, error } = await supabaseAdminClient().rpc("correct_campaign_recipient_domain", {
+        p_campaign_id: campaignId,
+        p_original_email: original,
+        p_corrected_email: proposed,
+        p_actor_id: session.user.id,
+        p_actor_name: session.user.name,
+        p_actor_email: session.user.email,
+      });
+      if (error) {
+        const messages: Record<string, string> = {
+          campaign_finished: "A campanha já foi concluída ou cancelada.",
+          recipient_not_correctable: "Este destinatário não está mais pendente.",
+          invalid_correction: "O endereço corrigido não passou pela validação de formato.",
+        };
+        results.push({ email: original, resultado: "rejeitado", mensagem: messages[error.message] ?? "Não foi possível aplicar esta correção." });
+      } else {
+        results.push({ original_email: original, ...data });
+      }
+    }
+    res.json({ results });
+  } catch (error) {
+    logSupabaseError(req, "Recipient domain corrections failed", error);
+    res.status(503).json({ error: "Não foi possível corrigir os destinatários." });
+  }
+});
 type ImportJobStatus = (typeof IMPORT_JOB_STATUSES)[number];
 
 function logSupabaseError(

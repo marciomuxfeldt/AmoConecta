@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   CircleAlert,
   FileUp,
@@ -97,11 +97,110 @@ export function CampaignMissingDateNotice({ summary }: { summary?: CampaignRecip
   return <MissingDateWarning percent={share.percent} count={share.count} testId="status-campaign-missing-date-warning" />;
 }
 
-export function ImportDataQualityNotices({ summary }: { summary: ImportValidationSummary }) {
+export function ImportDataQualityNotices({
+  summary,
+  campaignId,
+  isPreview = false,
+}: {
+  summary: ImportValidationSummary;
+  campaignId?: string;
+  isPreview?: boolean;
+}) {
+  const [working, setWorking] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [resolved, setResolved] = useState<string[]>([]);
+  const [unverified, setUnverified] = useState<string[]>([]);
+  const [validationStarted, setValidationStarted] = useState<string[]>([]);
+  const [validationBusy, setValidationBusy] = useState<string | null>(null);
   const missing = summary.datas_ausentes ?? 0;
   const pct = summary.datas_ausentes_percentual ?? 0;
-  const typos = summary.dominios_suspeitos ?? [];
-  const typoTotal = summary.dominios_suspeitos_total ?? typos.length;
+  const typos = (summary.dominios_suspeitos ?? []).filter((item) => !resolved.includes(item.email));
+  const [recipientStatuses, setRecipientStatuses] = useState<Record<string, string>>({});
+  const [campaignStatus, setCampaignStatus] = useState<string | null>(null);
+  const [statusCheckDone, setStatusCheckDone] = useState(false);
+  const [statusCheckFailed, setStatusCheckFailed] = useState(false);
+  const typoTotal = resolved.length ? typos.length : (summary.dominios_suspeitos_total ?? typos.length);
+  const typoEmailKey = typos.map((item) => item.email).join('\u0000');
+  const eligibleTypos = typos.filter((item) =>
+    recipientStatuses[item.email] === 'pendente' &&
+    !['concluida', 'cancelada'].includes(campaignStatus ?? ''),
+  );
+  useEffect(() => {
+    if (!campaignId || isPreview || typos.length === 0) return;
+    let active = true;
+    void fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/recipient-domain-corrections/status`, {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emails: typoEmailKey ? typoEmailKey.split('\u0000') : [] }),
+    }).then(async (response) => {
+      if (!response.ok) throw new Error('status unavailable');
+      return response.json() as Promise<{ campaign_status?: string; recipients?: Array<{ email: string; status: string }> }>;
+    }).then((data) => {
+      if (!active) return;
+      setCampaignStatus(data.campaign_status ?? null);
+      setRecipientStatuses(Object.fromEntries((data.recipients ?? []).map((row) => [row.email, row.status])));
+      setStatusCheckDone(true);
+    }).catch(() => {
+      if (active) {
+        setStatusCheckDone(true);
+        setStatusCheckFailed(true);
+      }
+    });
+    return () => { active = false; };
+  }, [campaignId, isPreview, typoEmailKey]);
+  const applyCorrections = async (items: typeof typos) => {
+    if (!campaignId || !items.length || working) return;
+    setWorking(true);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/recipient-domain-corrections`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ corrections: items.map(({ email, sugestao }) => ({ email, sugestao })) }),
+      });
+      const payload = await response.json() as { results?: Array<{ email?: string; original_email?: string; resultado?: string; mensagem?: string }>; error?: string };
+      if (!response.ok) throw new Error(payload.error || 'Não foi possível corrigir os endereços.');
+      const results = payload.results ?? [];
+      const accepted = results.filter((result) => ['corrigido', 'nao_verificado', 'suprimido', 'bloqueado', 'duplicado_removido'].includes(result.resultado ?? ''));
+      setResolved((current) => [...new Set([...current, ...accepted.map((result) => result.original_email ?? '')])]);
+      const unverified = results.filter((result) => result.resultado === 'nao_verificado').length;
+      setUnverified((current) => [...new Set([...current, ...results.filter((result) => result.resultado === 'nao_verificado').map((result) => result.email ?? '')])]);
+      const duplicate = results.filter((result) => result.resultado === 'duplicado_removido').length;
+      const blocked = results.filter((result) => result.resultado === 'bloqueado' || result.resultado === 'suprimido').length;
+      const rejected = results.filter((result) => result.resultado === 'rejeitado');
+      setNotice([
+        `${accepted.length} de ${items.length} sugestão(ões) aplicada(s).`,
+        duplicate ? `${duplicate} endereço(s) duplicado(s) já constavam na campanha e foram removidos da lista.` : '',
+        blocked ? `${blocked} endereço(s) ficaram bloqueado(s).` : '',
+        unverified ? `${unverified} endereço(s) estão sem verificação ZeroBounce.` : '',
+        ...rejected.map((result) => result.mensagem ?? 'Uma correção não foi aplicada.'),
+      ].filter(Boolean).join(' '));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível corrigir os endereços.');
+    } finally {
+      setWorking(false);
+    }
+  };
+  const validateOne = async (email: string) => {
+    if (!campaignId || validationBusy) return;
+    setValidationBusy(email);
+    try {
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/email-validation/one`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const payload = await response.json() as { mensagem?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error || 'Não foi possível iniciar a validação.');
+      setValidationStarted((current) => [...new Set([...current, email])]);
+      setNotice(`${payload.mensagem ?? 'Validação adicionada à fila.'} Custo: 1 crédito.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível iniciar a validação.');
+    } finally {
+      setValidationBusy(null);
+    }
+  };
   if (!(pct > MISSING_DATE_WARNING_PERCENT) && typoTotal === 0) return null;
   return (
     <div className="mt-6 space-y-3" data-testid="import-data-quality-notices">
@@ -109,16 +208,35 @@ export function ImportDataQualityNotices({ summary }: { summary: ImportValidatio
       {typoTotal > 0 && (
         <div className="rounded-xl border border-[#e8c56f] bg-[#fff9e9] p-4 text-xs leading-5 text-[#74561c]" data-testid="status-import-suspicious-domains">
           <strong>{nf(typoTotal)} endereços com domínio possivelmente digitado errado.</strong>{' '}
-          Nada foi corrigido nem recusado: eles continuam na lista exatamente como vieram. Confira as sugestões e corrija na origem se fizer sentido.
+          Nada foi corrigido automaticamente. Confira cada sugestão antes de aceitá-la.
+          {campaignId && !isPreview && eligibleTypos.length > 1 && (
+            <button type="button" onClick={() => void applyCorrections(eligibleTypos)} disabled={working} className="ml-3 rounded-lg bg-[#247b79] px-3 py-1.5 font-bold text-white disabled:opacity-60" data-testid="button-accept-all-domain-suggestions">
+              {working ? 'Aplicando...' : `Aceitar todas as sugestões (${eligibleTypos.length})`}
+            </button>
+          )}
           <ul className="mt-3 divide-y divide-[#f1dfb8] rounded-lg border border-[#f1dfb8] bg-white/60">
             {typos.map((item) => (
               <li key={`${item.linha}-${item.email}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2" data-testid={`row-suspicious-domain-${item.linha}`}>
                 <span className="font-mono text-[10px] text-[#8a6b2c]">linha {item.linha}</span>
                 <span className="min-w-0 flex-1 truncate font-semibold">{item.email}</span>
                 <span className="text-[#417846]">sugestão: {item.sugestao}</span>
+                {campaignId && !isPreview && recipientStatuses[item.email] === 'pendente' && !['concluida','cancelada'].includes(campaignStatus ?? '') && <button type="button" onClick={() => void applyCorrections([item])} disabled={working} className="rounded-lg border border-[#247b79] px-3 py-1 font-bold text-[#247b79] disabled:opacity-60" data-testid={`button-accept-domain-suggestion-${item.linha}`}>Usar a sugestão</button>}
+                {campaignId && recipientStatuses[item.email] && recipientStatuses[item.email] !== 'pendente' && <span className="text-[#8a6b2c]">Correção indisponível: destinatário já saiu da fila ({recipientStatuses[item.email]}).</span>}
+                {campaignId && !isPreview && statusCheckDone && !statusCheckFailed && !recipientStatuses[item.email] && <span className="text-[#8a6b2c]">Endereço não encontrado na lista atual.</span>}
+                {campaignId && !isPreview && statusCheckFailed && <span className="text-[#8a6b2c]">Não foi possível consultar o estado atual; atualize a página antes de corrigir.</span>}
+                {campaignId && !isPreview && recipientStatuses[item.email] === 'pendente' && ['concluida','cancelada'].includes(campaignStatus ?? '') && <span className="text-[#8a6b2c]">Correção indisponível: a campanha foi concluída ou cancelada.</span>}
               </li>
             ))}
           </ul>
+          {notice && <p className="mt-3" role="status" data-testid="status-domain-correction">{notice}</p>}
+          {unverified.length > 0 && <ul className="mt-3 space-y-2" data-testid="list-domain-correction-unverified">
+            {unverified.map((email) => <li key={email} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-2">
+              <span><strong>{email}</strong> — sem verificação ZeroBounce</span>
+              {validationStarted.includes(email)
+                ? <span className="font-semibold">Validação na fila (1 crédito)</span>
+                : <button type="button" onClick={() => void validateOne(email)} disabled={Boolean(validationBusy)} className="rounded-lg border border-[#247b79] px-3 py-1 font-bold text-[#247b79] disabled:opacity-60">Validar este endereço (1 crédito)</button>}
+            </li>)}
+          </ul>}
           {typoTotal > typos.length && <p className="mt-2">Mostrando {nf(typos.length)} de {nf(typoTotal)}.</p>}
         </div>
       )}

@@ -1325,9 +1325,11 @@ function CampaignForm({
 function ImportSummary({
   summary,
   isPreview = false,
+  campaignId,
 }: {
   summary: ImportValidationSummary;
   isPreview?: boolean;
+  campaignId: string;
 }) {
   const maxRecency = Math.max(...(summary.recencia?.map((item) => item.quantidade) ?? [1]), 1);
   const hasDeliverySnapshot =
@@ -1413,7 +1415,7 @@ function ImportSummary({
            ))}
          </div>
        </div>
-       <ImportDataQualityNotices summary={summary} />
+       <ImportDataQualityNotices summary={summary} campaignId={campaignId} isPreview={isPreview} />
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <div className="rounded-xl border border-[#e5ddd0] bg-[#f8f3ec] p-4">
           <div className="flex items-center justify-between"><h4 className="text-sm font-extrabold text-[#263044]">Pontos de atenção</h4><CircleAlert size={15} className="text-[#d35f2a]" /></div>
@@ -1985,7 +1987,7 @@ export function ImportPanel({ campaignId }: { campaignId: string }) {
       )}
       {cancelStatus && <p className="mt-4 rounded-lg border border-[#cfe4c7] bg-[#f2f8ee] px-3 py-2 text-xs text-[#417846]" role="status" data-testid="status-import-cancelled">{cancelStatus}</p>}
       {error && <div className="mt-5 flex items-start gap-3 rounded-xl border border-[#efc9ba] bg-[#fff0e9] px-4 py-3 text-sm leading-5 text-[#a64220]" data-testid="status-import-error"><CircleAlert size={17} className="mt-0.5 shrink-0" /><span>{error}</span><button type="button" onClick={() => setError(null)} className="ml-auto rounded p-1" aria-label="Fechar erro de importação" data-testid="button-dismiss-import-error"><X size={14} /></button></div>}
-      {summary && <ImportSummary summary={summary} isPreview={awaitingDateConfirmation} />}
+      {summary && <ImportSummary summary={summary} campaignId={campaignId} isPreview={awaitingDateConfirmation} />}
     </section>
   );
 }

@@ -209,6 +209,44 @@ router.get("/campaigns/:campaignId/email-validation/quote", async (req, res) => 
   }
 });
 
+router.post("/campaigns/:campaignId/email-validation/one", async (req, res) => {
+  const session = await getSupabaseUser(req, res);
+  if (!session) { res.status(401).json({ error: "Sessão expirada." }); return; }
+  const campaignId = String(req.params.campaignId ?? "");
+  const email = typeof req.body?.email === "string" ? normalizeEmail(req.body.email) : "";
+  if (!email || !isSafeEmailForExternalValidation(email) || !/^[\x21-\x7e]+$/u.test(email)) {
+    res.status(422).json({ error: "O endereço não passou pela validação de formato." }); return;
+  }
+  try {
+    if (!(await findCampaign(campaignId))) { res.status(404).json({ error: "Campanha não encontrada." }); return; }
+    const client = supabaseAdminClient();
+    const { data: cached, error: cacheError } = await client.from("verificacao_email")
+      .select("status").eq("email", email).maybeSingle();
+    if (cacheError) throw cacheError;
+    if (cached) { res.status(409).json({ error: `Este endereço já tem veredito em cache: ${cached.status}.` }); return; }
+    const credits = await getZeroBounceCredits();
+    if (credits < 1) { res.status(409).json({ error: "Não há crédito ZeroBounce disponível." }); return; }
+    const { data: jobId, error } = await client.rpc("criar_validacao_unitaria_destinatario", {
+      p_campaign_id: campaignId, p_email: email, p_creditos: credits,
+      p_actor_id: session.user.id, p_actor_name: session.user.name, p_actor_email: session.user.email,
+    });
+    if (error) {
+      const message = /validation_job_active/u.test(error.message)
+        ? "Já existe uma validação ativa para esta campanha."
+        : /recipient_not_pending/u.test(error.message)
+          ? "O destinatário não está mais pendente."
+          : /campaign_finished/u.test(error.message)
+            ? "A campanha já foi concluída ou cancelada."
+            : "Não foi possível iniciar a validação individual.";
+      res.status(409).json({ error: message }); return;
+    }
+    res.status(202).json({ job_id: jobId, custo: 1, mensagem: "Validação individual adicionada à fila." });
+  } catch (error) {
+    req.log.error({ technicalError: getTechnicalError(error) }, "Single recipient email validation failed");
+    res.status(503).json({ error: publicError(error) });
+  }
+});
+
 router.post("/campaigns/:campaignId/email-validation/jobs", async (req, res) => {
   const params = StartCampaignEmailValidationParams.safeParse(req.params);
   const body = StartCampaignEmailValidationBody.safeParse(req.body);
