@@ -1,0 +1,62 @@
+A importação já detecta domínios que parecem digitado errado e mostra a sugestão:
+
+1 endereços com domínio possivelmente digitado errado. Nada foi corrigido nem recusado: eles continuam na lista exatamente como vieram. linha 1336 — jeisinha198@ivloud.com — sugestão: jeisinha198@icloud.com
+
+Mostrar sem oferecer a correção deixa o operador sem saída: corrigir na origem significa refazer a exportação inteira por causa de um endereço. Falta o botão de aceitar.
+
+1. O botão
+
+Em cada linha de sugestão, um botão Usar a sugestão. Acima da lista, quando houver mais de uma, um botão Aceitar todas as sugestões, com a quantidade.
+
+Ao aceitar, o destinatário passa a ter o endereço corrigido, e a linha some da lista de sugestões.
+
+A correção troca somente o domínio, exatamente como sugerido. Nunca mexa na parte antes do arroba — não há como adivinhar se jeisinha198 está certo, e inventar correção ali manda e-mail para outra pessoa.
+
+2. O endereço corrigido é um endereço novo
+
+Esta é a parte que exige cuidado. Antes de gravar a troca, o endereço corrigido precisa passar pelas mesmas portas que qualquer endereço importado:
+
+Já existe na mesma campanha? Se jeisinha198@icloud.com já estiver na lista, a troca criaria duplicata e a pessoa receberia duas vezes. Nesse caso, não troque: remova o destinatário com o endereço errado e informe que ele já constava na lista.
+
+Está na supressão? Se estiver, a troca é feita e o destinatário é marcado como suprimido, como aconteceria numa importação normal. Jamais mande para quem se descadastrou por causa de uma correção de digitação.
+
+Tem veredito da ZeroBounce no cache? Se o endereço corrigido já foi verificado antes, aplique o resultado na hora — inclusive o bloqueio, se for inválido, spamtrap, abuse ou do_not_mail.
+
+Se não tiver veredito, ele entra na lista sem validação. Numa campanha que já passou pela validação, isso abre um furo: um endereço não verificado dentro de uma lista verificada. Sinalize na tela que o endereço corrigido está sem verificação e ofereça validar só ele — é um crédito.
+
+3. Quando a troca é permitida
+
+Só para destinatário com status pendente e campanha que ainda não concluiu.
+
+Se o destinatário já saiu da fila — enviado, entregue, bounce —, a troca reescreveria o registro de para quem a mensagem foi. Nesse caso o botão não aparece, e a tela explica por quê.
+
+4. Registro da troca
+
+Guarde, para cada correção: o endereço original, o corrigido, quem aceitou e quando. O endereço original não pode simplesmente desaparecer — meses depois alguém vai perguntar por que a lista importada tem 9.526 linhas e o relatório mostra um endereço que não está no arquivo.
+
+Inclua a troca em evento_auditoria, e me diga se precisa de coluna ou tabela nova.
+
+Na exportação para BI, o endereço exportado é o corrigido. Se houver forma simples de indicar que aquele endereço foi corrigido manualmente, melhor; se exigir coluna nova, me pergunte antes.
+
+5. A normalização continua valendo
+
+O endereço corrigido passa pela mesma função de normalização e pelas mesmas constraints que qualquer outro — minúsculas, sem espaço nas pontas, sem espaço interno, ASCII puro. Se a correção produzir algo que viole qualquer uma delas, recuse a troca com mensagem clara em vez de deixar o banco rejeitar.
+
+Fora do escopo
+
+Não altere a detecção de domínios suspeitos, que já funciona. Não mexa na validação pela ZeroBounce, nos limites de reputação, na janela de envio nem na exclusão de destinatários.
+
+Critérios de aceite
+Aceitar a sugestão troca o domínio e o destinatário passa a constar com o endereço corrigido.
+Aceitar todas de uma vez funciona e informa quantas foram trocadas.
+Corrigir para um endereço que já está na mesma campanha não cria duplicata.
+Corrigir para um endereço que está na supressão não resulta em envio.
+Corrigir para um endereço com veredito ruim no cache de verificação resulta em bloqueio.
+Um endereço corrigido sem veredito aparece sinalizado como não verificado.
+O botão não aparece para destinatário que já recebeu.
+O endereço original fica registrado.
+Ao final
+
+SQL de qualquer migração nova em bloco de código único, o que preciso configurar à mão, e quais arquivos alterados são executados também pelo worker.
+
+Depois de entregar, não aplique nada: vou rodar a migração com ROLLBACK no lugar do COMMIT antes de valer.
