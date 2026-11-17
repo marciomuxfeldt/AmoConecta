@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION public.campaign_email_rollups(
 )
 LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public AS $$
   WITH facts AS (
-    SELECT d.campanha_id, lower(btrim(d.email)) AS email, 1 AS recipients,
+    SELECT d.campanha_id, public.normalize_email(d.email) AS email, 1 AS recipients,
       d.enviado_em IS NOT NULL OR d.status IN ('enviado','entregue','aberto','clicado','bounce') AS sent,
       d.entregue_em IS NOT NULL OR d.status IN ('entregue','aberto','clicado') AS delivered,
       d.aberto_em IS NOT NULL AS opened, d.clicado_em IS NOT NULL AS clicked,
@@ -19,11 +19,11 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public AS $$
       d.descadastrado_em IS NOT NULL AS unsubscribed
     FROM destinatario d
     WHERE d.campanha_id=ANY(p_campaign_ids) AND d.is_lembrete=p_is_reminder
-      AND nullif(btrim(d.email),'') IS NOT NULL
+      AND nullif(public.normalize_email(d.email),'') IS NOT NULL
     UNION ALL
     -- Preserve the existing event attribution: events are grouped by campaign
     -- and address, including event-only contacts, for either message rollup.
-    SELECT e.campanha_id, lower(btrim(e.email)), 0,
+    SELECT e.campanha_id, public.normalize_email(e.email), 0,
       e.tipo='email.sent',
       e.tipo IN ('email.delivered','email.opened','email.clicked','email.complained'),
       e.tipo='email.opened', e.tipo='email.clicked', e.tipo='email.bounced',
@@ -33,7 +33,7 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public AS $$
         ELSE 1 END,
       e.tipo='email.complained', false
     FROM evento_email e WHERE e.campanha_id=ANY(p_campaign_ids)
-      AND nullif(btrim(e.email),'') IS NOT NULL
+      AND nullif(public.normalize_email(e.email),'') IS NOT NULL
   ), contacts AS (
     SELECT f.campanha_id,f.email,sum(recipients) AS recipients,
       bool_or(sent) AS sent, bool_or(delivered) AS delivered,
@@ -60,16 +60,16 @@ CREATE OR REPLACE FUNCTION public.campaign_read_projection(
 ) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public AS $$
   WITH recipients AS (
-    SELECT public.normalize_email(d.email) AS email,d.excluido_em,
+    SELECT d.email,d.excluido_em,
       coalesce(c.incluir_desengajados,false) AS include_disengaged
     FROM destinatario d JOIN campanha c ON c.id=d.campanha_id
     WHERE d.campanha_id=p_campaign_id AND d.is_lembrete=false
-      AND nullif(public.normalize_email(d.email),'') IS NOT NULL
+      AND nullif(d.email,'') IS NOT NULL
   ), exclusions AS (
     SELECT DISTINCT email FROM recipients WHERE excluido_em IS NOT NULL
   ), flags AS (
     SELECT r.email,
-      EXISTS(SELECT 1 FROM supressao s WHERE public.normalize_email(s.email)=r.email) AS suppressed,
+      EXISTS(SELECT 1 FROM supressao s WHERE s.email=r.email) AS suppressed,
       EXISTS(SELECT 1 FROM contato_desengajamento cd
         WHERE cd.email=r.email AND cd.desengajado_cronico=true) AS chronic,
       EXISTS(SELECT 1 FROM exclusions x WHERE x.email=r.email) AS excluded,
@@ -135,5 +135,124 @@ REVOKE ALL ON FUNCTION public.campaign_email_rollups(uuid[],boolean) FROM PUBLIC
 REVOKE ALL ON FUNCTION public.campaign_read_projection(uuid,boolean,text[]) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.campaign_email_rollups(uuid[],boolean) TO service_role;
 GRANT EXECUTE ON FUNCTION public.campaign_read_projection(uuid,boolean,text[]) TO service_role;
+
+-- Diagnostic helpers live only in this SQL session, not in the public API.
+-- Frozen normalization used by the previous JavaScript: trim(), toLowerCase().
+CREATE OR REPLACE FUNCTION pg_temp.campaign_email_legacy_key(p_email text)
+RETURNS text LANGUAGE sql IMMUTABLE AS $$
+  SELECT lower(btrim(p_email,
+    U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF'));
+$$;
+
+-- Independent SQL transcription of the previous JavaScript rollup.
+-- No exclusion filter, and events belong to both main/reminder rollups.
+-- The last recipient by id supplies descadastrado_em, as in the paged loop.
+CREATE OR REPLACE FUNCTION pg_temp.campaign_email_rollups_previous(
+  p_campaign_ids uuid[], p_is_reminder boolean
+) RETURNS TABLE (
+  campanha_id uuid, destinatarios bigint, enviados bigint, entregues bigint,
+  aberturas bigint, cliques bigint, bounces bigint, "bouncesPermanentes" bigint,
+  "bouncesTemporarios" bigint, "bouncesIndeterminados" bigint,
+  reclamacoes bigint, descadastros bigint
+)
+LANGUAGE sql STABLE AS $$
+  WITH recipients AS (
+    SELECT d.campanha_id,pg_temp.campaign_email_legacy_key(d.email) AS email,
+      count(*) AS recipients,
+      bool_or(d.enviado_em IS NOT NULL OR d.status IN ('enviado','entregue','aberto','clicado','bounce')) AS sent,
+      bool_or(d.entregue_em IS NOT NULL OR d.status IN ('entregue','aberto','clicado')) AS delivered,
+      bool_or(d.aberto_em IS NOT NULL) AS opened,
+      bool_or(d.clicado_em IS NOT NULL) AS clicked,
+      bool_or(d.status='bounce') AS bounced,
+      (array_agg(d.descadastrado_em IS NOT NULL ORDER BY d.id DESC))[1] AS unsubscribed
+    FROM public.destinatario d
+    WHERE d.campanha_id=ANY(p_campaign_ids) AND d.is_lembrete=p_is_reminder
+      AND nullif(pg_temp.campaign_email_legacy_key(d.email),'') IS NOT NULL
+    GROUP BY d.campanha_id,pg_temp.campaign_email_legacy_key(d.email)
+  ), events AS (
+    SELECT e.campanha_id,pg_temp.campaign_email_legacy_key(e.email) AS email,
+      bool_or(e.tipo='email.sent') AS sent,
+      bool_or(e.tipo IN ('email.delivered','email.opened','email.clicked','email.complained')) AS delivered,
+      bool_or(e.tipo='email.opened') AS opened,bool_or(e.tipo='email.clicked') AS clicked,
+      bool_or(e.tipo='email.bounced') AS bounced,
+      max(CASE WHEN e.tipo<>'email.bounced' THEN 0
+        WHEN e.bounce_permanente IS TRUE OR pg_temp.campaign_email_legacy_key(e.bounce_tipo_bruto) IN ('permanent','hard') THEN 3
+        WHEN pg_temp.campaign_email_legacy_key(e.bounce_tipo_bruto) IN ('transient','temporary','soft','delayed') THEN 2
+        ELSE 1 END) AS severity,
+      bool_or(e.tipo='email.complained') AS complained
+    FROM public.evento_email e WHERE e.campanha_id=ANY(p_campaign_ids)
+      AND nullif(pg_temp.campaign_email_legacy_key(e.email),'') IS NOT NULL
+    GROUP BY e.campanha_id,pg_temp.campaign_email_legacy_key(e.email)
+  ), contacts AS (
+    SELECT coalesce(r.campanha_id,e.campanha_id) AS campanha_id,
+      coalesce(r.recipients,0) AS recipients,
+      coalesce(r.sent,false) OR coalesce(e.sent,false) AS sent,
+      coalesce(r.delivered,false) OR coalesce(e.delivered,false) AS delivered,
+      coalesce(r.opened,false) OR coalesce(e.opened,false) AS opened,
+      coalesce(r.clicked,false) OR coalesce(e.clicked,false) AS clicked,
+      coalesce(r.bounced,false) OR coalesce(e.bounced,false) AS bounced,
+      coalesce(e.severity,0) AS severity,coalesce(e.complained,false) AS complained,
+      coalesce(r.unsubscribed,false) AS unsubscribed
+    FROM recipients r FULL JOIN events e USING(campanha_id,email)
+  )
+  SELECT c.campanha_id,sum(recipients)::bigint,
+    count(*) FILTER(WHERE sent),count(*) FILTER(WHERE delivered),
+    count(*) FILTER(WHERE opened),count(*) FILTER(WHERE clicked),
+    count(*) FILTER(WHERE bounced),count(*) FILTER(WHERE bounced AND severity=3),
+    count(*) FILTER(WHERE bounced AND severity=2),
+    count(*) FILTER(WHERE bounced AND severity IN (0,1)),
+    count(*) FILTER(WHERE complained),count(*) FILTER(WHERE unsubscribed)
+  FROM contacts c GROUP BY c.campanha_id;
+$$;
+
+-- Check the live invariants and indexes rather than assuming migrations ran.
+SELECT conrelid::regclass AS tabela,conname,convalidated,
+  pg_get_constraintdef(oid) AS definicao
+FROM pg_constraint
+WHERE conrelid IN ('public.destinatario'::regclass,'public.supressao'::regclass,
+  'public.contato_desengajamento'::regclass,'public.evento_email'::regclass)
+  AND contype='c' ORDER BY tabela,conname;
+SELECT tablename,indexname,indexdef FROM pg_indexes
+WHERE schemaname='public' AND tablename IN ('supressao','contato_desengajamento');
+SELECT tgname,tgenabled,pg_get_triggerdef(oid) AS definicao FROM pg_trigger
+WHERE tgrelid='public.evento_email'::regclass AND NOT tgisinternal;
+SELECT
+  (SELECT count(*) FROM public.evento_email
+    WHERE email IS DISTINCT FROM public.normalize_email(email)) AS eventos_divergentes,
+  (SELECT count(*) FROM public.destinatario
+    WHERE nullif(public.normalize_email(email),'') IS NULL) AS destinatarios_email_vazio;
+
+-- Side by side for every campaign, main and reminder. {} means no contacts.
+-- Changes caused by canonical normalization remain visible as iguais=false.
+WITH ids AS (SELECT coalesce(array_agg(id),'{}'::uuid[]) AS ids FROM public.campanha),
+previous AS (
+  SELECT p.*,m.lembrete FROM ids CROSS JOIN (VALUES(false),(true)) m(lembrete)
+  CROSS JOIN LATERAL pg_temp.campaign_email_rollups_previous(ids.ids,m.lembrete) p
+), current AS (
+  SELECT n.*,m.lembrete FROM ids CROSS JOIN (VALUES(false),(true)) m(lembrete)
+  CROSS JOIN LATERAL public.campaign_email_rollups(ids.ids,m.lembrete) n
+)
+SELECT c.id AS campanha_id,m.lembrete,
+  coalesce(to_jsonb(p)-'campanha_id'-'lembrete','{}'::jsonb) AS anterior,
+  coalesce(to_jsonb(n)-'campanha_id'-'lembrete','{}'::jsonb) AS nova,
+  coalesce(to_jsonb(p)-'campanha_id'-'lembrete','{}'::jsonb)
+    =coalesce(to_jsonb(n)-'campanha_id'-'lembrete','{}'::jsonb) AS iguais
+FROM public.campanha c CROSS JOIN (VALUES(false),(true)) m(lembrete)
+LEFT JOIN previous p ON p.campanha_id=c.id AND p.lembrete=m.lembrete
+LEFT JOIN current n ON n.campanha_id=c.id AND n.lembrete=m.lembrete
+ORDER BY c.id,m.lembrete;
+
+-- Acceptance: Execution Time < 1000 ms for EACH statement on today's data.
+-- Do not apply if any exceeds that limit. Test with ROLLBACK instead of COMMIT.
+EXPLAIN (ANALYZE,BUFFERS)
+SELECT * FROM public.campaign_email_rollups(ARRAY(SELECT id FROM public.campanha),false);
+EXPLAIN (ANALYZE,BUFFERS)
+SELECT public.campaign_read_counts('8141923e-e3b3-46fd-a59b-19dcf42d5336',
+  (now() AT TIME ZONE 'America/Sao_Paulo')::date);
+-- true/empty allowlist is an isolated read-performance scenario, not a change
+-- to ENVIO_LIBERADO or ENVIO_ALLOWLIST. No recipient is authorized or sent.
+EXPLAIN (ANALYZE,BUFFERS)
+SELECT public.campaign_read_projection('8141923e-e3b3-46fd-a59b-19dcf42d5336',
+  true,ARRAY[]::text[]);
 
 COMMIT;

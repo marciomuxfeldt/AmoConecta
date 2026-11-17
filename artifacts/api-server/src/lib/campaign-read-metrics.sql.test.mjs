@@ -11,7 +11,7 @@ before(async () => {
   await db.exec(`
     CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
     CREATE TABLE campanha(id uuid primary key, incluir_desengajados boolean default false);
-    CREATE TABLE destinatario(campanha_id uuid,email text,status text,is_lembrete boolean default false,
+    CREATE TABLE destinatario(id uuid default gen_random_uuid(),campanha_id uuid,email text,status text,is_lembrete boolean default false,
       enviado_em timestamptz,entregue_em timestamptz,aberto_em timestamptz,clicado_em timestamptz,
       descadastrado_em timestamptz,excluido_em timestamptz,data_ultima_compra date);
     CREATE TABLE evento_email(campanha_id uuid,email text,tipo text,bounce_permanente boolean,bounce_tipo_bruto text);
@@ -113,4 +113,42 @@ test("read counts preserve inclusive date boundaries, future dates, excluded row
   assert.deepEqual(value.reminderStatusCounts,[1,0,0,0,0,0,0]);
   assert.equal(value.excludedCount,1);
   assert.deepEqual(value.recencyCounts,[2,2,2,2,1,1]);
+});
+
+test("new rollups match the frozen previous algorithm for exclusions, reminders, empty emails and delivered plus bounce", async () => {
+  const campaign = "00000000-0000-0000-0000-000000000003";
+  await db.query(`INSERT INTO destinatario(campanha_id,email,status,is_lembrete,entregue_em,excluido_em) VALUES
+    ($1,'bounce@example.test','bounce',false,now(),null),
+    ($1,'excluded@example.test','entregue',false,now(),now()),
+    ($1,'reminder@example.test','enviado',true,null,null),
+    ($1,'','pendente',false,null,null)`,[campaign]);
+  await db.query(`INSERT INTO evento_email VALUES
+    ($1,'bounce@example.test','email.delivered',null,null),
+    ($1,'bounce@example.test','email.bounced',true,'hard'),
+    ($1,'reminder@example.test','email.opened',null,null)`,[campaign]);
+  for (const reminder of [false,true]) {
+    const previous = (await db.query("SELECT * FROM pg_temp.campaign_email_rollups_previous(ARRAY[$1::uuid],$2)",[campaign,reminder])).rows;
+    const current = (await db.query("SELECT * FROM campaign_email_rollups(ARRAY[$1::uuid],$2)",[campaign,reminder])).rows;
+    assert.deepEqual(current,previous);
+  }
+  const row = (await db.query("SELECT * FROM campaign_email_rollups(ARRAY[$1::uuid],false)",[campaign])).rows[0];
+  assert.equal(Number(row.destinatarios),2,"excluded recipient remains counted; empty address does not");
+  assert.equal(Number(row.entregues),3,"delivery and bounce are independent in the previous screen metrics");
+  assert.equal(Number(row.bounces),1);
+  assert.equal(Number(row.aberturas),1,"reminder event is attributed to both rollups, as before");
+});
+
+test("canonical event normalization prevents an invisible address from creating a second contact", async () => {
+  const campaign = "00000000-0000-0000-0000-000000000004";
+  await db.query(`INSERT INTO destinatario(campanha_id,email,status,entregue_em)
+    VALUES($1,'same@example.test','entregue',now())`,[campaign]);
+  for (const type of ["email.sent","email.delivered"]) {
+    await db.query("INSERT INTO evento_email VALUES($1,$2,$3,null,null)",[campaign,"\u200Bsame@example.test",type]);
+  }
+  const current = (await db.query("SELECT * FROM campaign_email_rollups(ARRAY[$1::uuid],false)",[campaign])).rows[0];
+  const previous = (await db.query("SELECT * FROM pg_temp.campaign_email_rollups_previous(ARRAY[$1::uuid],false)",[campaign])).rows[0];
+  assert.equal(Number(current.enviados),1);
+  assert.equal(Number(current.entregues),1);
+  assert.equal(Number(previous.enviados),2);
+  assert.equal(Number(previous.entregues),2);
 });

@@ -17,3 +17,4 @@
 - [Campaign operational scope](campaign-operational-policy.md) — exclusions are campaign-only; resumed sends drive the next pause; external validation stays out of this batch.
 - [Email validation retry budget](email-validation-retry-budget.md) — keep three total attempts per address cumulative across resume; exhausted addresses are ignored, not classified.
 - [Campaign pause policy copy](campaign-pause-policy-copy.md) — display pause thresholds from the server policy through the API contract, never as duplicate frontend constants.
+- [Canonical e-mail normalization](email-normalization-policy.md) — the user reinforced that SQL must reuse the canonical normalizer, including webhook event keys.
