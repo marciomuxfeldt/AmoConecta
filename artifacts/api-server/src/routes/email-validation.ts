@@ -20,11 +20,62 @@ import { recordAuditEvent, teamAuditActor } from "../lib/audit-events";
 import { getTechnicalError } from "../lib/technical-error";
 
 const router: IRouter = Router();
-const PAGE_SIZE = 1_000;
 const IN_QUERY_URL_BUDGET = 5_500;
 const ACTIVE_JOB_STATUSES = ["pendente", "processando", "sem_creditos", "erro"];
+const JOB_SELECT = [
+  "id",
+  "campanha_id",
+  "status",
+  "total_pendentes",
+  "processados",
+  "custo_estimado",
+  "creditos_no_inicio",
+  "resultados",
+  "erro",
+  "proxima_tentativa_em",
+  "criado_em",
+  "iniciado_em",
+  "progresso_atualizado_em",
+  "criado_por_nome",
+  "criado_por_email",
+  "concluido_em",
+].join(",");
 
-type PendingRecipient = { id: string; email: string };
+const EMPTY_STATUS_COUNTS = {
+  valid: 0,
+  invalid: 0,
+  spamtrap: 0,
+  abuse: 0,
+  do_not_mail: 0,
+  catch_all: 0,
+  unknown: 0,
+  formato_invalido: 0,
+  erro: 0,
+  pendente: 0,
+  ignorado: 0,
+};
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function jobResponseFromRow(row: Record<string, unknown>) {
+  const results = recordValue(row.resultados);
+  const storedCounts = row.status === "concluida"
+    ? recordValue(results.por_status)
+    : {};
+  const storedExclusions = recordValue(results.exclusoes_automaticas);
+  return {
+    ...row,
+    por_status: { ...EMPTY_STATUS_COUNTS, ...storedCounts, erro: 0, pendente: 0 },
+    exclusoes_automaticas: {
+      catch_all: Number(storedExclusions.catch_all ?? 0),
+      unknown: Number(storedExclusions.unknown ?? 0),
+    },
+  };
+}
 
 function inFilter(values: readonly string[]): string {
   return `in.(${values.map((value) => `"${value.replace(/\\/gu, "\\\\").replace(/"/gu, '\\"')}"`).join(",")})`;
@@ -54,29 +105,6 @@ function makeBatches(values: readonly string[]): string[][] {
   }
   if (batch.length) batches.push(batch);
   return batches;
-}
-
-async function loadPendingRecipients(
-  campaignId: string,
-): Promise<PendingRecipient[]> {
-  const client = supabaseAdminClient();
-  const recipients: PendingRecipient[] = [];
-  for (let offset = 0; offset < 5_000_000; offset += PAGE_SIZE) {
-    const { data, error } = await client
-      .from("destinatario")
-      .select("id,email")
-      .eq("campanha_id", campaignId)
-      .eq("is_lembrete", false)
-      .eq("status", "pendente")
-      .is("excluido_em", null)
-      .order("id")
-      .range(offset, offset + PAGE_SIZE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as PendingRecipient[];
-    recipients.push(...rows);
-    if (rows.length < PAGE_SIZE) return recipients;
-  }
-  throw new Error("Pending campaign queue exceeded the supported validation snapshot size.");
 }
 
 async function loadCachedResults(emails: readonly string[]) {
@@ -128,51 +156,45 @@ async function getJobOverview(
     | typeof GetCampaignEmailValidationJobResponse
     | typeof StartCampaignEmailValidationResponse
     | typeof ResumeCampaignEmailValidationJobResponse,
+  campaignId?: string,
 ) {
-  const { data, error } = await supabaseAdminClient().rpc(
-    "resumo_job_validacao_email",
-    { p_job_id: jobId },
-  );
+  const { data, error } = await supabaseAdminClient()
+    .from("validacao_email_job")
+    .select(JOB_SELECT)
+    .eq("id", jobId)
+    .maybeSingle();
   if (error) throw error;
-  if (!data) return null;
-  return responseSchema.parse(data);
+  const row = data as unknown as Record<string, unknown> | null;
+  if (!row || (campaignId && row.campanha_id !== campaignId)) return null;
+  return responseSchema.parse(jobResponseFromRow(row));
 }
 
 async function loadQuote(campaignId: string) {
   const client = supabaseAdminClient();
-  const [recipients, activeResult, credits] = await Promise.all([
-    loadPendingRecipients(campaignId),
+  const [countsResult, activeResult, credits] = await Promise.all([
+    client.rpc("campaign_email_validation_quote", { p_campaign_id: campaignId }),
     client
       .from("validacao_email_job")
-      .select("id")
+      .select(JOB_SELECT)
       .eq("campanha_id", campaignId)
       .in("status", ACTIVE_JOB_STATUSES)
       .maybeSingle(),
     getZeroBounceCredits(),
   ]);
+  if (countsResult.error) throw countsResult.error;
   if (activeResult.error) throw activeResult.error;
 
-  const eligible = new Set<string>();
-  const invalid = new Set<string>();
-  for (const recipient of recipients) {
-    if (formatInvalidAddress(recipient.email)) {
-      invalid.add(normalizeEmail(recipient.email) || recipient.email);
-    } else {
-      eligible.add(normalizeEmail(recipient.email));
-    }
-  }
-  const cache = await loadCachedResults([...eligible]);
-  const activeJob = activeResult.data?.id
-    ? await getJobOverview(activeResult.data.id, GetCampaignEmailValidationJobResponse)
+  const counts = recordValue(countsResult.data);
+  const activeJobRow = activeResult.data as unknown as Record<string, unknown> | null;
+  const activeJob = activeJobRow
+    ? GetCampaignEmailValidationJobResponse.parse(jobResponseFromRow(activeJobRow))
     : null;
-  return quoteFromCounts(
-    recipients.length,
-    cache,
-    [...eligible],
-    invalid.size,
-    credits,
-    activeJob,
-  );
+  return GetCampaignEmailValidationQuoteResponse.parse({
+    ...counts,
+    creditos: credits,
+    creditos_faltantes: Math.max(0, Number(counts.a_verificar ?? 0) - credits),
+    job_ativo: activeJob,
+  });
 }
 
 function conflict(res: Response, message: string, quote: unknown) {
@@ -345,20 +367,10 @@ router.get(
         res.status(401).json({ error: "Sessão expirada." });
         return;
       }
-      const { data, error } = await supabaseAdminClient()
-        .from("validacao_email_job")
-        .select("id")
-        .eq("id", params.data.jobId)
-        .eq("campanha_id", params.data.campaignId)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) {
-        res.status(404).json({ error: "Validação não encontrada." });
-        return;
-      }
       const job = await getJobOverview(
         params.data.jobId,
         GetCampaignEmailValidationJobResponse,
+        params.data.campaignId,
       );
       if (!job) {
         res.status(404).json({ error: "Validação não encontrada." });

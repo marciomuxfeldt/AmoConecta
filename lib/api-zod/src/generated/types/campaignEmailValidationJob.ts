@@ -26,6 +26,7 @@ export interface CampaignEmailValidationJob {
   criado_em: Date;
   /** @nullable */
   iniciado_em: Date | null;
+  progresso_atualizado_em: Date;
   /** @nullable */
   criado_por_nome: string | null;
   /** @nullable */

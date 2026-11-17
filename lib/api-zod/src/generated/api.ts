@@ -2638,6 +2638,7 @@ export const GetCampaignEmailValidationQuoteResponse = zod.object({
   "proxima_tentativa_em": zod.coerce.date().nullable(),
   "criado_em": zod.coerce.date(),
   "iniciado_em": zod.coerce.date().nullable(),
+  "progresso_atualizado_em": zod.coerce.date(),
   "criado_por_nome": zod.string().nullable(),
   "criado_por_email": zod.string().nullable(),
   "concluido_em": zod.coerce.date().nullable()
@@ -2692,6 +2693,7 @@ export const StartCampaignEmailValidationResponse = zod.object({
   "proxima_tentativa_em": zod.coerce.date().nullable(),
   "criado_em": zod.coerce.date(),
   "iniciado_em": zod.coerce.date().nullable(),
+  "progresso_atualizado_em": zod.coerce.date(),
   "criado_por_nome": zod.string().nullable(),
   "criado_por_email": zod.string().nullable(),
   "concluido_em": zod.coerce.date().nullable()
@@ -2735,6 +2737,7 @@ export const GetCampaignEmailValidationJobResponse = zod.object({
   "proxima_tentativa_em": zod.coerce.date().nullable(),
   "criado_em": zod.coerce.date(),
   "iniciado_em": zod.coerce.date().nullable(),
+  "progresso_atualizado_em": zod.coerce.date(),
   "criado_por_nome": zod.string().nullable(),
   "criado_por_email": zod.string().nullable(),
   "concluido_em": zod.coerce.date().nullable()
@@ -2778,6 +2781,7 @@ export const ResumeCampaignEmailValidationJobResponse = zod.object({
   "proxima_tentativa_em": zod.coerce.date().nullable(),
   "criado_em": zod.coerce.date(),
   "iniciado_em": zod.coerce.date().nullable(),
+  "progresso_atualizado_em": zod.coerce.date(),
   "criado_por_nome": zod.string().nullable(),
   "criado_por_email": zod.string().nullable(),
   "concluido_em": zod.coerce.date().nullable()
@@ -2822,6 +2826,7 @@ export const CancelCampaignEmailValidationJobResponse = zod.object({
   "proxima_tentativa_em": zod.coerce.date().nullable(),
   "criado_em": zod.coerce.date(),
   "iniciado_em": zod.coerce.date().nullable(),
+  "progresso_atualizado_em": zod.coerce.date(),
   "criado_por_nome": zod.string().nullable(),
   "criado_por_email": zod.string().nullable(),
   "concluido_em": zod.coerce.date().nullable()

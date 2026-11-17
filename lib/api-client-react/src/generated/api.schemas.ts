@@ -932,6 +932,7 @@ export interface CampaignEmailValidationJob {
   criado_em: string;
   /** @nullable */
   iniciado_em: string | null;
+  progresso_atualizado_em: string;
   /** @nullable */
   criado_por_nome: string | null;
   /** @nullable */

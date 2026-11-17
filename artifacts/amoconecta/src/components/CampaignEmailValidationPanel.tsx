@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -18,6 +18,12 @@ import {
   useResumeCampaignEmailValidationJob,
   useStartCampaignEmailValidation,
 } from "@workspace/api-client-react";
+import {
+  isProgressStalled,
+  observedRemainingMinutes,
+  theoreticalDurationRange,
+  validationPollInterval,
+} from "./email-validation-progress";
 
 const nf = (value: number | null | undefined) =>
   new Intl.NumberFormat("pt-BR").format(value ?? 0);
@@ -69,6 +75,54 @@ function jobStatusLabel(status: CampaignEmailValidationJob["status"]): string {
   }
 }
 
+function formatMinutes(value: number): string {
+  if (value < 1) return "menos de 1 minuto";
+  if (value < 60) return `${value} min`;
+  const hours = Math.floor(value / 60);
+  const minutes = value % 60;
+  return minutes ? `${hours} h ${minutes} min` : `${hours} h`;
+}
+
+function formatDurationRange(itemCount: number): string {
+  const range = theoreticalDurationRange(itemCount);
+  if (!range) return "menos de 1 minuto";
+  if (range.minMinutes === range.maxMinutes) {
+    return `aproximadamente ${formatMinutes(range.minMinutes)}`;
+  }
+  return `aproximadamente ${formatMinutes(range.minMinutes)} a ${formatMinutes(range.maxMinutes)}`;
+}
+
+function formatTimeSince(timestamp: number, now: number): string {
+  if (!timestamp) return "aguardando a primeira atualização";
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1_000));
+  if (seconds < 5) return "agora";
+  if (seconds < 60) return `há ${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `há ${minutes} min`;
+  return `há ${Math.floor(minutes / 60)} h`;
+}
+
+function formatElapsed(milliseconds: number): string {
+  return formatMinutes(Math.floor(milliseconds / 60_000));
+}
+
+function readableJobError(error: string): string {
+  if (/ZEROBOUNCE_API_KEY/u.test(error)) {
+    return "A integração com a ZeroBounce não está configurada no worker. A equipe responsável precisa corrigir a configuração antes de retomar.";
+  }
+  if (/saldo insuficiente/u.test(error)) {
+    return "O saldo da ZeroBounce é insuficiente. Atualize o saldo e retome a validação.";
+  }
+  if (/limitou temporariamente|falhas temporárias|erro individual/u.test(error)) {
+    return "A ZeroBounce limitou temporariamente algumas consultas. O worker tentará novamente após o intervalo indicado.";
+  }
+  if (/validação externa falhou/u.test(error)) {
+    return "A consulta ao serviço externo falhou. O worker tentará novamente; nenhum resultado foi salvo para as consultas que falharam.";
+  }
+  if (/cancelada/u.test(error)) return "A validação foi cancelada.";
+  return "A validação encontrou uma falha técnica. Confira a configuração da ZeroBounce e tente retomar; se persistir, peça apoio técnico.";
+}
+
 export function CampaignEmailValidationPanel({
   campaignId,
   campaignStatus,
@@ -80,7 +134,18 @@ export function CampaignEmailValidationPanel({
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
-  const quoteQuery = useGetCampaignEmailValidationQuote(campaignId);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const quoteQuery = useGetCampaignEmailValidationQuote(campaignId, {
+    query: {
+      queryKey: getGetCampaignEmailValidationQuoteQueryKey(campaignId),
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
+  });
   const quote = quoteQuery.data;
   const start = useStartCampaignEmailValidation();
   const jobId = quote?.job_ativo?.id ?? selectedJobId ?? "";
@@ -88,9 +153,11 @@ export function CampaignEmailValidationPanel({
     query: {
       queryKey: getGetCampaignEmailValidationJobQueryKey(campaignId, jobId),
       enabled: Boolean(jobId),
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
       refetchInterval: (query) => {
         const status = query.state.data?.status;
-        return status === "processando" || status === "pendente" ? 5_000 : false;
+        return validationPollInterval(status, query.state.fetchStatus === "fetching");
       },
     },
   });
@@ -135,8 +202,8 @@ export function CampaignEmailValidationPanel({
   });
 
   const refresh = () => {
-    void quoteQuery.refetch();
-    if (jobId) void jobQuery.refetch();
+    if (!quoteQuery.isFetching) void quoteQuery.refetch({ cancelRefetch: false });
+    if (jobId) void jobQuery.refetch({ cancelRefetch: false });
   };
   const invalidateAfterStart = (result: CampaignEmailValidationJob) => {
     setSelectedJobId(result.id);
@@ -175,6 +242,28 @@ export function CampaignEmailValidationPanel({
   const progress = job?.total_pendentes
     ? Math.min(100, Math.round((job.processados / job.total_pendentes) * 100))
     : 0;
+  const elapsedMs = job?.iniciado_em
+    ? Math.max(
+      0,
+      Date.parse(job.concluido_em ?? new Date(now).toISOString()) -
+        Date.parse(job.iniciado_em),
+    )
+    : null;
+  const observedEta = job?.status === "processando"
+    ? observedRemainingMinutes(job.processados, job.total_pendentes, job.iniciado_em, now)
+    : null;
+  const estimatedRemaining = job
+    ? theoreticalDurationRange(Math.max(0, job.total_pendentes - job.processados))
+    : null;
+  const stalled = isProgressStalled(
+    job?.status,
+    job?.progresso_atualizado_em,
+    now,
+  );
+  const stalledMinutes = stalled && job?.progresso_atualizado_em
+    ? Math.floor((now - Date.parse(job.progresso_atualizado_em)) / 60_000)
+    : 0;
+  const jobUpdatedAt = jobQuery.dataUpdatedAt || quoteQuery.dataUpdatedAt;
 
   return (
     <section
@@ -313,18 +402,61 @@ export function CampaignEmailValidationPanel({
                   style={{ width: `${terminal ? 100 : progress}%` }}
                 />
               </div>
+              {elapsedMs !== null && (
+                <div className="mt-3 grid gap-2 text-xs text-[#6d7180] sm:grid-cols-2">
+                  <p data-testid="text-email-validation-elapsed">
+                    Tempo decorrido: <strong className="text-[#263044]">{formatElapsed(elapsedMs)}</strong>
+                  </p>
+                  <p data-testid="text-email-validation-eta">
+                    {terminal
+                      ? "Tempo restante: concluída"
+                      : observedEta !== null
+                        ? <>Tempo restante estimado: <strong className="text-[#263044]">{formatMinutes(observedEta)}</strong> (ritmo observado)</>
+                        : <>Tempo restante: {estimatedRemaining
+                          ? `${formatMinutes(estimatedRemaining.minMinutes)} a ${formatMinutes(estimatedRemaining.maxMinutes)} (estimativa teórica)`
+                          : "menos de 1 minuto (estimativa teórica)"}; calculando o ritmo real.</>}
+                  </p>
+                </div>
+              )}
+              {job.status === "pendente" && !job.iniciado_em && (
+                <p className="mt-3 text-xs text-[#6d7180]" data-testid="text-email-validation-waiting-start">
+                  Duração estimada: {formatDurationRange(job.total_pendentes)}. O tempo decorrido começa quando o worker iniciar.
+                </p>
+              )}
               {job.status === "processando" || job.status === "pendente" ? (
                 <p className="mt-3 text-xs text-[#6d7180]" data-testid="text-email-validation-live">
-                  O progresso é atualizado automaticamente. A fila da campanha permanece bloqueada até a validação terminar.
+                  A validação continua em segundo plano e o progresso é atualizado automaticamente a cada 10 segundos. A fila permanece bloqueada até terminar.
                 </p>
               ) : null}
+              {jobUpdatedAt > 0 && (
+                <p className="mt-2 text-xs text-[#92939a]" data-testid="text-email-validation-last-refresh">
+                  Tela atualizada {formatTimeSince(jobUpdatedAt, now)}.
+                </p>
+              )}
+              {stalled && (
+                <p
+                  className="mt-3 rounded-lg border border-[#efc9ba] bg-[#fff0e9] px-3 py-2 text-xs leading-5 text-[#8e3a20]"
+                  role="alert"
+                  data-testid="status-email-validation-stalled"
+                >
+                  Sem progresso há {stalledMinutes} {stalledMinutes === 1 ? "minuto" : "minutos"}. Último avanço: {formatDate(job.progresso_atualizado_em)}. Verifique o worker; esta tela não reinicia nem altera o job.
+                </p>
+              )}
+              {jobQuery.isError && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[#a64220]" role="alert" data-testid="status-email-validation-refresh-error">
+                  <span>Não foi possível atualizar o progresso agora. O último dado continua salvo.</span>
+                  <button type="button" onClick={() => void jobQuery.refetch()} className="action-button action-button-secondary" data-testid="button-email-validation-progress-retry">
+                    <RefreshCw size={13} /> Atualizar progresso
+                  </button>
+                </div>
+              )}
               {job.erro && (
                 <p
                   className="mt-3 flex items-start gap-2 rounded-lg border border-[#efc9ba] bg-[#fff0e9] px-3 py-2 text-xs leading-5 text-[#a64220]"
                   role="alert"
                   data-testid="status-email-validation-job-error"
                 >
-                  <CircleAlert size={14} className="mt-0.5 shrink-0" /> {job.erro}
+                  <CircleAlert size={14} className="mt-0.5 shrink-0" /> {readableJobError(job.erro)}
                 </p>
               )}
               {(job.status === "sem_creditos" || job.status === "erro") && (
@@ -411,22 +543,28 @@ export function CampaignEmailValidationPanel({
                 </p>
               )}
 
-              <div className="mt-4 grid gap-x-4 gap-y-2 border-t border-[#dce8e2] pt-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
-                <Count label="Válidos" value={job.por_status.valid} />
-                <Count label="Inválidos" value={job.por_status.invalid} />
-                <Count label="Spamtrap" value={job.por_status.spamtrap} />
-                <Count label="Abuse / não enviar" value={job.por_status.abuse + job.por_status.do_not_mail} />
-                <Count label="Catch-all" value={job.por_status.catch_all} />
-                <Count label="Desconhecidos" value={job.por_status.unknown} />
-                <Count label="Formato inválido" value={job.por_status.formato_invalido} />
-                <Count label="Erros temporários" value={job.por_status.erro} />
-                <Count label="Ignorados após três tentativas" value={job.por_status.ignorado} />
-                {job.status === "concluida" && (
+              {job.status === "concluida" ? (
+                <div className="mt-4 grid gap-x-4 gap-y-2 border-t border-[#dce8e2] pt-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                  <Count label="Válidos" value={job.por_status.valid} />
+                  <Count label="Inválidos" value={job.por_status.invalid} />
+                  <Count label="Spamtrap" value={job.por_status.spamtrap} />
+                  <Count label="Abuse / não enviar" value={job.por_status.abuse + job.por_status.do_not_mail} />
+                  <Count label="Catch-all" value={job.por_status.catch_all} />
+                  <Count label="Desconhecidos" value={job.por_status.unknown} />
+                  <Count label="Formato inválido" value={job.por_status.formato_invalido} />
+                  <Count label="Ignorados após três tentativas" value={job.por_status.ignorado} />
                   <p className="text-[#247b79] sm:col-span-2 lg:col-span-4" data-testid="text-email-validation-complete">
                     Concluída em {formatDate(job.concluido_em)}. Exclusões aplicadas nesta campanha: {nf(job.exclusoes_automaticas.catch_all)} catch-all e {nf(job.exclusoes_automaticas.unknown)} desconhecidos.
                   </p>
-                )}
-              </div>
+                </div>
+              ) : (
+                <p
+                  className="mt-4 border-t border-[#dce8e2] pt-3 text-xs leading-5 text-[#6d7180]"
+                  data-testid="text-email-validation-partial-counts-unavailable"
+                >
+                  O resumo por status aparece ao concluir. Para mostrar parciais sem varrer cada item a cada atualização, o worker precisaria manter contadores agregados no próprio job.
+                </p>
+              )}
             </div>
           )}
 
@@ -462,6 +600,9 @@ export function CampaignEmailValidationPanel({
               </h3>
               <p className="mt-2 text-xs leading-5 text-[#6d7180]">
                 Serão verificados até {nf(quote.a_verificar)} endereços únicos ainda sem resultado em cache. A estimativa é de até {nf(quote.a_verificar)} créditos; o saldo atual é {nf(quote.creditos)}. A fila ficará bloqueada até o job terminar.
+              </p>
+              <p className="mt-2 text-xs leading-5 text-[#6d7180]" data-testid="text-email-validation-theoretical-duration">
+                Duração teórica: {formatDurationRange(quote.a_verificar)}, considerando o limite de consultas da ZeroBounce. A validação continua em segundo plano; você pode sair desta tela.
               </p>
               <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <button

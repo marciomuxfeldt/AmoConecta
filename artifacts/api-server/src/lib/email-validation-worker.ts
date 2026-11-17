@@ -11,6 +11,7 @@ import {
 } from "./zerobounce";
 import { getTechnicalError } from "./technical-error";
 import { logger } from "./logger";
+import { progressTimestampForIncrease } from "./email-validation-progress";
 
 const BATCH_SIZE = 100;
 const MAX_ADDRESS_ATTEMPTS = 3;
@@ -123,6 +124,7 @@ async function selectJob(): Promise<ValidationJob | null> {
     .update({
       status: "processando",
       iniciado_em: new Date().toISOString(),
+      progresso_atualizado_em: new Date().toISOString(),
       erro: null,
     })
     .eq("id", pending.data.id)
@@ -336,8 +338,10 @@ async function finishOrRetry(job: ValidationJob): Promise<void> {
       .in("id", ignoredIds)
       .eq("status", "erro");
     if (ignored.error) throw ignored.error;
+    const nextProcessed = Math.min(job.total_pendentes, job.processados + ignoredIds.length);
     await markJob(job.id, "pendente", {
-      processados: Math.min(job.total_pendentes, job.processados + ignoredIds.length),
+      processados: nextProcessed,
+      ...progressTimestampForIncrease(job.processados, nextProcessed),
       proxima_tentativa_em: new Date().toISOString(),
       erro: null,
     });
@@ -422,8 +426,10 @@ async function processJobBatch(job: ValidationJob): Promise<void> {
   if (cacheMisses.length === 0) {
     const completed = malformedCount + cachedCount;
     if (completed > 0) {
+      const nextProcessed = job.processados + completed;
       await markJob(job.id, "processando", {
-        processados: job.processados + completed,
+        processados: nextProcessed,
+        ...progressTimestampForIncrease(job.processados, nextProcessed),
         erro: null,
       });
     }
@@ -467,8 +473,10 @@ async function processJobBatch(job: ValidationJob): Promise<void> {
     if (claimed.length === 0) {
       const completed = malformedCount + cachedCount + newlyCachedCount;
       if (completed > 0) {
+        const nextProcessed = job.processados + completed;
         await markJob(job.id, "processando", {
-          processados: job.processados + completed,
+          processados: nextProcessed,
+          ...progressTimestampForIncrease(job.processados, nextProcessed),
           erro: null,
         });
       }
@@ -554,8 +562,10 @@ async function processJobBatch(job: ValidationJob): Promise<void> {
             item.message,
           )),
     );
+    const nextProcessed = job.processados + completed;
     await markJob(job.id, "processando", {
-      processados: job.processados + completed,
+      processados: nextProcessed,
+      ...progressTimestampForIncrease(job.processados, nextProcessed),
       erro: insufficientCreditsForAddress
         ? "A ZeroBounce informou saldo insuficiente."
         : results.some((item) => item.kind === "error")

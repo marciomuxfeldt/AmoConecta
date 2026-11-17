@@ -87,6 +87,13 @@ before(async () => {
   `);
   await db.exec(await sqlFile("migrations/202610050020_email_validation.sql"));
   await db.exec(await sqlFile("migrations/202610050021_campaign_send_window.sql"));
+  const progressMigrationResults = await db.exec(
+    await sqlFile("migrations/202611170025_campaign_email_validation_progress.sql"),
+  );
+  const quoteVerification = progressMigrationResults
+    .find((result) => result.fields.some((field) => field.name === "results_match"))
+    ?.rows[0];
+  assert.equal(quoteVerification?.results_match, true);
   const initialWindow = await row(
     "SELECT janela_envio_inicio::text, janela_envio_fim::text FROM campanha WHERE id=$1",
     [campaign],
@@ -392,6 +399,10 @@ test("exclusion restoration is rejected after completion and diagnostics show fo
 test("email validation holds the queue, excludes reversible risk groups, and blocks global unsafe results", async () => {
   const validationCampaign = "00000000-0000-0000-0000-000000000003";
   await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [validationCampaign]);
+  await db.query(
+    "UPDATE campanha SET janela_envio_inicio='00:00',janela_envio_fim='23:59' WHERE id=$1",
+    [validationCampaign],
+  );
   const addresses = [
     ["safe@example.test", "valid"],
     ["bad@example.test", "invalid"],
@@ -508,6 +519,10 @@ test("email validation holds the queue, excludes reversible risk groups, and blo
   const laterCampaign = "00000000-0000-0000-0000-000000000004";
   await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [laterCampaign]);
   await db.query(
+    "UPDATE campanha SET janela_envio_inicio='00:00',janela_envio_fim='23:59' WHERE id=$1",
+    [laterCampaign],
+  );
+  await db.query(
     `INSERT INTO destinatario(campanha_id,email,status,is_lembrete) VALUES
      ($1,'bad@example.test','pendente',false),
      ($1,'trap@example.test','pendente',false)`,
@@ -616,6 +631,10 @@ test("spamtrap cache blocks a legacy recipient with internal whitespace before r
   const legacyCampaign = "00000000-0000-0000-0000-000000000007";
   const malformedEmail = "joao silva@gmail.com";
   await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [legacyCampaign]);
+  await db.query(
+    "UPDATE campanha SET janela_envio_inicio='00:00',janela_envio_fim='23:59' WHERE id=$1",
+    [legacyCampaign],
+  );
   await db.exec(
     "ALTER TABLE destinatario DROP CONSTRAINT destinatario_email_normalizado_check",
   );
@@ -701,6 +720,10 @@ test("validation cancellation releases the queue and an exhausted item is ignore
   const cancelCampaign = "00000000-0000-0000-0000-000000000005";
   await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [cancelCampaign]);
   await db.query(
+    "UPDATE campanha SET janela_envio_inicio='00:00',janela_envio_fim='23:59' WHERE id=$1",
+    [cancelCampaign],
+  );
+  await db.query(
     `INSERT INTO destinatario(campanha_id,email,status,is_lembrete) VALUES
       ($1,'cancel-one@example.test','pendente',false),
       ($1,'cancel-two@example.test','pendente',false)`,
@@ -731,6 +754,10 @@ test("validation cancellation releases the queue and an exhausted item is ignore
   const retryCampaign = "00000000-0000-0000-0000-000000000006";
   await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [retryCampaign]);
   await db.query(
+    "UPDATE campanha SET janela_envio_inicio='00:00',janela_envio_fim='23:59' WHERE id=$1",
+    [retryCampaign],
+  );
+  await db.query(
     `INSERT INTO destinatario(campanha_id,email,status,is_lembrete) VALUES
       ($1,'exhausted@example.test','pendente',false),
       ($1,'retry@example.test','pendente',false)`,
@@ -753,7 +780,9 @@ test("validation cancellation releases the queue and an exhausted item is ignore
     [retryJob.id],
   );
   await db.query(
-    "UPDATE validacao_email_job SET status='erro' WHERE id=$1",
+    `UPDATE validacao_email_job
+     SET status='erro',progresso_atualizado_em='2000-01-01T00:00:00Z'
+     WHERE id=$1`,
     [retryJob.id],
   );
   assert.equal(
@@ -774,13 +803,22 @@ test("validation cancellation releases the queue and an exhausted item is ignore
       .processados,
     1,
   );
+  assert.ok(
+    Date.parse((await row(
+      "SELECT progresso_atualizado_em FROM validacao_email_job WHERE id=$1",
+      [retryJob.id],
+    )).progresso_atualizado_em) > Date.parse("2000-01-01T00:00:00Z"),
+    "resuming ignored exhausted items records real progress",
+  );
   await db.query(
     `UPDATE validacao_email_job_item SET status='validado',resultado_status='valid'
      WHERE job_id=$1 AND email='retry@example.test'`,
     [retryJob.id],
   );
   await db.query(
-    "UPDATE validacao_email_job SET status='processando' WHERE id=$1",
+    `UPDATE validacao_email_job
+     SET status='processando',progresso_atualizado_em='2000-01-01T00:00:00Z'
+     WHERE id=$1`,
     [retryJob.id],
   );
   const summary = await row(
@@ -789,4 +827,41 @@ test("validation cancellation releases the queue and an exhausted item is ignore
   );
   assert.equal(summary.value.por_status.ignorado, 1);
   assert.equal(summary.value.por_status.valid, 1);
+  assert.ok(
+    Date.parse((await row(
+      "SELECT progresso_atualizado_em FROM validacao_email_job WHERE id=$1",
+      [retryJob.id],
+    )).progresso_atualizado_em) > Date.parse("2000-01-01T00:00:00Z"),
+    "final reconciliation records a processed-count increase",
+  );
+});
+
+test("quote SQL matches queue filters, unique addresses, cache, and invalid-format counts", async () => {
+  const quoteCampaign = "a0000000-0000-0000-0000-000000000007";
+  await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [quoteCampaign]);
+  await db.query(
+    `INSERT INTO destinatario(campanha_id,email,status,is_lembrete,excluido_em) VALUES
+      ($1,'cache@example.test','pendente',false,NULL),
+      ($1,'not-cached@example.test','pendente',false,NULL),
+      ($1,'malformed-address','pendente',false,NULL),
+      ($1,'no-domain-dot@invalid','pendente',false,NULL),
+      ($1,'reminder@example.test','pendente',true,NULL),
+      ($1,'sent@example.test','enviado',false,NULL),
+      ($1,'excluded@example.test','pendente',false,now())`,
+    [quoteCampaign],
+  );
+  await db.query(
+    `INSERT INTO verificacao_email(email,status,resposta_bruta,verificado_em)
+     VALUES('cache@example.test','valid','{}'::jsonb,'2025-10-01T12:00:00Z')`,
+  );
+
+  const quote = (await row(
+    "SELECT campaign_email_validation_quote($1) AS value",
+    [quoteCampaign],
+  )).value;
+  assert.equal(quote.pendentes, 4);
+  assert.equal(quote.cacheados, 1);
+  assert.equal(quote.a_verificar, 1);
+  assert.equal(quote.formato_invalido, 2);
+  assert.equal(Date.parse(quote.cache_mais_antigo_em), Date.parse("2025-10-01T12:00:00Z"));
 });

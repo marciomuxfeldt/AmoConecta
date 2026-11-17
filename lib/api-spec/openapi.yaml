@@ -2962,10 +2962,11 @@ components:
         proxima_tentativa_em: { type: ["string", "null"], format: date-time }
         criado_em: { type: string, format: date-time }
         iniciado_em: { type: ["string", "null"], format: date-time }
+        progresso_atualizado_em: { type: string, format: date-time }
         criado_por_nome: { type: ["string", "null"] }
         criado_por_email: { type: ["string", "null"] }
         concluido_em: { type: ["string", "null"], format: date-time }
-      required: [id, campanha_id, status, total_pendentes, processados, custo_estimado, creditos_no_inicio, por_status, exclusoes_automaticas, erro, proxima_tentativa_em, criado_em, iniciado_em, criado_por_nome, criado_por_email, concluido_em]
+      required: [id, campanha_id, status, total_pendentes, processados, custo_estimado, creditos_no_inicio, por_status, exclusoes_automaticas, erro, proxima_tentativa_em, criado_em, iniciado_em, progresso_atualizado_em, criado_por_nome, criado_por_email, concluido_em]
     CampaignEmailValidationQuote:
       type: object
       properties:
