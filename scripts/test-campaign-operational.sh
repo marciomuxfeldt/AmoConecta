@@ -26,6 +26,7 @@ await build({
 JS
 node --test "$TEST_OUTPUT"/*.mjs
 node --test artifacts/api-server/src/lib/flexible-import.sql.test.mjs
+node --test artifacts/api-server/src/lib/campaign-read-metrics.sql.test.mjs
 node --test artifacts/api-server/src/lib/campaign-domain-corrections.sql.test.mjs
 node --test artifacts/api-server/src/lib/campaign-controls.sql.test.mjs
 pnpm --filter @workspace/amoconecta test

@@ -545,6 +545,7 @@ export function CampaignsPage({ user }: { user: SessionUser }) {
   const campaignsQuery = useListCampaigns({ query: { queryKey: getListCampaignsQueryKey() } });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const campaigns = campaignsQuery.data ?? [];
+  const countsKnown = campaignsQuery.data != null;
   const counts = useMemo(() => ({
     total: campaigns.length,
     scheduled: campaigns.filter((campaign) => campaign.status === CampaignStatus.agendada).length,
@@ -555,9 +556,9 @@ export function CampaignsPage({ user }: { user: SessionUser }) {
     <Shell user={user} title="Campanhas" eyebrow="Visão geral" mobileNavOpen={mobileNavOpen} setMobileNavOpen={setMobileNavOpen}>
       <div className="animate-rise-in-delay">
         <div className="mb-8 grid gap-3 sm:grid-cols-3">
-          <div className="panel p-4"><span className="section-kicker">No espaço</span><strong className="mt-3 block text-3xl font-extrabold tracking-[-.07em] text-[#263044]" data-testid="text-campaign-count">{formatNumber(counts.total)}</strong><span className="mt-1 block text-xs text-[#7d7e87]">campanhas registradas</span></div>
-          <div className="panel p-4"><span className="section-kicker">Em preparação</span><strong className="mt-3 block text-3xl font-extrabold tracking-[-.07em] text-[#263044]" data-testid="text-draft-count">{formatNumber(counts.drafts)}</strong><span className="mt-1 block text-xs text-[#7d7e87]">rascunhos em aberto</span></div>
-          <div className="panel p-4"><span className="section-kicker">Próxima janela</span><strong className="mt-3 block text-3xl font-extrabold tracking-[-.07em] text-[#263044]" data-testid="text-scheduled-count">{formatNumber(counts.scheduled)}</strong><span className="mt-1 block text-xs text-[#7d7e87]">campanhas agendadas</span></div>
+          <div className="panel p-4"><span className="section-kicker">No espaço</span><strong className="mt-3 block text-3xl font-extrabold tracking-[-.07em] text-[#263044]" data-testid="text-campaign-count">{countsKnown ? formatNumber(counts.total) : '—'}</strong><span className="mt-1 block text-xs text-[#7d7e87]">campanhas registradas</span></div>
+          <div className="panel p-4"><span className="section-kicker">Em preparação</span><strong className="mt-3 block text-3xl font-extrabold tracking-[-.07em] text-[#263044]" data-testid="text-draft-count">{countsKnown ? formatNumber(counts.drafts) : '—'}</strong><span className="mt-1 block text-xs text-[#7d7e87]">rascunhos em aberto</span></div>
+          <div className="panel p-4"><span className="section-kicker">Próxima janela</span><strong className="mt-3 block text-3xl font-extrabold tracking-[-.07em] text-[#263044]" data-testid="text-scheduled-count">{countsKnown ? formatNumber(counts.scheduled) : '—'}</strong><span className="mt-1 block text-xs text-[#7d7e87]">campanhas agendadas</span></div>
         </div>
         <div className="mb-8">
           <AccountReputationCard />
@@ -3099,7 +3100,6 @@ export function CampaignDetailPage({ user, campaignId }: { user: SessionUser; ca
             onSaved={(updated) => {
               queryClient.setQueryData(getGetCampaignQueryKey(campaignId), updated);
               queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
-              queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
               queryClient.invalidateQueries({ queryKey: getGetCampaignAuditQueryKey(campaignId) });
                setOperationError(null);
                setOperationSuccess('Alterações salvas.');

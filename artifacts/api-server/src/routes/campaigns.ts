@@ -51,6 +51,7 @@ import {
   noEligibleRecipientsScheduleMessage,
 } from "../lib/campaign-schedule-policy";
 import { recipientDeliveryProjection } from "../lib/recipient-delivery-projection";
+import { emptyEmailRollup, loadCampaignReadRollups, loadCampaignReadProjection, loadCampaignReadCounts } from "../lib/campaign-read-metrics";
 import { referenceDateLabel } from "../lib/reference-date-label";
 import {
   CAMPAIGN_SEND_TIME_ZONE,
@@ -363,247 +364,6 @@ async function withSendMetrics<T extends Record<string, unknown>>(campaign: T): 
   };
 }
 
-async function countMainRecipients(
-  campaignId: string,
-  query?: {
-    gte?: string;
-    lt?: string;
-    lte?: string;
-    isNull?: boolean;
-    isNotNull?: string;
-    statuses?: readonly string[];
-  },
-  isReminder = false,
-): Promise<number> {
-  let request = supabaseAdminClient()
-    .from("destinatario")
-    .select("id", { count: "exact", head: true })
-    .eq("campanha_id", campaignId)
-    .eq("is_lembrete", isReminder);
-
-  if (query?.gte) request = request.gte("data_ultima_compra", query.gte);
-  if (query?.lt) request = request.lt("data_ultima_compra", query.lt);
-  if (query?.lte) request = request.lte("data_ultima_compra", query.lte);
-  if (query?.isNull) request = request.is("data_ultima_compra", null);
-  if (query?.isNotNull) request = request.not(query.isNotNull, "is", null);
-  if (query?.statuses) request = request.in("status", query.statuses).is("excluido_em", null);
-
-  const { count, error } = await request;
-  if (error) throw error;
-  return count ?? 0;
-}
-
-type CampaignEmailRollup = {
-  destinatarios: number;
-  enviados: number;
-  entregues: number;
-  aberturas: number;
-  cliques: number;
-  bounces: number;
-  bouncesPermanentes: number;
-  bouncesTemporarios: number;
-  bouncesIndeterminados: number;
-  reclamacoes: number;
-  descadastros: number;
-};
-
-type BounceClassification = "permanente" | "temporario" | "indeterminado";
-
-type CampaignEmailContact = {
-  recipient?: {
-    status: string;
-    enviado_em: string | null;
-    entregue_em: string | null;
-    aberto_em: string | null;
-    clicado_em: string | null;
-    descadastrado_em: string | null;
-  };
-  sent: boolean;
-  delivered: boolean;
-  opened: boolean;
-  clicked: boolean;
-  bounced: boolean;
-  bounceClassification: BounceClassification | null;
-  complained: boolean;
-};
-
-function emptyEmailRollup(): CampaignEmailRollup {
-  return {
-    destinatarios: 0,
-    enviados: 0,
-    entregues: 0,
-    aberturas: 0,
-    cliques: 0,
-    bounces: 0,
-    bouncesPermanentes: 0,
-    bouncesTemporarios: 0,
-    bouncesIndeterminados: 0,
-    reclamacoes: 0,
-    descadastros: 0,
-  };
-}
-
-function classifyBounceType(value: unknown): BounceClassification {
-  const type = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (type === "permanent" || type === "hard") return "permanente";
-  if (["transient", "temporary", "soft", "delayed"].includes(type)) {
-    return "temporario";
-  }
-  return "indeterminado";
-}
-
-async function loadCampaignEmailRollups(
-  campaignIds: string[],
-  isReminder = false,
-): Promise<Map<string, CampaignEmailRollup>> {
-  const output = new Map<string, CampaignEmailRollup>();
-  for (const id of campaignIds) output.set(id, emptyEmailRollup());
-  if (campaignIds.length === 0) return output;
-
-  const contacts = new Map<string, Map<string, CampaignEmailContact>>();
-  const getContact = (campaignId: string, email: unknown) => {
-    if (typeof email !== "string" || !email.trim()) return null;
-    const normalizedEmail = email.trim().toLowerCase();
-    let campaignContacts = contacts.get(campaignId);
-    if (!campaignContacts) {
-      campaignContacts = new Map();
-      contacts.set(campaignId, campaignContacts);
-    }
-    let contact = campaignContacts.get(normalizedEmail);
-    if (!contact) {
-      contact = {
-        sent: false,
-        delivered: false,
-        opened: false,
-        clicked: false,
-        bounced: false,
-        bounceClassification: null,
-        complained: false,
-      };
-      campaignContacts.set(normalizedEmail, contact);
-    }
-    return contact;
-  };
-
-  const client = supabaseAdminClient();
-  const pageSize = 1000;
-  let offset = 0;
-  while (true) {
-    const { data, error } = await client
-      .from("destinatario")
-      .select(
-        "campanha_id,email,status,enviado_em,entregue_em,aberto_em,clicado_em,descadastrado_em",
-      )
-      .in("campanha_id", campaignIds)
-      .eq("is_lembrete", isReminder)
-      .order("id", { ascending: true })
-      .range(offset, offset + pageSize - 1);
-    if (error) throw error;
-    for (const row of data ?? []) {
-      const rollup = output.get(row.campanha_id);
-      const contact = getContact(row.campanha_id, row.email);
-      if (!rollup || !contact) continue;
-      rollup.destinatarios += 1;
-      contact.recipient = {
-        status: row.status,
-        enviado_em: row.enviado_em,
-        entregue_em: row.entregue_em,
-        aberto_em: row.aberto_em,
-        clicado_em: row.clicado_em,
-        descadastrado_em: row.descadastrado_em,
-      };
-      contact.sent ||= Boolean(row.enviado_em) ||
-        ["enviado", "entregue", "aberto", "clicado", "bounce"].includes(row.status);
-      contact.delivered ||= Boolean(row.entregue_em) ||
-        ["entregue", "aberto", "clicado"].includes(row.status);
-      contact.opened ||= Boolean(row.aberto_em);
-      contact.clicked ||= Boolean(row.clicado_em);
-      contact.bounced ||= row.status === "bounce";
-    }
-    if ((data?.length ?? 0) < pageSize) break;
-    offset += pageSize;
-  }
-
-  offset = 0;
-  while (true) {
-    const { data, error } = await client
-      .from("evento_email")
-      .select("campanha_id,email,tipo,bounce_permanente,bounce_tipo_bruto")
-      .in("campanha_id", campaignIds)
-      .not("email", "is", null)
-      .order("id", { ascending: true })
-      .range(offset, offset + pageSize - 1);
-    if (error) throw error;
-    for (const row of data ?? []) {
-      const contact = getContact(row.campanha_id, row.email);
-      if (!contact) continue;
-      switch (row.tipo) {
-        case "email.sent":
-          contact.sent = true;
-          break;
-        case "email.delivered":
-          contact.delivered = true;
-          break;
-        case "email.opened":
-          contact.delivered = true;
-          contact.opened = true;
-          break;
-        case "email.clicked":
-          contact.delivered = true;
-          contact.clicked = true;
-          break;
-        case "email.bounced":
-          contact.bounced = true;
-          {
-            const classification =
-              row.bounce_permanente === true
-                ? "permanente"
-                : classifyBounceType(row.bounce_tipo_bruto);
-            if (
-              contact.bounceClassification === null ||
-              classification === "permanente" ||
-              (classification === "temporario" &&
-                contact.bounceClassification === "indeterminado")
-            ) {
-              contact.bounceClassification = classification;
-            }
-          }
-          break;
-        case "email.complained":
-          contact.delivered = true;
-          contact.complained = true;
-          break;
-      }
-    }
-    if ((data?.length ?? 0) < pageSize) break;
-    offset += pageSize;
-  }
-
-  for (const [campaignId, campaignContacts] of contacts) {
-    const rollup = output.get(campaignId);
-    if (!rollup) continue;
-    for (const contact of campaignContacts.values()) {
-      if (contact.sent) rollup.enviados += 1;
-      if (contact.delivered) rollup.entregues += 1;
-      if (contact.opened) rollup.aberturas += 1;
-      if (contact.clicked) rollup.cliques += 1;
-      if (contact.bounced) {
-        rollup.bounces += 1;
-        if (contact.bounceClassification === "permanente") {
-          rollup.bouncesPermanentes += 1;
-        } else if (contact.bounceClassification === "temporario") {
-          rollup.bouncesTemporarios += 1;
-        } else {
-          rollup.bouncesIndeterminados += 1;
-        }
-      }
-      if (contact.complained) rollup.reclamacoes += 1;
-      if (contact.recipient?.descadastrado_em) rollup.descadastros += 1;
-    }
-  }
-  return output;
-}
-
 function dateOnlyDaysAgo(days: number): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Sao_Paulo",
@@ -627,51 +387,17 @@ async function recipientSummary(
   referenceCustomLabel: string | null,
 ) {
   const today = dateOnlyDaysAgo(0);
-  const statusQueries = [
-    ["pendente", ["pendente", "processando"]],
-    ["enviado", ["enviado"]],
-    ["entregue", ["entregue", "aberto", "clicado"]],
-    ["bounce", ["bounce"]],
-    ["bloqueado", [
-      "bloqueado_modo_teste",
-      "bloqueado_desengajado",
-      "bloqueado_validacao_email",
-    ]],
-    ["suprimido", ["suprimido"]],
-    ["erro", ["erro"]],
-  ] as const;
-  const statusCounts = await Promise.all(
-    statusQueries.map(async ([, statuses]) => countMainRecipients(campaignId, { statuses })),
-  );
-  const { count: excludedCount, error: excludedError } = await supabaseAdminClient()
-    .from("destinatario").select("id", { count: "exact", head: true })
-    .eq("campanha_id", campaignId).eq("is_lembrete", false).not("excluido_em", "is", null);
-  if (excludedError) throw excludedError;
-  const reminderStatusCounts = await Promise.all(
-    statusQueries.map(async ([, statuses]) =>
-      countMainRecipients(campaignId, { statuses }, true),
-    ),
-  );
-  const recencyQueries = [
-    { gte: dateOnlyDaysAgo(30), lte: today },
-    { gte: dateOnlyDaysAgo(90), lt: dateOnlyDaysAgo(30) },
-    { gte: dateOnlyDaysAgo(180), lt: dateOnlyDaysAgo(90) },
-    { gte: dateOnlyDaysAgo(365), lt: dateOnlyDaysAgo(180) },
-    { lt: dateOnlyDaysAgo(365) },
-    { isNull: true },
-  ];
-  const recencyCounts = await Promise.all(
-    recencyQueries.map((query) => countMainRecipients(campaignId, query)),
-  );
+  const { statusCounts, reminderStatusCounts, recencyCounts, excludedCount } =
+    await loadCampaignReadCounts(campaignId, today);
   const [
     deliveryProjection,
     emailRollups,
     reminderRollups,
     disengagedCount,
   ] = await Promise.all([
-    recipientDeliveryProjection(supabaseAdminClient(), campaignId),
-    loadCampaignEmailRollups([campaignId]),
-    loadCampaignEmailRollups([campaignId], true),
+    loadCampaignReadProjection(campaignId),
+    loadCampaignReadRollups([campaignId]),
+    loadCampaignReadRollups([campaignId], true),
     countChronicDisengagedContacts(),
   ]);
   const email = emailRollups.get(campaignId) ?? emptyEmailRollup();
@@ -840,7 +566,7 @@ router.get("/campaigns", async (req, res) => {
       return;
     }
 
-    const rollups = await loadCampaignEmailRollups(
+    const rollups = await loadCampaignReadRollups(
       (campaigns ?? []).map((campaign) => campaign.id),
     );
     const campaignsWithRecipientCounts = (campaigns ?? []).map((campaign) => {
