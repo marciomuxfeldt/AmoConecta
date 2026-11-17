@@ -65,14 +65,11 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public AS $$
     FROM destinatario d JOIN campanha c ON c.id=d.campanha_id
     WHERE d.campanha_id=p_campaign_id AND d.is_lembrete=false
       AND nullif(d.email,'') IS NOT NULL
-  ), exclusions AS (
-    SELECT DISTINCT email FROM recipients WHERE excluido_em IS NOT NULL
   ), flags AS (
     SELECT r.email,
-      EXISTS(SELECT 1 FROM supressao s WHERE s.email=r.email) AS suppressed,
-      EXISTS(SELECT 1 FROM contato_desengajamento cd
-        WHERE cd.email=r.email AND cd.desengajado_cronico=true) AS chronic,
-      EXISTS(SELECT 1 FROM exclusions x WHERE x.email=r.email) AS excluded,
+      s.email IS NOT NULL AS suppressed,
+      cd.email IS NOT NULL AS chronic,
+      r.excluido_em IS NOT NULL AS excluded,
       r.include_disengaged,
       -- Same Gmail plus alias semantics as isRecipientAllowed().
       CASE WHEN split_part(r.email,'@',2)='gmail.com'
@@ -80,6 +77,9 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public AS $$
         THEN split_part(split_part(r.email,'@',1),'+',1)||'@gmail.com'
         ELSE r.email END AS allowlist_email
     FROM recipients r
+    LEFT JOIN supressao s ON s.email=r.email
+    LEFT JOIN contato_desengajamento cd
+      ON cd.email=r.email AND cd.desengajado_cronico=true
   ), eligible AS (
     SELECT *, NOT suppressed AND NOT excluded AND (include_disengaged OR NOT chronic) AS eligible,
       p_send_enabled OR allowlist_email=ANY(p_allowlist)
@@ -222,8 +222,59 @@ SELECT
   (SELECT count(*) FROM public.destinatario
     WHERE nullif(public.normalize_email(email),'') IS NULL) AS destinatarios_email_vazio;
 
--- Side by side for every campaign, main and reminder. {} means no contacts.
--- Changes caused by canonical normalization remain visible as iguais=false.
+-- One final result set contains three timing rows and two comparison rows
+-- per campaign (18 comparison rows for the current nine campaigns).
+-- SELECT below is the last row-returning statement, including on ROLLBACK.
+CREATE TEMP TABLE campaign_read_verification (
+  secao text NOT NULL,
+  funcao text,
+  duracao_ms numeric,
+  limite_ms integer,
+  aprovado boolean,
+  campanha_id uuid,
+  lembrete boolean,
+  anterior jsonb,
+  nova jsonb,
+  iguais boolean
+) ON COMMIT DROP;
+
+-- PL/pgSQL statements execute in this order: start -> call -> stop.
+-- No timing relies on the planner's ordering of independent expressions.
+DO $measurement$
+DECLARE
+  v_ids uuid[];
+  v_started timestamptz;
+  v_duration numeric;
+  v_campaign constant uuid := '8141923e-e3b3-46fd-a59b-19dcf42d5336';
+  v_today date := (now() AT TIME ZONE 'America/Sao_Paulo')::date;
+BEGIN
+  SELECT coalesce(array_agg(id),'{}'::uuid[]) INTO v_ids FROM public.campanha;
+
+  v_started := clock_timestamp();
+  PERFORM * FROM public.campaign_email_rollups(v_ids,false);
+  v_duration := extract(epoch FROM clock_timestamp()-v_started)*1000;
+  INSERT INTO campaign_read_verification(secao,funcao,duracao_ms,limite_ms,aprovado)
+    VALUES('medicao','campaign_email_rollups',v_duration,1000,v_duration<1000);
+
+  v_started := clock_timestamp();
+  PERFORM public.campaign_read_counts(v_campaign,v_today);
+  v_duration := extract(epoch FROM clock_timestamp()-v_started)*1000;
+  INSERT INTO campaign_read_verification(secao,funcao,duracao_ms,limite_ms,aprovado)
+    VALUES('medicao','campaign_read_counts',v_duration,1000,v_duration<1000);
+
+  -- true/empty allowlist measures an isolated read. It changes no environment
+  -- setting, authorizes no real sending, and preserves the previous scenario.
+  v_started := clock_timestamp();
+  PERFORM public.campaign_read_projection(v_campaign,true,ARRAY[]::text[]);
+  v_duration := extract(epoch FROM clock_timestamp()-v_started)*1000;
+  INSERT INTO campaign_read_verification(secao,funcao,duracao_ms,limite_ms,aprovado)
+    VALUES('medicao','campaign_read_projection',v_duration,300,v_duration<300);
+END;
+$measurement$;
+
+-- Compare after timing, so the reference calculation does not warm the
+-- rollup's buffers first. {} means no contacts.
+INSERT INTO campaign_read_verification(secao,campanha_id,lembrete,anterior,nova,iguais)
 WITH ids AS (SELECT coalesce(array_agg(id),'{}'::uuid[]) AS ids FROM public.campanha),
 previous AS (
   SELECT p.*,m.lembrete FROM ids CROSS JOIN (VALUES(false),(true)) m(lembrete)
@@ -232,7 +283,7 @@ previous AS (
   SELECT n.*,m.lembrete FROM ids CROSS JOIN (VALUES(false),(true)) m(lembrete)
   CROSS JOIN LATERAL public.campaign_email_rollups(ids.ids,m.lembrete) n
 )
-SELECT c.id AS campanha_id,m.lembrete,
+SELECT 'comparacao',c.id AS campanha_id,m.lembrete,
   coalesce(to_jsonb(p)-'campanha_id'-'lembrete','{}'::jsonb) AS anterior,
   coalesce(to_jsonb(n)-'campanha_id'-'lembrete','{}'::jsonb) AS nova,
   coalesce(to_jsonb(p)-'campanha_id'-'lembrete','{}'::jsonb)
@@ -242,17 +293,13 @@ LEFT JOIN previous p ON p.campanha_id=c.id AND p.lembrete=m.lembrete
 LEFT JOIN current n ON n.campanha_id=c.id AND n.lembrete=m.lembrete
 ORDER BY c.id,m.lembrete;
 
--- Acceptance: Execution Time < 1000 ms for EACH statement on today's data.
--- Do not apply if any exceeds that limit. Test with ROLLBACK instead of COMMIT.
-EXPLAIN (ANALYZE,BUFFERS)
-SELECT * FROM public.campaign_email_rollups(ARRAY(SELECT id FROM public.campanha),false);
-EXPLAIN (ANALYZE,BUFFERS)
-SELECT public.campaign_read_counts('8141923e-e3b3-46fd-a59b-19dcf42d5336',
-  (now() AT TIME ZONE 'America/Sao_Paulo')::date);
--- true/empty allowlist is an isolated read-performance scenario, not a change
--- to ENVIO_LIBERADO or ENVIO_ALLOWLIST. No recipient is authorized or sent.
-EXPLAIN (ANALYZE,BUFFERS)
-SELECT public.campaign_read_projection('8141923e-e3b3-46fd-a59b-19dcf42d5336',
-  true,ARRAY[]::text[]);
+-- One visible output: first the three times, then all comparisons.
+-- Acceptance: all aprovado=true AND all iguais=true.
+-- For a non-persistent trial, replace the final COMMIT with ROLLBACK.
+SELECT secao,funcao,duracao_ms,limite_ms,aprovado,
+  campanha_id,lembrete,anterior,nova,iguais
+FROM campaign_read_verification
+ORDER BY CASE secao WHEN 'medicao' THEN 0 ELSE 1 END,
+  funcao,campanha_id,lembrete;
 
 COMMIT;

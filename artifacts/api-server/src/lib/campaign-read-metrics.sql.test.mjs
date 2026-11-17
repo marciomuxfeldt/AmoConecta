@@ -6,6 +6,7 @@ import { PGlite } from "@electric-sql/pglite";
 const db = new PGlite();
 const id = "00000000-0000-0000-0000-000000000001";
 const migration = await readFile(new URL("../../../../supabase/migrations/202611170024_campaign_read_metrics.sql", import.meta.url), "utf8");
+let verificationRows;
 
 before(async () => {
   await db.exec(`
@@ -17,13 +18,18 @@ before(async () => {
     CREATE TABLE evento_email(campanha_id uuid,email text,tipo text,bounce_permanente boolean,bounce_tipo_bruto text);
     CREATE TABLE supressao(email text);
     CREATE TABLE contato_desengajamento(email text,desengajado_cronico boolean);
+    CREATE UNIQUE INDEX supressao_email_uidx ON supressao(email) WHERE email IS NOT NULL;
+    ALTER TABLE contato_desengajamento ADD PRIMARY KEY(email);
+    CREATE UNIQUE INDEX destinatario_campanha_email_lembrete_uidx
+      ON destinatario(campanha_id,email,is_lembrete);
     INSERT INTO campanha(id) VALUES ('${id}');
   `);
   const canonical = await readFile(new URL("../../../../supabase/migrations/202610050020_email_validation.sql", import.meta.url), "utf8");
   // Install the actual canonical function, not a simplified test substitute.
   await db.exec(canonical.slice(canonical.indexOf("CREATE OR REPLACE FUNCTION public.normalize_email("),
     canonical.indexOf("COMMENT ON FUNCTION public.normalize_email")));
-  await db.exec(migration);
+  const results = await db.exec(migration);
+  verificationRows = results.filter((result) => result.fields.some((field) => field.name === "secao")).at(-1).rows;
 });
 after(() => db.close());
 
@@ -151,4 +157,50 @@ test("canonical event normalization prevents an invisible address from creating 
   assert.equal(Number(current.entregues),1);
   assert.equal(Number(previous.enviados),2);
   assert.equal(Number(previous.entregues),2);
+});
+
+test("verification returns all three identified timings and both campaign comparisons in one result", () => {
+  const timings = verificationRows.filter((row) => row.secao === "medicao");
+  assert.deepEqual(timings.map((row) => [row.funcao,row.limite_ms]),[
+    ["campaign_email_rollups",1000],
+    ["campaign_read_counts",1000],
+    ["campaign_read_projection",300],
+  ]);
+  for (const row of timings) {
+    assert.ok(Number(row.duracao_ms)>=0);
+    assert.equal(row.aprovado,Number(row.duracao_ms)<row.limite_ms);
+  }
+  const comparisons = verificationRows.filter((row) => row.secao === "comparacao");
+  assert.deepEqual(comparisons.map((row) => [row.campanha_id,row.lembrete,row.iguais]),[
+    [id,false,true],[id,true,true],
+  ]);
+});
+
+test("joined projection preserves all counters with overlapping suppression, chronic disengagement and exclusion", async () => {
+  const campaign = "00000000-0000-0000-0000-000000000005";
+  await db.query("INSERT INTO campanha(id) VALUES($1)",[campaign]);
+  await db.query(`INSERT INTO destinatario(campanha_id,email,status,excluido_em) VALUES
+    ($1,'allowed+tag@gmail.com','pendente',null),
+    ($1,'domain@join.test','pendente',null),
+    ($1,'suppressed@join.test','pendente',null),
+    ($1,'excluded@join.test','pendente',now()),
+    ($1,'chronic@join.test','pendente',null)`,[campaign]);
+  await db.exec(`INSERT INTO supressao VALUES('suppressed@join.test');
+    INSERT INTO contato_desengajamento VALUES
+      ('suppressed@join.test',true),('excluded@join.test',true),('chronic@join.test',true);`);
+  const projection = async (enabled,allowlist) => (await db.query(
+    "SELECT campaign_read_projection($1,$2,$3::text[]) AS value",[campaign,enabled,allowlist])).rows[0].value;
+  const expected = {
+    total_na_lista:5,suprimidos_no_envio:1,permitidos_modo_teste:1,
+    bloqueados_modo_teste:1,receberao_de_fato:1,
+    desengajados_na_lista:3,bloqueados_desengajados:2,
+  };
+  assert.deepEqual(await projection(false,["allowed@gmail.com"]),expected);
+  const unrestricted = {...expected,permitidos_modo_teste:2,bloqueados_modo_teste:0,receberao_de_fato:2};
+  assert.deepEqual(await projection(false,["allowed@gmail.com","@join.test"]),unrestricted);
+  assert.deepEqual(await projection(true,[]),unrestricted);
+  await db.query("UPDATE campanha SET incluir_desengajados=true WHERE id=$1",[campaign]);
+  assert.deepEqual(await projection(false,["allowed@gmail.com","@join.test"]),{
+    ...unrestricted,permitidos_modo_teste:3,receberao_de_fato:3,bloqueados_desengajados:0,
+  });
 });
