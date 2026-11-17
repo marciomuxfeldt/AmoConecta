@@ -28,10 +28,27 @@ before(async () => {
   // Install the actual canonical function, not a simplified test substitute.
   await db.exec(canonical.slice(canonical.indexOf("CREATE OR REPLACE FUNCTION public.normalize_email("),
     canonical.indexOf("COMMENT ON FUNCTION public.normalize_email")));
+  await db.exec(`
+    ALTER TABLE destinatario ADD CONSTRAINT destinatario_email_normalizado_check
+      CHECK (email=public.normalize_email(email) AND email !~ '[[:space:]]') NOT VALID;
+    ALTER TABLE destinatario VALIDATE CONSTRAINT destinatario_email_normalizado_check;
+  `);
   const results = await db.exec(migration);
   verificationRows = results.filter((result) => result.fields.some((field) => field.name === "secao")).at(-1).rows;
 });
 after(() => db.close());
+
+test("recipient fixture guarantees normalized emails with a validated database constraint", async () => {
+  const constraint = (await db.query(`
+    SELECT convalidated FROM pg_constraint
+    WHERE conname='destinatario_email_normalizado_check'
+  `)).rows[0];
+  assert.equal(constraint.convalidated,true);
+  await assert.rejects(
+    db.query("INSERT INTO destinatario(campanha_id,email,status) VALUES($1,'UPPER@example.test','pendente')",[id]),
+    /destinatario_email_normalizado_check/,
+  );
+});
 
 test("read rollup deduplicates events, preserves timestamp evidence and permanent bounce precedence", async () => {
   await db.query(`INSERT INTO destinatario(campanha_id,email,status,enviado_em,descadastrado_em)
@@ -174,6 +191,18 @@ test("verification returns all three identified timings and both campaign compar
   assert.deepEqual(comparisons.map((row) => [row.campanha_id,row.lembrete,row.iguais]),[
     [id,false,true],[id,true,true],
   ]);
+  const plans = verificationRows.filter((row) => row.secao === "plano");
+  assert.equal(plans.length,1);
+  assert.ok(Array.isArray(plans[0].plano));
+  assert.ok(plans[0].plano[0].Plan);
+  assert.ok("Execution Time" in plans[0].plano[0]);
+  assert.ok("Shared Hit Blocks" in plans[0].plano[0].Plan);
+  const diagnostics = verificationRows.filter((row) => row.secao === "diagnostico");
+  assert.equal(diagnostics.length,1);
+  assert.equal(diagnostics[0].metadados.provolatile,"i");
+  assert.equal(diagnostics[0].metadados.proparallel,"s");
+  assert.equal(diagnostics[0].metadados.prosecdef,false);
+  assert.equal(diagnostics[0].metadados.language_name,"sql");
 });
 
 test("joined projection preserves all counters with overlapping suppression, chronic disengagement and exclusion", async () => {

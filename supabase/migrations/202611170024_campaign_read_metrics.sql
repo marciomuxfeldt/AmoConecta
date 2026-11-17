@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION public.campaign_email_rollups(
 )
 LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public AS $$
   WITH facts AS (
-    SELECT d.campanha_id, public.normalize_email(d.email) AS email, 1 AS recipients,
+    SELECT d.campanha_id, d.email, 1 AS recipients,
       d.enviado_em IS NOT NULL OR d.status IN ('enviado','entregue','aberto','clicado','bounce') AS sent,
       d.entregue_em IS NOT NULL OR d.status IN ('entregue','aberto','clicado') AS delivered,
       d.aberto_em IS NOT NULL AS opened, d.clicado_em IS NOT NULL AS clicked,
@@ -19,7 +19,7 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public AS $$
       d.descadastrado_em IS NOT NULL AS unsubscribed
     FROM destinatario d
     WHERE d.campanha_id=ANY(p_campaign_ids) AND d.is_lembrete=p_is_reminder
-      AND nullif(public.normalize_email(d.email),'') IS NOT NULL
+      AND nullif(d.email,'') IS NOT NULL
     UNION ALL
     -- Preserve the existing event attribution: events are grouped by campaign
     -- and address, including event-only contacts, for either message rollup.
@@ -235,7 +235,9 @@ CREATE TEMP TABLE campaign_read_verification (
   lembrete boolean,
   anterior jsonb,
   nova jsonb,
-  iguais boolean
+  iguais boolean,
+  plano jsonb,
+  metadados jsonb
 ) ON COMMIT DROP;
 
 -- PL/pgSQL statements execute in this order: start -> call -> stop.
@@ -272,6 +274,22 @@ BEGIN
 END;
 $measurement$;
 
+-- Preserve the requested pg_proc fields and include the joined language name:
+-- prolang::regtype is the raw language OID cast as a type name, not its language.
+INSERT INTO campaign_read_verification(secao,funcao,metadados)
+SELECT 'diagnostico','normalize_email',jsonb_build_object(
+  'proname',p.proname,
+  'provolatile',p.provolatile,
+  'proparallel',p.proparallel,
+  'prosecdef',p.prosecdef,
+  'prolang',p.prolang::regtype,
+  'language_name',l.lanname
+)
+FROM pg_proc p
+JOIN pg_language l ON l.oid=p.prolang
+WHERE p.proname='normalize_email'
+  AND p.pronamespace='public'::regnamespace;
+
 -- Compare after timing, so the reference calculation does not warm the
 -- rollup's buffers first. {} means no contacts.
 INSERT INTO campaign_read_verification(secao,campanha_id,lembrete,anterior,nova,iguais)
@@ -293,13 +311,32 @@ LEFT JOIN previous p ON p.campanha_id=c.id AND p.lembrete=m.lembrete
 LEFT JOIN current n ON n.campanha_id=c.id AND n.lembrete=m.lembrete
 ORDER BY c.id,m.lembrete;
 
--- One visible output: first the three times, then all comparisons.
--- Acceptance: all aprovado=true AND all iguais=true.
+-- Capture EXPLAIN as JSON so the editor can show the plan beside the
+-- measurements and comparisons in the same final result set.
+DO $explain$
+DECLARE
+  v_plan jsonb;
+BEGIN
+  EXECUTE $query$
+    EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+    SELECT * FROM public.campaign_email_rollups(
+      ARRAY(SELECT id FROM public.campanha),false
+    )
+  $query$ INTO v_plan;
+  INSERT INTO campaign_read_verification(secao,funcao,plano)
+    VALUES('plano','campaign_email_rollups',v_plan);
+END;
+$explain$;
+
+-- One visible result contains three timings, all comparisons, and EXPLAIN.
+-- Acceptance: all measurement rows approved, all comparisons equal, and
+-- inspect the plan row's temp buffer counts for any disk spill.
 -- For a non-persistent trial, replace the final COMMIT with ROLLBACK.
 SELECT secao,funcao,duracao_ms,limite_ms,aprovado,
-  campanha_id,lembrete,anterior,nova,iguais
+  campanha_id,lembrete,anterior,nova,iguais,plano,metadados
 FROM campaign_read_verification
-ORDER BY CASE secao WHEN 'medicao' THEN 0 ELSE 1 END,
+ORDER BY CASE secao WHEN 'medicao' THEN 0 WHEN 'comparacao' THEN 1
+    WHEN 'diagnostico' THEN 2 ELSE 3 END,
   funcao,campanha_id,lembrete;
 
 COMMIT;
