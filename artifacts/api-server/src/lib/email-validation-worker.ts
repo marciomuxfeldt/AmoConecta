@@ -14,6 +14,7 @@ import { logger } from "./logger";
 import { progressTimestampForIncrease } from "./email-validation-progress";
 import {
   EMAIL_VALIDATION_RATE_LIMIT_WAIT_MS,
+  MAX_EMAIL_VALIDATION_CONCURRENT_REQUESTS,
   MAX_EMAIL_VALIDATION_CYCLE_DURATION_MS,
   MAX_EMAIL_VALIDATION_REQUESTS_PER_CYCLE,
   runEmailValidationCycle,
@@ -21,6 +22,7 @@ import {
 } from "./email-validation-cycle";
 
 const BATCH_SIZE = 100;
+const PENDING_SCAN_SIZE = BATCH_SIZE * MAX_EMAIL_VALIDATION_CONCURRENT_REQUESTS;
 const MAX_ADDRESS_ATTEMPTS = 3;
 const PROVIDER_RETRY_MS = 30_000;
 const MAX_CACHE_QUERY_LENGTH = 5_500;
@@ -56,6 +58,66 @@ type CachedEmail = {
   resposta_bruta: Record<string, unknown>;
   verificado_em: string;
 };
+
+type ValidationCycleMetrics = {
+  pendingRowsFetched: number;
+  pendingSearchMs: number;
+  cacheLookupMs: number;
+  reservationMs: number;
+  zeroBounceRequestMs: number;
+  zeroBounceWallMs: number;
+  resultWriteMs: number;
+  limiterWaitMs: number;
+  leaseReleaseMs: number;
+  providerCalls: number;
+  providerEmails: number;
+  cacheHits: number;
+  peakConcurrentRequests: number;
+};
+
+function createValidationCycleMetrics(): ValidationCycleMetrics {
+  return {
+    pendingRowsFetched: 0,
+    pendingSearchMs: 0,
+    cacheLookupMs: 0,
+    reservationMs: 0,
+    zeroBounceRequestMs: 0,
+    zeroBounceWallMs: 0,
+    resultWriteMs: 0,
+    limiterWaitMs: 0,
+    leaseReleaseMs: 0,
+    providerCalls: 0,
+    providerEmails: 0,
+    cacheHits: 0,
+    peakConcurrentRequests: 0,
+  };
+}
+
+function addElapsed(
+  metrics: ValidationCycleMetrics,
+  field: keyof Pick<
+    ValidationCycleMetrics,
+    | "pendingSearchMs"
+    | "cacheLookupMs"
+    | "reservationMs"
+    | "zeroBounceRequestMs"
+    | "zeroBounceWallMs"
+    | "resultWriteMs"
+    | "limiterWaitMs"
+    | "leaseReleaseMs"
+  >,
+  startedAt: number,
+): void {
+  metrics[field] += performance.now() - startedAt;
+}
+
+function splitIntoBatches<T>(values: readonly T[], size: number): T[][] {
+  const batches: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += size) {
+    batches.push(values.slice(offset, offset + size));
+  }
+  return batches;
+}
 
 function cacheQueryLength(emails: readonly string[]): number {
   const values = emails
@@ -248,14 +310,17 @@ async function claimEmails(jobId: string, emails: string[], token: string) {
   };
 }
 
-async function findItems(jobId: string): Promise<ValidationJobItem[]> {
+async function findItems(
+  jobId: string,
+  limit = PENDING_SCAN_SIZE,
+): Promise<ValidationJobItem[]> {
   const { data, error } = await supabaseAdminClient()
     .from("validacao_email_job_item")
     .select("id,job_id,destinatario_id,email,email_normalizado,status,tentativas")
     .eq("job_id", jobId)
     .eq("status", "pendente")
     .order("id")
-    .limit(BATCH_SIZE);
+    .limit(limit);
   if (error) throw error;
   return (data ?? []) as ValidationJobItem[];
 }
@@ -420,19 +485,141 @@ async function finishOrRetry(job: ValidationJob): Promise<void> {
   if (finishError) throw finishError;
 }
 
-async function processJobBatch(
+type ClaimedValidationBatch = {
+  token: string;
+  emails: string[];
+  items: ValidationJobItem[];
+};
+
+type ValidationRequestOutcome =
+  | { kind: "completed"; requestStarted: true; processedItems: number; hasAddressErrors: boolean; insufficientCredits: boolean }
+  | { kind: "rate_limited"; requestStarted: true; retryAfterMs: number }
+  | { kind: "insufficient_credits"; requestStarted: true }
+  | { kind: "provider_error"; requestStarted: true; failedItems: number }
+  | { kind: "cancelled"; requestStarted: true }
+  | { kind: "not_started"; requestStarted: false };
+
+async function processClaimedValidationBatch(
   job: ValidationJob,
-): Promise<EmailValidationBatchOutcome> {
-  if (!(await isJobProcessing(job.id))) {
-    return { requestStarted: false, processedItems: 0, continueProcessing: false };
+  batch: ClaimedValidationBatch,
+  metrics: ValidationCycleMetrics,
+  hasTimeRemaining: () => boolean,
+  activeRequests: { count: number },
+): Promise<ValidationRequestOutcome> {
+  if (!hasTimeRemaining()) return { kind: "not_started", requestStarted: false };
+
+  activeRequests.count += 1;
+  metrics.peakConcurrentRequests = Math.max(
+    metrics.peakConcurrentRequests,
+    activeRequests.count,
+  );
+  metrics.providerCalls += 1;
+  metrics.providerEmails += batch.emails.length;
+  const requestStartedAt = performance.now();
+  let results: Awaited<ReturnType<typeof validateZeroBounceBatch>>;
+  try {
+    results = await validateZeroBounceBatch(batch.emails);
+  } catch (error) {
+    addElapsed(metrics, "zeroBounceRequestMs", requestStartedAt);
+    activeRequests.count -= 1;
+    if (error instanceof ZeroBounceError && error.insufficientCredits) {
+      return { kind: "insufficient_credits", requestStarted: true };
+    }
+    if (error instanceof ZeroBounceError && error.status === 429) {
+      return {
+        kind: "rate_limited",
+        requestStarted: true,
+        retryAfterMs: error.retryAfterMs ?? 10 * 60_000,
+      };
+    }
+    const technicalError = getTechnicalError(error);
+    const writeStartedAt = performance.now();
+    await updateItems(batch.items.map((item) =>
+      itemUpdate(item, "erro", undefined, undefined, technicalError.message),
+    ));
+    addElapsed(metrics, "resultWriteMs", writeStartedAt);
+    return {
+      kind: "provider_error",
+      requestStarted: true,
+      failedItems: batch.items.length,
+    };
   }
-  const client = supabaseAdminClient();
-  const items = await findItems(job.id);
-  if (items.length === 0) {
-    await finishOrRetry(job);
-    return { requestStarted: false, processedItems: 0, continueProcessing: false };
+  addElapsed(metrics, "zeroBounceRequestMs", requestStartedAt);
+  activeRequests.count -= 1;
+
+  const writeStartedAt = performance.now();
+  const successful = results.flatMap((item) =>
+    item.kind === "result" ? [item.value] : [],
+  );
+  // Persist paid results before checking whether cancellation stopped this job.
+  await persistCache(successful, job.id);
+  if (!(await isJobProcessing(job.id))) {
+    addElapsed(metrics, "resultWriteMs", writeStartedAt);
+    return { kind: "cancelled", requestStarted: true };
   }
 
+  const resultByEmail = new Map(
+    results.flatMap((item) =>
+      item.kind === "global_error"
+        ? []
+        : [[item.kind === "result" ? item.value.email : item.email, item] as const],
+    ),
+  );
+  const claimedEmails = new Set(batch.emails);
+  const updates = batch.items
+    .filter((item) => {
+      const email = item.email_normalizado ?? normalizeEmail(item.email);
+      return claimedEmails.has(email) && resultByEmail.has(email);
+    })
+    .map((item) => {
+      const email = item.email_normalizado ?? normalizeEmail(item.email);
+      const result = resultByEmail.get(email);
+      if (!result) {
+        return itemUpdate(item, "erro", undefined, undefined, "Resposta individual ausente.");
+      }
+      return result.kind === "result"
+        ? itemUpdate(item, "validado", result.value)
+        : itemUpdate(item, "erro", undefined, result.raw, result.message);
+    });
+  await updateItems(updates);
+  addElapsed(metrics, "resultWriteMs", writeStartedAt);
+
+  const insufficientCredits = results.some(
+    (item) =>
+      item.kind === "global_error" ||
+      (item.kind === "error" &&
+        /insufficient\s+credits|not\s+enough\s+credits|no\s+credits|out\s+of\s+credits/i.test(
+          item.message,
+        )),
+  );
+  return {
+    kind: "completed",
+    requestStarted: true,
+    processedItems: updates.filter((update) => update.values.status === "validado").length,
+    hasAddressErrors: results.some((item) => item.kind === "error"),
+    insufficientCredits,
+  };
+}
+
+async function processJobBatch(
+  job: ValidationJob,
+  requestCapacity: number,
+  hasTimeRemaining: () => boolean,
+  metrics: ValidationCycleMetrics,
+): Promise<EmailValidationBatchOutcome> {
+  if (!(await isJobProcessing(job.id))) {
+    return { requestsStarted: 0, processedItems: 0, continueProcessing: false };
+  }
+  const searchStartedAt = performance.now();
+  const items = await findItems(job.id);
+  addElapsed(metrics, "pendingSearchMs", searchStartedAt);
+  metrics.pendingRowsFetched += items.length;
+  if (items.length === 0) {
+    await finishOrRetry(job);
+    return { requestsStarted: 0, processedItems: 0, continueProcessing: false };
+  }
+
+  const preparationStartedAt = performance.now();
   const malformedCount = await markFormatErrors(items);
   const wellFormed = items
     .filter((item) => validCacheEmail(item.email))
@@ -441,226 +628,269 @@ async function processJobBatch(
     item.id,
     normalizeEmail(item.email),
   ]));
-  const normalizedEmails = [...new Set(normalizedByItem.values())];
+  const itemsByEmail = new Map<string, ValidationJobItem[]>();
+  for (const item of wellFormed) {
+    const email = normalizedByItem.get(item.id)!;
+    const matchingItems = itemsByEmail.get(email) ?? [];
+    matchingItems.push(item);
+    itemsByEmail.set(email, matchingItems);
+  }
+  const normalizedEmails = [...itemsByEmail.keys()];
   await updateItems(wellFormed.map((item) => ({
     id: item.id,
     values: { email_normalizado: normalizedByItem.get(item.id)! },
   })));
 
+  const cacheReadStartedAt = performance.now();
   const cache = await loadCache(normalizedEmails);
+  addElapsed(metrics, "cacheLookupMs", cacheReadStartedAt);
   const cachedCount = await applyCached(wellFormed, cache);
+  metrics.cacheHits += cachedCount;
+  addElapsed(metrics, "resultWriteMs", preparationStartedAt);
+
   const immediatelyCompleted = malformedCount + cachedCount;
   const cacheMisses = normalizedEmails.filter((email) => !cache.has(email));
+  const progressWriteStartedAt = performance.now();
+  const progressedJob = await advanceJobProgress(job, immediatelyCompleted);
+  addElapsed(metrics, "resultWriteMs", progressWriteStartedAt);
   if (cacheMisses.length === 0) {
-    await advanceJobProgress(job, immediatelyCompleted);
     return {
-      requestStarted: false,
+      requestsStarted: 0,
+      processedItems: immediatelyCompleted,
+      continueProcessing: true,
+    };
+  }
+  if (!hasTimeRemaining()) {
+    return {
+      requestsStarted: 0,
       processedItems: immediatelyCompleted,
       continueProcessing: true,
     };
   }
 
-  const token = randomUUID();
-  let claimed: string[] = [];
+  const requestGroups = splitIntoBatches(cacheMisses, BATCH_SIZE)
+    .slice(0, requestCapacity);
+  const claimAttempts = await Promise.allSettled(requestGroups.map(async (emails) => {
+    if (!hasTimeRemaining()) return { kind: "not_started" as const };
+    const token = randomUUID();
+    const reservationStartedAt = performance.now();
+    const claim = await claimEmails(job.id, emails, token);
+    addElapsed(metrics, "reservationMs", reservationStartedAt);
+    return { kind: "claimed" as const, token, emails, claim };
+  }));
+  const rejectedClaim = claimAttempts.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  const successfulClaims = claimAttempts.flatMap((result) =>
+    result.status === "fulfilled" && result.value.kind === "claimed"
+      ? [result.value]
+      : [],
+  );
+  const heldClaims = successfulClaims.filter((result) => result.claim.claimed.length > 0);
+  if (rejectedClaim) {
+    const releaseStartedAt = performance.now();
+    await Promise.allSettled(heldClaims.map((result) => releaseClaims(result.token)));
+    addElapsed(metrics, "leaseReleaseMs", releaseStartedAt);
+    throw rejectedClaim.reason;
+  }
+
+  const busy = successfulClaims.some((result) => result.claim.busy.length > 0);
+  const rateLimited = successfulClaims.some((result) => result.claim.rateLimited);
+  const newlyCachedEmails = [...new Set(
+    successfulClaims.flatMap((result) => result.claim.cached),
+  )];
+
   try {
-    const claim = await claimEmails(job.id, cacheMisses, token);
-    if (claim.rateLimited) {
-      await advanceJobProgress(job, immediatelyCompleted);
-      return {
-        requestStarted: false,
-        processedItems: immediatelyCompleted,
-        continueProcessing: true,
-        waitMs: EMAIL_VALIDATION_RATE_LIMIT_WAIT_MS,
-      };
-    }
-    claimed = claim.claimed;
     let newlyCachedCount = 0;
-
-    if (claim.cached.length) {
-      const newlyCached = await loadCache(claim.cached);
-      for (const item of wellFormed) {
-        const email = normalizedByItem.get(item.id);
-        const result = newlyCached.get(email ?? "");
-        if (result) {
-          const { error } = await client.from("validacao_email_job_item")
-            .update({
-              status: "validado",
-              resultado_status: result.status,
-              resposta_bruta: result.resposta_bruta,
-              verificado_em: result.verificado_em,
-              erro: null,
-              proxima_tentativa_em: null,
-            }).eq("id", item.id);
-          if (error) throw error;
-          newlyCachedCount += 1;
-        }
-      }
-    }
-    if (claimed.length === 0) {
-      const completed = immediatelyCompleted + newlyCachedCount;
-      await advanceJobProgress(job, completed);
-      if (claim.busy.length > 0) {
-        await markJob(job.id, "pendente", {
-          proxima_tentativa_em: new Date(Date.now() + 15_000).toISOString(),
-        });
-      }
-      return {
-        requestStarted: false,
-        processedItems: completed,
-        continueProcessing: claim.busy.length === 0,
-      };
-    }
-
-    const completedBeforeRequest = immediatelyCompleted + newlyCachedCount;
-    const progressedJob = await advanceJobProgress(job, completedBeforeRequest);
-    if (!(await isJobProcessing(job.id))) {
-      return {
-        requestStarted: false,
-        processedItems: completedBeforeRequest,
-        continueProcessing: false,
-      };
-    }
-
-    let results;
-    try {
-      results = await validateZeroBounceBatch(claimed);
-    } catch (error) {
-      if (error instanceof ZeroBounceError && error.insufficientCredits) {
-        await markJob(job.id, "sem_creditos", {
-          erro: "A ZeroBounce informou saldo insuficiente. Atualize os créditos e retome a validação.",
-        });
-        return {
-          requestStarted: true,
-          processedItems: completedBeforeRequest,
-          continueProcessing: false,
-        };
-      }
-      if (error instanceof ZeroBounceError && error.status === 429) {
-        await markJob(job.id, "pendente", {
-          proxima_tentativa_em: new Date(Date.now() + (error.retryAfterMs ?? 10 * 60_000)).toISOString(),
-          erro: "A ZeroBounce limitou temporariamente as solicitações. A fila será retomada depois.",
-        });
-        return {
-          requestStarted: true,
-          processedItems: completedBeforeRequest,
-          continueProcessing: false,
-        };
-      }
-      const technicalError = getTechnicalError(error);
-      const failedItems = wellFormed.filter((item) =>
-        claimed.includes(normalizedByItem.get(item.id) ?? ""),
+    if (newlyCachedEmails.length > 0) {
+      const cacheReadStartedAt = performance.now();
+      const newlyCached = await loadCache(newlyCachedEmails);
+      addElapsed(metrics, "cacheLookupMs", cacheReadStartedAt);
+      const cachedSet = new Set(newlyCachedEmails);
+      const newlyCachedItems = wellFormed.filter((item) =>
+        cachedSet.has(normalizedByItem.get(item.id) ?? ""),
       );
-      await updateItems(failedItems.map((item) =>
-        itemUpdate(item, "erro", undefined, undefined, technicalError.message),
-      ));
-      await markJob(job.id, "processando", {
-        tentativas: progressedJob.tentativas + 1,
-        erro: "A validação externa falhou; endereços não foram armazenados no cache.",
-      });
-      return {
-        requestStarted: true,
-        processedItems: completedBeforeRequest,
-        continueProcessing: false,
-      };
+      const writeStartedAt = performance.now();
+      newlyCachedCount = await applyCached(newlyCachedItems, newlyCached);
+      metrics.cacheHits += newlyCachedCount;
+      addElapsed(metrics, "resultWriteMs", writeStartedAt);
     }
+    const completedBeforeRequests = immediatelyCompleted + newlyCachedCount;
+    const cacheProgressStartedAt = performance.now();
+    const cacheProgressJob = await advanceJobProgress(progressedJob, newlyCachedCount);
+    addElapsed(metrics, "resultWriteMs", cacheProgressStartedAt);
 
-    const successful = results.flatMap((item) =>
-      item.kind === "result" ? [item.value] : [],
-    );
-    // A completed ZeroBounce response has value independently of this job.
-    // Persist paid verdicts before checking whether cancellation stopped the job.
-    await persistCache(successful, job.id);
     if (!(await isJobProcessing(job.id))) {
       return {
-        requestStarted: true,
-        processedItems: completedBeforeRequest,
+        requestsStarted: 0,
+        processedItems: completedBeforeRequests,
         continueProcessing: false,
       };
     }
-    const resultByEmail = new Map(
-      results.flatMap((item) =>
-        item.kind === "global_error"
-          ? []
-          : [[item.kind === "result" ? item.value.email : item.email, item] as const],
-      ),
-    );
-    const updates = wellFormed
-      .filter((item) => {
-        const email = normalizedByItem.get(item.id) ?? "";
-        return claimed.includes(email) && resultByEmail.has(email);
-      })
-      .map((item) => {
-        const email = normalizedByItem.get(item.id)!;
-        const result = resultByEmail.get(email);
-        if (!result) {
-          return itemUpdate(item, "erro", undefined, undefined, "Resposta individual ausente.");
-        }
-        return result.kind === "result"
-          ? itemUpdate(item, "validado", result.value)
-          : itemUpdate(item, "erro", undefined, result.raw, result.message);
-      });
-    await updateItems(updates);
 
-    const externallyCompleted = updates.filter(
-      (update) => update.values.status === "validado",
-    ).length;
-    const insufficientCreditsForAddress = results.some(
-      (item) =>
-        item.kind === "global_error" ||
-        (item.kind === "error" &&
-          /insufficient\s+credits|not\s+enough\s+credits|no\s+credits|out\s+of\s+credits/i.test(
-            item.message,
-          )),
+    const requestBatches: ClaimedValidationBatch[] = heldClaims.map((result) => ({
+      token: result.token,
+      emails: result.claim.claimed,
+      items: result.claim.claimed.flatMap((email) => itemsByEmail.get(email) ?? []),
+    }));
+    const activeRequests = { count: 0 };
+    const requestWaveStartedAt = performance.now();
+    const requestResults = await Promise.allSettled(requestBatches.map((batch) =>
+      processClaimedValidationBatch(
+        job,
+        batch,
+        metrics,
+        hasTimeRemaining,
+        activeRequests,
+      ),
+    ));
+    addElapsed(metrics, "zeroBounceWallMs", requestWaveStartedAt);
+    const rejectedRequest = requestResults.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
     );
-    const nextProcessed = Math.min(
-      job.total_pendentes,
-      progressedJob.processados + externallyCompleted,
+    if (rejectedRequest) throw rejectedRequest.reason;
+    const outcomes = requestResults.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
     );
-    await markJob(job.id, "processando", {
-      processados: nextProcessed,
-      ...progressTimestampForIncrease(progressedJob.processados, nextProcessed),
-      erro: insufficientCreditsForAddress
-        ? "A ZeroBounce informou saldo insuficiente."
-        : results.some((item) => item.kind === "error")
-        ? "Um ou mais endereços tiveram erro individual e serão tentados novamente."
-        : null,
-    });
-    if (insufficientCreditsForAddress) {
+    const requestsStarted = outcomes.filter((outcome) => outcome.requestStarted).length;
+    const externallyCompleted = outcomes.reduce(
+      (total, outcome) =>
+        total + (outcome.kind === "completed" ? outcome.processedItems : 0),
+      0,
+    );
+    const resultProgressStartedAt = performance.now();
+    await advanceJobProgress(cacheProgressJob, externallyCompleted);
+    addElapsed(metrics, "resultWriteMs", resultProgressStartedAt);
+
+    const rateLimitedResult = outcomes.find((outcome) => outcome.kind === "rate_limited");
+    const insufficientCredits = outcomes.some(
+      (outcome) =>
+        outcome.kind === "insufficient_credits" ||
+        (outcome.kind === "completed" && outcome.insufficientCredits),
+    );
+    const providerErrors = outcomes.filter((outcome) => outcome.kind === "provider_error");
+    const addressErrors = outcomes.some(
+      (outcome) => outcome.kind === "completed" && outcome.hasAddressErrors,
+    );
+    const cancelled = outcomes.some((outcome) => outcome.kind === "cancelled");
+
+    if (insufficientCredits) {
       await markJob(job.id, "sem_creditos", {
         erro: "A ZeroBounce informou saldo insuficiente. Atualize os créditos e retome a validação.",
       });
       return {
-        requestStarted: true,
-        processedItems: completedBeforeRequest + externallyCompleted,
+        requestsStarted,
+        processedItems: completedBeforeRequests + externallyCompleted,
         continueProcessing: false,
       };
     }
+    if (rateLimitedResult?.kind === "rate_limited") {
+      await markJob(job.id, "pendente", {
+        proxima_tentativa_em: new Date(Date.now() + rateLimitedResult.retryAfterMs).toISOString(),
+        erro: "A ZeroBounce limitou temporariamente as solicitações. A fila será retomada depois.",
+      });
+      return {
+        requestsStarted,
+        processedItems: completedBeforeRequests + externallyCompleted,
+        continueProcessing: false,
+      };
+    }
+    if (providerErrors.length > 0) {
+      await markJob(job.id, "processando", {
+        tentativas: job.tentativas + providerErrors.length,
+        erro: "A validação externa falhou; endereços não foram armazenados no cache.",
+      });
+      return {
+        requestsStarted,
+        processedItems: completedBeforeRequests + externallyCompleted,
+        continueProcessing: false,
+      };
+    }
+    if (busy) {
+      await markJob(job.id, "pendente", {
+        proxima_tentativa_em: new Date(Date.now() + 15_000).toISOString(),
+      });
+      return {
+        requestsStarted,
+        processedItems: completedBeforeRequests + externallyCompleted,
+        continueProcessing: false,
+      };
+    }
+    if (cancelled) {
+      return {
+        requestsStarted,
+        processedItems: completedBeforeRequests + externallyCompleted,
+        continueProcessing: false,
+      };
+    }
+    if (requestsStarted > 0) {
+      const writeStartedAt = performance.now();
+      await markJob(job.id, "processando", {
+        erro: addressErrors
+          ? "Um ou mais endereços tiveram erro individual e serão tentados novamente."
+          : null,
+      });
+      addElapsed(metrics, "resultWriteMs", writeStartedAt);
+    }
+
+    if (
+      requestsStarted === 0 &&
+      completedBeforeRequests === 0 &&
+      newlyCachedCount === 0 &&
+      !rateLimited
+    ) {
+      if (await isJobProcessing(job.id)) await finishOrRetry(job);
+      return { requestsStarted: 0, processedItems: 0, continueProcessing: false };
+    }
     return {
-      requestStarted: true,
-      processedItems: completedBeforeRequest + externallyCompleted,
+      requestsStarted,
+      processedItems: completedBeforeRequests + externallyCompleted,
       continueProcessing: true,
+      ...(rateLimited
+        ? { waitMs: EMAIL_VALIDATION_RATE_LIMIT_WAIT_MS }
+        : {}),
     };
   } finally {
-    if (claimed.length) await releaseClaims(token);
+    if (heldClaims.length > 0) {
+      const releaseStartedAt = performance.now();
+      await Promise.allSettled(heldClaims.map((result) => releaseClaims(result.token)));
+      addElapsed(metrics, "leaseReleaseMs", releaseStartedAt);
+    }
   }
 }
 
 export async function processCampaignEmailValidationJobs(): Promise<number> {
   const cycleStartedAt = performance.now();
-  const job = await selectJob();
-  if (!job) return 0;
+  const metrics = createValidationCycleMetrics();
+  let job: ValidationJob | null = null;
+  let stopReason = "no_job";
   try {
+    job = await selectJob();
+    if (!job) return 0;
     if (!process.env.ZEROBOUNCE_API_KEY?.trim()) {
       await markJob(job.id, "erro", {
         erro: "Configure ZEROBOUNCE_API_KEY no Repl do worker e retome a validação.",
       });
+      stopReason = "missing_api_key";
       return 0;
     }
-    const cycle = await runEmailValidationCycle(job, processJobBatch, {
-      maxRequests: MAX_EMAIL_VALIDATION_REQUESTS_PER_CYCLE,
-      maxDurationMs: MAX_EMAIL_VALIDATION_CYCLE_DURATION_MS,
-      startedAt: cycleStartedAt,
-    });
+    const cycle = await runEmailValidationCycle(
+      job,
+      (currentJob, requestCapacity, hasTimeRemaining) =>
+        processJobBatch(currentJob, requestCapacity, hasTimeRemaining, metrics),
+      {
+        maxRequests: MAX_EMAIL_VALIDATION_REQUESTS_PER_CYCLE,
+        maxDurationMs: MAX_EMAIL_VALIDATION_CYCLE_DURATION_MS,
+        maxConcurrentRequests: MAX_EMAIL_VALIDATION_CONCURRENT_REQUESTS,
+        startedAt: cycleStartedAt,
+        wait: async (ms) => {
+          const waitStartedAt = performance.now();
+          await new Promise<void>((resolve) => setTimeout(resolve, ms));
+          addElapsed(metrics, "limiterWaitMs", waitStartedAt);
+        },
+      },
+    );
+    stopReason = cycle.stopReason;
     if (cycle.stopReason !== "batch") {
       await finishOrRetry(cycle.job);
     }
@@ -668,6 +898,7 @@ export async function processCampaignEmailValidationJobs(): Promise<number> {
       ? 1
       : 0;
   } catch (error) {
+    if (!job) throw error;
     logger.error(
       { jobId: job.id, technicalError: getTechnicalError(error) },
       "Campaign email validation worker batch failed",
@@ -676,6 +907,29 @@ export async function processCampaignEmailValidationJobs(): Promise<number> {
       proxima_tentativa_em: new Date(Date.now() + PROVIDER_RETRY_MS).toISOString(),
       erro: "O worker encontrou uma falha temporária. Nenhum resultado incerto foi armazenado.",
     });
+    stopReason = "worker_error";
     return 0;
+  } finally {
+    logger.info(
+      {
+        jobId: job?.id ?? null,
+        stopReason,
+        providerCalls: metrics.providerCalls,
+        providerEmails: metrics.providerEmails,
+        pendingRowsFetched: metrics.pendingRowsFetched,
+        cacheHits: metrics.cacheHits,
+        pendingSearchMs: Math.round(metrics.pendingSearchMs),
+        cacheLookupMs: Math.round(metrics.cacheLookupMs),
+        reservationMs: Math.round(metrics.reservationMs),
+        zeroBounceRequestMs: Math.round(metrics.zeroBounceRequestMs),
+        zeroBounceWaveWallMs: Math.round(metrics.zeroBounceWallMs),
+        resultWriteMs: Math.round(metrics.resultWriteMs),
+        limiterWaitMs: Math.round(metrics.limiterWaitMs),
+        leaseReleaseMs: Math.round(metrics.leaseReleaseMs),
+        peakConcurrentRequests: metrics.peakConcurrentRequests,
+        cycleWallMs: Math.round(performance.now() - cycleStartedAt),
+      },
+      "Campaign email validation cycle metrics",
+    );
   }
 }

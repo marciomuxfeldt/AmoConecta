@@ -10,13 +10,15 @@ const job = { id: "job-1", processados: 44_000, total_pendentes: 98_447 };
 
 test("caps one validation cycle at 25 provider requests", async () => {
   let calls = 0;
+  const capacities: number[] = [];
   const result = await runEmailValidationCycle(
     job,
-    async () => {
+    async (_job, requestCapacity) => {
       calls += 1;
+      capacities.push(requestCapacity);
       return {
-        requestStarted: true,
-        processedItems: 100,
+        requestsStarted: requestCapacity,
+        processedItems: requestCapacity * 100,
         continueProcessing: true,
       };
     },
@@ -27,6 +29,7 @@ test("caps one validation cycle at 25 provider requests", async () => {
   assert.equal(result.requestsStarted, MAX_EMAIL_VALIDATION_REQUESTS_PER_CYCLE);
   assert.equal(result.stopReason, "request_limit");
   assert.equal(result.job.processados, 46_500);
+  assert.deepEqual(capacities, [6, 6, 6, 6, 1]);
 });
 
 test("does not start another batch after the 50-second budget", async () => {
@@ -37,7 +40,7 @@ test("does not start another batch after the 50-second budget", async () => {
     async () => {
       calls += 1;
       clock += 25_000;
-      return { requestStarted: true, processedItems: 100, continueProcessing: true };
+      return { requestsStarted: 1, processedItems: 100, continueProcessing: true };
     },
     { now: () => clock },
   );
@@ -54,7 +57,7 @@ test("stops the cycle when a batch signals that it must stop", async () => {
     job,
     async () => {
       calls += 1;
-      return { requestStarted: true, processedItems: 0, continueProcessing: false };
+      return { requestsStarted: 1, processedItems: 0, continueProcessing: false };
     },
     { now: () => 0 },
   );
@@ -74,12 +77,12 @@ test("waits for a shared rate-limit slot without counting a provider request", a
       calls += 1;
       return calls === 1
         ? {
-            requestStarted: false,
+            requestsStarted: 0,
             processedItems: 1,
             continueProcessing: true,
             waitMs: 1_000,
           }
-        : { requestStarted: true, processedItems: 1, continueProcessing: false };
+        : { requestsStarted: 1, processedItems: 1, continueProcessing: false };
     },
     {
       now: () => clock,
@@ -100,7 +103,7 @@ test("never reports more processed items than the job total", async () => {
   const result = await runEmailValidationCycle(
     { ...job, processados: 98_446 },
     async () => ({
-      requestStarted: false,
+      requestsStarted: 0,
       processedItems: 100,
       continueProcessing: false,
     }),

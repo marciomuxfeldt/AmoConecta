@@ -1,9 +1,10 @@
 export const MAX_EMAIL_VALIDATION_REQUESTS_PER_CYCLE = 25;
 export const MAX_EMAIL_VALIDATION_CYCLE_DURATION_MS = 50_000;
+export const MAX_EMAIL_VALIDATION_CONCURRENT_REQUESTS = 6;
 export const EMAIL_VALIDATION_RATE_LIMIT_WAIT_MS = 1_000;
 
 export type EmailValidationBatchOutcome = {
-  requestStarted: boolean;
+  requestsStarted: number;
   processedItems: number;
   continueProcessing: boolean;
   waitMs?: number;
@@ -22,6 +23,7 @@ type ProgressJob = {
 type CycleOptions = {
   maxRequests?: number;
   maxDurationMs?: number;
+  maxConcurrentRequests?: number;
   startedAt?: number;
   now?: () => number;
   wait?: (ms: number) => Promise<void>;
@@ -31,7 +33,11 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 export async function runEmailValidationCycle<T extends ProgressJob>(
   initialJob: T,
-  processBatch: (job: T) => Promise<EmailValidationBatchOutcome>,
+  processBatch: (
+    job: T,
+    requestCapacity: number,
+    hasTimeRemaining: () => boolean,
+  ) => Promise<EmailValidationBatchOutcome>,
   options: CycleOptions = {},
 ): Promise<{
   job: T;
@@ -41,6 +47,8 @@ export async function runEmailValidationCycle<T extends ProgressJob>(
   const maxRequests = options.maxRequests ?? MAX_EMAIL_VALIDATION_REQUESTS_PER_CYCLE;
   const maxDurationMs =
     options.maxDurationMs ?? MAX_EMAIL_VALIDATION_CYCLE_DURATION_MS;
+  const maxConcurrentRequests =
+    options.maxConcurrentRequests ?? MAX_EMAIL_VALIDATION_CONCURRENT_REQUESTS;
   const now = options.now ?? (() => performance.now());
   const wait = options.wait ?? delay;
   const startedAt = options.startedAt ?? now();
@@ -51,6 +59,9 @@ export async function runEmailValidationCycle<T extends ProgressJob>(
   if (!Number.isFinite(maxDurationMs) || maxDurationMs <= 0) {
     throw new RangeError("maxDurationMs must be positive.");
   }
+  if (!Number.isSafeInteger(maxConcurrentRequests) || maxConcurrentRequests < 1) {
+    throw new RangeError("maxConcurrentRequests must be a positive integer.");
+  }
 
   let job = initialJob;
   let requestsStarted = 0;
@@ -59,13 +70,25 @@ export async function runEmailValidationCycle<T extends ProgressJob>(
     requestsStarted < maxRequests &&
     now() - startedAt < maxDurationMs
   ) {
+    const requestCapacity = Math.min(
+      maxConcurrentRequests,
+      maxRequests - requestsStarted,
+    );
+    const hasTimeRemaining = () => now() - startedAt < maxDurationMs;
     // The deadline stops later batches; an in-flight paid request keeps its
     // existing provider timeout so an abort cannot leave an uncertain result.
-    const outcome = await processBatch(job);
+    const outcome = await processBatch(job, requestCapacity, hasTimeRemaining);
     if (!Number.isSafeInteger(outcome.processedItems) || outcome.processedItems < 0) {
       throw new RangeError("processedItems must be a non-negative integer.");
     }
-    if (outcome.requestStarted) requestsStarted += 1;
+    if (
+      !Number.isSafeInteger(outcome.requestsStarted) ||
+      outcome.requestsStarted < 0 ||
+      outcome.requestsStarted > requestCapacity
+    ) {
+      throw new RangeError("requestsStarted must fit the available cycle capacity.");
+    }
+    requestsStarted += outcome.requestsStarted;
     if (outcome.processedItems > 0) {
       job = {
         ...job,
