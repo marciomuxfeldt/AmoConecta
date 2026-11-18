@@ -897,7 +897,6 @@ export async function processDueCampaigns(): Promise<number> {
 
   try {
     await processPendingEmailEvents();
-    await processCampaignEmailValidationJobs();
     await refreshChronicDisengagementIfDue();
     await processBiExportJobs();
     await recoverStuckRecipients();
@@ -929,6 +928,8 @@ export async function processDueCampaigns(): Promise<number> {
     for (const campaign of completedWithReminders ?? []) {
       processed += await processReminderQueue(campaign as Campaign);
     }
+    // Complete scheduled sends and reminders before using the cycle for validation.
+    await processCampaignEmailValidationJobs();
     return processed;
   } finally {
     try {

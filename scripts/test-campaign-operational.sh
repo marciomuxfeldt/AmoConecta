@@ -20,6 +20,7 @@ await build({
     "artifacts/api-server/src/lib/campaign-send-window.test.ts",
     "artifacts/api-server/src/lib/config-diagnostics.test.ts",
     "artifacts/api-server/src/lib/email-validation-progress.test.ts",
+    "artifacts/api-server/src/lib/email-validation-cycle.test.ts",
   ],
   bundle: true, platform: "node", format: "esm",
   outdir: process.env.TEST_OUTPUT, outExtension: { ".js": ".mjs" },

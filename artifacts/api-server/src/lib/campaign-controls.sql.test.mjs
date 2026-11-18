@@ -865,3 +865,47 @@ test("quote SQL matches queue filters, unique addresses, cache, and invalid-form
   assert.equal(quote.formato_invalido, 2);
   assert.equal(Date.parse(quote.cache_mais_antigo_em), Date.parse("2025-10-01T12:00:00Z"));
 });
+
+test("validation claim ledger enforces the shared 30-per-minute cap and releases leases", async () => {
+  await db.query("DELETE FROM verificacao_email_api_chamada");
+  await db.query("DELETE FROM verificacao_email_lease");
+  const rateCampaign = "a0000000-0000-0000-0000-000000000008";
+  await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [rateCampaign]);
+  const jobId = (await row(
+    `INSERT INTO validacao_email_job(campanha_id,status,total_pendentes)
+     VALUES($1,'processando',32) RETURNING id`,
+    [rateCampaign],
+  )).id;
+  const token = (value) => `00000000-0000-0000-0000-${String(value).padStart(12, "0")}`;
+  const claim = async (email, value) => (await row(
+    "SELECT claim_verificacao_email_batch($1,$2::text[],$3::uuid) AS value",
+    [jobId, [email], token(value)],
+  )).value;
+
+  assert.deepEqual((await claim("lease@example.test", 1)).claimed, ["lease@example.test"]);
+  assert.deepEqual((await claim("lease@example.test", 2)).busy, ["lease@example.test"]);
+  assert.equal((await row(
+    "SELECT liberar_verificacao_email_batch($1::uuid) AS released",
+    [token(1)],
+  )).released, 1);
+  assert.deepEqual((await claim("lease@example.test", 3)).claimed, ["lease@example.test"]);
+
+  assert.deepEqual((await claim("expired@example.test", 4)).claimed, ["expired@example.test"]);
+  await db.query(
+    "UPDATE verificacao_email_lease SET expira_em=clock_timestamp()-interval '1 second' WHERE email=$1",
+    ["expired@example.test"],
+  );
+  assert.deepEqual((await claim("expired@example.test", 5)).claimed, ["expired@example.test"]);
+
+  for (let index = 0; index < 26; index += 1) {
+    const result = await claim(`rate-${index}@example.test`, 6 + index);
+    assert.equal(result.rate_limited, false);
+    assert.equal(result.claimed.length, 1);
+  }
+  const limited = await claim("rate-limit-final@example.test", 32);
+  assert.equal(limited.rate_limited, true);
+  assert.equal(limited.claimed.length, 0);
+  assert.equal((await row(
+    "SELECT count(*) AS n FROM verificacao_email_api_chamada",
+  )).n, 30);
+});
