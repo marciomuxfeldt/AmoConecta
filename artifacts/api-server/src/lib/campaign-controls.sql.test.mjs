@@ -97,6 +97,9 @@ before(async () => {
   await db.exec(
     await sqlFile("migrations/202611180026_email_validation_pending_scan.sql"),
   );
+  await db.exec(
+    await sqlFile("migrations/202611180027_bulk_email_validation_writes.sql"),
+  );
   const initialWindow = await row(
     "SELECT janela_envio_inicio::text, janela_envio_fim::text FROM campanha WHERE id=$1",
     [campaign],
@@ -876,6 +879,246 @@ test("pending validation scans have a valid job-and-id index", async () => {
      WHERE i.indexrelid='validacao_email_job_item_pending_id_idx'::regclass`,
   );
   assert.equal(index.indisvalid, true);
+});
+
+test("bulk validation writes preserve cache conflicts and count only newly processed pending items", async () => {
+  const writeCampaign = "a0000000-0000-0000-0000-000000000009";
+  await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [writeCampaign]);
+  const jobId = (await row(
+    `INSERT INTO validacao_email_job(campanha_id,status,total_pendentes,processados)
+     VALUES($1,'processando',4,0) RETURNING id`,
+    [writeCampaign],
+  )).id;
+  const ids = {
+    valid: await recipient("bulk-valid@example.test"),
+    malformed: await recipient("bulk-format@example.test"),
+    failed: await recipient("bulk-error@example.test"),
+    completed: await recipient("bulk-existing@example.test"),
+  };
+  for (const [email, id, status, verdict] of [
+    ["bulk-valid@example.test", ids.valid, "pendente", null],
+    ["bulk-format@example.test", ids.malformed, "pendente", null],
+    ["bulk-error@example.test", ids.failed, "pendente", null],
+    ["bulk-existing@example.test", ids.completed, "validado", "invalid"],
+  ]) {
+    await db.query(
+      `INSERT INTO validacao_email_job_item(job_id,destinatario_id,email,status,resultado_status)
+       VALUES($1,$2,$3,$4,$5)`,
+      [jobId, id, email, status, verdict],
+    );
+  }
+  await db.query(
+    `INSERT INTO verificacao_email(email,status,resposta_bruta)
+     VALUES('bulk-existing-cache@example.test','invalid','{"source":"existing"}'::jsonb)`,
+  );
+
+  const cacheRows = [
+    {
+      email: "bulk-valid@example.test",
+      status: "valid",
+      sub_status: null,
+      free_email: false,
+      did_you_mean: null,
+      dominio: "example.test",
+      smtp_provider: null,
+      mx_found: true,
+      resposta_bruta: { source: "provider" },
+      verificado_em: "2026-11-18T09:00:00.000Z",
+      origem: `campaign-validation:${jobId}`,
+    },
+    {
+      email: "bulk-existing-cache@example.test",
+      status: "valid",
+      sub_status: null,
+      free_email: null,
+      did_you_mean: null,
+      dominio: null,
+      smtp_provider: null,
+      mx_found: null,
+      resposta_bruta: { source: "new" },
+      verificado_em: "2026-11-18T09:00:00.000Z",
+      origem: `campaign-validation:${jobId}`,
+    },
+  ];
+  const itemUpdates = [
+    {
+      id: (await row("SELECT id FROM validacao_email_job_item WHERE job_id=$1 AND email=$2", [
+        jobId,
+        "bulk-valid@example.test",
+      ])).id,
+      status: "validado",
+      email_normalizado: "bulk-valid@example.test",
+      resultado_status: "valid",
+      resposta_bruta: { source: "provider" },
+      verificado_em: "2026-11-18T09:00:00.000Z",
+      erro: null,
+      tentativas: 0,
+      proxima_tentativa_em: null,
+    },
+    {
+      id: (await row("SELECT id FROM validacao_email_job_item WHERE job_id=$1 AND email=$2", [
+        jobId,
+        "bulk-format@example.test",
+      ])).id,
+      status: "formato_invalido",
+      email_normalizado: null,
+      erro: "Formato inválido.",
+      proxima_tentativa_em: null,
+    },
+    {
+      id: (await row("SELECT id FROM validacao_email_job_item WHERE job_id=$1 AND email=$2", [
+        jobId,
+        "bulk-error@example.test",
+      ])).id,
+      status: "erro",
+      email_normalizado: "bulk-error@example.test",
+      erro: "Falha temporária.",
+      tentativas: 1,
+      proxima_tentativa_em: "2026-11-18T09:01:00.000Z",
+    },
+    {
+      id: (await row("SELECT id FROM validacao_email_job_item WHERE job_id=$1 AND email=$2", [
+        jobId,
+        "bulk-existing@example.test",
+      ])).id,
+      status: "validado",
+      resultado_status: "valid",
+    },
+  ];
+  const applyBatch = async () => (await row(
+    `SELECT public.persist_validacao_email_batch($1,$2::jsonb,$3::jsonb) AS value`,
+    [jobId, JSON.stringify(cacheRows), JSON.stringify(itemUpdates)],
+  )).value;
+
+  assert.deepEqual(await applyBatch(), {
+    job_processing: true,
+    updated_items: 3,
+    processed_items: 2,
+  });
+  const persisted = await row(
+    `SELECT
+       (SELECT status FROM verificacao_email WHERE email='bulk-existing-cache@example.test') AS cache_status,
+       (SELECT status FROM validacao_email_job_item WHERE id=$1) AS completed_status,
+       (SELECT resultado_status FROM validacao_email_job_item WHERE id=$1) AS completed_verdict,
+       (SELECT status FROM validacao_email_job_item WHERE id=$2) AS error_status,
+       (SELECT tentativas FROM validacao_email_job_item WHERE id=$2) AS error_attempts`,
+    [itemUpdates[3].id, itemUpdates[2].id],
+  );
+  assert.equal(persisted.cache_status, "invalid");
+  assert.equal(persisted.completed_status, "validado");
+  assert.equal(persisted.completed_verdict, "invalid");
+  assert.equal(persisted.error_status, "erro");
+  assert.equal(persisted.error_attempts, 1);
+  assert.deepEqual(await applyBatch(), {
+    job_processing: true,
+    updated_items: 0,
+    processed_items: 0,
+  });
+});
+
+test("bulk validation persistence keeps paid cache results when a job was cancelled", async () => {
+  const cancelledCampaign = "a0000000-0000-0000-0000-000000000010";
+  await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [cancelledCampaign]);
+  const jobId = (await row(
+    `INSERT INTO validacao_email_job(campanha_id,status,total_pendentes)
+     VALUES($1,'cancelada',1) RETURNING id`,
+    [cancelledCampaign],
+  )).id;
+  const recipientId = await recipient("cancelled-bulk@example.test");
+  const itemId = (await row(
+    `INSERT INTO validacao_email_job_item(job_id,destinatario_id,email,status)
+     VALUES($1,$2,'cancelled-bulk@example.test','pendente') RETURNING id`,
+    [jobId, recipientId],
+  )).id;
+  const cache = [{
+    email: "cancelled-bulk@example.test",
+    status: "valid",
+    resposta_bruta: { source: "paid-result" },
+    verificado_em: "2026-11-18T09:00:00.000Z",
+    origem: `campaign-validation:${jobId}`,
+  }];
+  const result = await row(
+    `SELECT public.persist_validacao_email_batch($1,$2::jsonb,$3::jsonb) AS value`,
+    [jobId, JSON.stringify(cache), JSON.stringify([{
+      id: itemId,
+      status: "validado",
+      resultado_status: "valid",
+    }])],
+  );
+  assert.deepEqual(result.value, {
+    job_processing: false,
+    updated_items: 0,
+    processed_items: 0,
+  });
+  assert.equal(
+    (await row("SELECT status FROM verificacao_email WHERE email=$1", [cache[0].email])).status,
+    "valid",
+  );
+  assert.equal(
+    (await row("SELECT status FROM validacao_email_job_item WHERE id=$1", [itemId])).status,
+    "pendente",
+  );
+});
+
+test("one 100-address validation request persists its cache and item rows in bulk", async () => {
+  const batchCampaign = "a0000000-0000-0000-0000-000000000011";
+  await db.query("INSERT INTO campanha(id,status) VALUES($1,'enviando')", [batchCampaign]);
+  const recipients = await db.query(
+    `INSERT INTO destinatario(campanha_id,email)
+     SELECT $1,'bulk-100-' || n::text || '@example.test'
+     FROM generate_series(1,100) AS n
+     RETURNING id,email`,
+    [batchCampaign],
+  );
+  const jobId = (await row(
+    `INSERT INTO validacao_email_job(campanha_id,status,total_pendentes)
+     VALUES($1,'processando',100) RETURNING id`,
+    [batchCampaign],
+  )).id;
+  const items = await db.query(
+    `INSERT INTO validacao_email_job_item(job_id,destinatario_id,email)
+     SELECT $1,id,email FROM destinatario
+     WHERE campanha_id=$2 AND email LIKE 'bulk-100-%@example.test'
+     RETURNING id,email`,
+    [jobId, batchCampaign],
+  );
+  const verifiedAt = "2026-11-18T09:00:00.000Z";
+  const cacheRows = recipients.rows.map((recipientRow) => ({
+    email: recipientRow.email,
+    status: "valid",
+    resposta_bruta: { source: "provider" },
+    verificado_em: verifiedAt,
+    origem: `campaign-validation:${jobId}`,
+  }));
+  const itemUpdates = items.rows.map((item) => ({
+    id: item.id,
+    status: "validado",
+    email_normalizado: item.email,
+    resultado_status: "valid",
+    resposta_bruta: { source: "provider" },
+    verificado_em: verifiedAt,
+    erro: null,
+    tentativas: 0,
+    proxima_tentativa_em: null,
+  }));
+
+  const response = await row(
+    `SELECT public.persist_validacao_email_batch($1,$2::jsonb,$3::jsonb) AS value`,
+    [jobId, JSON.stringify(cacheRows), JSON.stringify(itemUpdates)],
+  );
+  assert.deepEqual(response.value, {
+    job_processing: true,
+    updated_items: 100,
+    processed_items: 100,
+  });
+  const counts = await row(
+    `SELECT
+       (SELECT count(*)::integer FROM verificacao_email WHERE origem=$1) AS cached,
+       (SELECT count(*)::integer FROM validacao_email_job_item
+        WHERE job_id=$2 AND status='validado') AS validated`,
+    [`campaign-validation:${jobId}`, jobId],
+  );
+  assert.deepEqual(counts, { cached: 100, validated: 100 });
 });
 
 test("validation claim ledger supports parallel leases and enforces the shared 30-per-minute cap", async () => {

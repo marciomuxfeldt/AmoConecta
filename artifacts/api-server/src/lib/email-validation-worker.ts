@@ -209,25 +209,21 @@ async function selectJob(): Promise<ValidationJob | null> {
   return claimed.data as ValidationJob | null;
 }
 
-async function updateItems(
-  updates: Array<{ id: string; values: Record<string, unknown> }>,
-): Promise<void> {
-  const client = supabaseAdminClient();
-  const concurrency = 10;
-  for (let offset = 0; offset < updates.length; offset += concurrency) {
-    const group = updates.slice(offset, offset + concurrency);
-    const results = await Promise.all(group.map(({ id, values }) =>
-      client.from("validacao_email_job_item").update(values).eq("id", id),
-    ));
-    const failed = results.find((result) => result.error)?.error;
-    if (failed) throw failed;
-  }
-}
+type ItemUpdate = { id: string; values: Record<string, unknown> };
 
-async function persistCache(results: readonly ZeroBounceEmailResult[], jobId: string) {
-  if (results.length === 0) return;
+type PersistedBatch = {
+  jobProcessing: boolean;
+  updatedItems: number;
+  processedItems: number;
+};
+
+async function persistValidationBatch(
+  jobId: string,
+  cacheResults: readonly ZeroBounceEmailResult[],
+  updates: readonly ItemUpdate[],
+): Promise<PersistedBatch> {
   const verifiedAt = new Date().toISOString();
-  const rows = results.map((result) => ({
+  const cacheRows = cacheResults.map((result) => ({
     email: result.email,
     status: result.status,
     sub_status: result.subStatus,
@@ -240,10 +236,40 @@ async function persistCache(results: readonly ZeroBounceEmailResult[], jobId: st
     verificado_em: verifiedAt,
     origem: `campaign-validation:${jobId}`,
   }));
-  const { error } = await supabaseAdminClient()
-    .from("verificacao_email")
-    .upsert(rows, { onConflict: "email", ignoreDuplicates: true });
+  const itemUpdates = updates.map(({ id, values }) => ({ id, ...values }));
+  const { data, error } = await supabaseAdminClient().rpc(
+    "persist_validacao_email_batch",
+    {
+      p_job_id: jobId,
+      p_cache_rows: cacheRows,
+      p_item_updates: itemUpdates,
+    },
+  );
   if (error) throw error;
+  const persisted = data as {
+    job_processing?: unknown;
+    updated_items?: unknown;
+    processed_items?: unknown;
+  } | null;
+  if (
+    typeof persisted?.job_processing !== "boolean" ||
+    !Number.isSafeInteger(persisted.updated_items) ||
+    !Number.isSafeInteger(persisted.processed_items)
+  ) {
+    throw new Error("A persistência em lote retornou uma resposta inválida.");
+  }
+  return {
+    jobProcessing: persisted.job_processing,
+    updatedItems: persisted.updated_items as number,
+    processedItems: persisted.processed_items as number,
+  };
+}
+
+async function updateItems(
+  jobId: string,
+  updates: Array<{ id: string; values: Record<string, unknown> }>,
+): Promise<PersistedBatch> {
+  return persistValidationBatch(jobId, [], updates);
 }
 
 async function markJob(
@@ -331,32 +357,21 @@ async function findItems(
   return (data ?? []) as ValidationJobItem[];
 }
 
-async function applyCached(
+function cachedItemUpdates(
   items: readonly ValidationJobItem[],
   cache: ReadonlyMap<string, CachedEmail>,
-): Promise<number> {
+): ItemUpdate[] {
   const updates: Array<{ id: string; values: Record<string, unknown> }> = [];
   for (const item of items) {
     const email = item.email_normalizado;
-    if (!email) {
-      if (!validCacheEmail(item.email)) {
-        updates.push({
-          id: item.id,
-          values: {
-            status: "formato_invalido",
-            email_normalizado: null,
-            erro: "Endereço rejeitado antes da validação externa por conter formato invisível ou inválido.",
-          },
-        });
-      }
-      continue;
-    }
+    if (!email) continue;
     if (!cache.has(email)) continue;
     const result = cache.get(email)!;
     updates.push({
       id: item.id,
       values: {
         status: "validado",
+        email_normalizado: email,
         resultado_status: result.status,
         resposta_bruta: result.resposta_bruta,
         verificado_em: result.verificado_em,
@@ -366,13 +381,11 @@ async function applyCached(
       },
     });
   }
-  await updateItems(updates);
-  return updates.length;
+  return updates;
 }
 
-async function markFormatErrors(items: readonly ValidationJobItem[]): Promise<number> {
-  const malformed = items.filter((item) => !validCacheEmail(item.email));
-  await updateItems(malformed.map((item) => ({
+function formatErrorUpdates(items: readonly ValidationJobItem[]): ItemUpdate[] {
+  return items.filter((item) => !validCacheEmail(item.email)).map((item) => ({
     id: item.id,
     values: {
       status: "formato_invalido",
@@ -380,8 +393,7 @@ async function markFormatErrors(items: readonly ValidationJobItem[]): Promise<nu
       erro: "Endereço rejeitado antes da validação externa por conter formato invisível ou inválido.",
       proxima_tentativa_em: null,
     },
-  })));
-  return malformed.length;
+  }));
 }
 
 function itemUpdate(
@@ -396,6 +408,7 @@ function itemUpdate(
     id: item.id,
     values: {
       status,
+      email_normalizado: item.email_normalizado ?? normalizeEmail(item.email),
       ...(result ? {
         resultado_status: result.status,
         resposta_bruta: result.raw,
@@ -551,10 +564,13 @@ async function processClaimedValidationBatch(
     }
     const technicalError = getTechnicalError(error);
     const writeStartedAt = performance.now();
-    await updateItems(batch.items.map((item) =>
+    const persisted = await updateItems(job.id, batch.items.map((item) =>
       itemUpdate(item, "erro", undefined, undefined, technicalError.message),
     ));
     addElapsed(metrics, "resultWriteMs", writeStartedAt);
+    if (!persisted.jobProcessing) {
+      return { kind: "cancelled", requestStarted: true };
+    }
     return {
       kind: "provider_error",
       requestStarted: true,
@@ -574,12 +590,6 @@ async function processClaimedValidationBatch(
     item.kind === "result" ? [item.value] : [],
   );
   // Persist paid results before checking whether cancellation stopped this job.
-  await persistCache(successful, job.id);
-  if (!(await isJobProcessing(job.id))) {
-    addElapsed(metrics, "resultWriteMs", writeStartedAt);
-    return { kind: "cancelled", requestStarted: true };
-  }
-
   const resultByEmail = new Map(
     results.flatMap((item) =>
       item.kind === "global_error"
@@ -603,12 +613,11 @@ async function processClaimedValidationBatch(
         ? itemUpdate(item, "validado", result.value)
         : itemUpdate(item, "erro", undefined, result.raw, result.message);
     });
-  await updateItems(updates);
+  const persisted = await persistValidationBatch(job.id, successful, updates);
   addElapsed(metrics, "resultWriteMs", writeStartedAt);
 
-  const processedItems = updates.filter(
-    (update) => update.values.status === "validado",
-  ).length;
+  if (!persisted.jobProcessing) return { kind: "cancelled", requestStarted: true };
+  const processedItems = persisted.processedItems;
   const progressStartedAt = performance.now();
   await progress.advance(processedItems);
   addElapsed(metrics, "resultWriteMs", progressStartedAt);
@@ -651,40 +660,48 @@ async function processJobBatch(
     return { requestsStarted: 0, processedItems: 0, continueProcessing: false };
   }
 
-  const preparationStartedAt = performance.now();
-  const malformedCount = await markFormatErrors(items);
+  const malformedItems = items.filter((item) => !validCacheEmail(item.email));
   const wellFormed = items
     .filter((item) => validCacheEmail(item.email))
     .map((item) => ({ ...item, email_normalizado: normalizeEmail(item.email) }));
-  const normalizedByItem = new Map(wellFormed.map((item) => [
-    item.id,
-    normalizeEmail(item.email),
-  ]));
   const itemsByEmail = new Map<string, ValidationJobItem[]>();
   for (const item of wellFormed) {
-    const email = normalizedByItem.get(item.id)!;
+    const email = item.email_normalizado!;
     const matchingItems = itemsByEmail.get(email) ?? [];
     matchingItems.push(item);
     itemsByEmail.set(email, matchingItems);
   }
   const normalizedEmails = [...itemsByEmail.keys()];
-  await updateItems(wellFormed.map((item) => ({
-    id: item.id,
-    values: { email_normalizado: normalizedByItem.get(item.id)! },
-  })));
 
   const cacheReadStartedAt = performance.now();
   const cache = await loadCache(normalizedEmails);
   addElapsed(metrics, "cacheLookupMs", cacheReadStartedAt);
-  const cachedCount = await applyCached(wellFormed, cache);
-  metrics.cacheHits += cachedCount;
-  addElapsed(metrics, "resultWriteMs", preparationStartedAt);
-
-  const immediatelyCompleted = malformedCount + cachedCount;
-  const cacheMisses = normalizedEmails.filter((email) => !cache.has(email));
+  const cachedUpdates = cachedItemUpdates(wellFormed, cache);
+  const initialUpdates = [
+    ...formatErrorUpdates(malformedItems),
+    ...cachedUpdates,
+  ];
+  let immediatelyCompleted = 0;
+  if (initialUpdates.length > 0) {
+    const writeStartedAt = performance.now();
+    const persisted = await updateItems(job.id, initialUpdates);
+    addElapsed(metrics, "resultWriteMs", writeStartedAt);
+    metrics.cacheHits += cachedUpdates.length;
+    if (!persisted.jobProcessing) {
+      metrics.stopDetail = "job_no_longer_processing";
+      return {
+        requestsStarted: 0,
+        processedItems: persisted.processedItems,
+        continueProcessing: false,
+      };
+    }
+    immediatelyCompleted = persisted.processedItems;
+  }
   const progressWriteStartedAt = performance.now();
   await progress.advance(immediatelyCompleted);
   addElapsed(metrics, "resultWriteMs", progressWriteStartedAt);
+
+  const cacheMisses = normalizedEmails.filter((email) => !cache.has(email));
   if (cacheMisses.length === 0) {
     return {
       requestsStarted: 0,
@@ -740,12 +757,24 @@ async function processJobBatch(
       addElapsed(metrics, "cacheLookupMs", cacheReadStartedAt);
       const cachedSet = new Set(newlyCachedEmails);
       const newlyCachedItems = wellFormed.filter((item) =>
-        cachedSet.has(normalizedByItem.get(item.id) ?? ""),
+        cachedSet.has(item.email_normalizado ?? ""),
       );
-      const writeStartedAt = performance.now();
-      newlyCachedCount = await applyCached(newlyCachedItems, newlyCached);
-      metrics.cacheHits += newlyCachedCount;
-      addElapsed(metrics, "resultWriteMs", writeStartedAt);
+      const updates = cachedItemUpdates(newlyCachedItems, newlyCached);
+      if (updates.length > 0) {
+        const writeStartedAt = performance.now();
+        const persisted = await updateItems(job.id, updates);
+        addElapsed(metrics, "resultWriteMs", writeStartedAt);
+        metrics.cacheHits += updates.length;
+        newlyCachedCount = persisted.processedItems;
+        if (!persisted.jobProcessing) {
+          metrics.stopDetail = "job_no_longer_processing";
+          return {
+            requestsStarted: 0,
+            processedItems: immediatelyCompleted + newlyCachedCount,
+            continueProcessing: false,
+          };
+        }
+      }
     }
     const completedBeforeRequests = immediatelyCompleted + newlyCachedCount;
     const cacheProgressStartedAt = performance.now();
