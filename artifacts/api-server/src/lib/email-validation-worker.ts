@@ -11,7 +11,10 @@ import {
 } from "./zerobounce";
 import { getTechnicalError } from "./technical-error";
 import { logger } from "./logger";
-import { progressTimestampForIncrease } from "./email-validation-progress";
+import {
+  createSerializedProgressCounter,
+  progressTimestampForIncrease,
+} from "./email-validation-progress";
 import {
   EMAIL_VALIDATION_RATE_LIMIT_WAIT_MS,
   MAX_EMAIL_VALIDATION_CONCURRENT_REQUESTS,
@@ -65,7 +68,7 @@ type ValidationCycleMetrics = {
   cacheLookupMs: number;
   reservationMs: number;
   zeroBounceRequestMs: number;
-  zeroBounceWallMs: number;
+  providerWaveWallMs: number;
   resultWriteMs: number;
   limiterWaitMs: number;
   leaseReleaseMs: number;
@@ -73,6 +76,7 @@ type ValidationCycleMetrics = {
   providerEmails: number;
   cacheHits: number;
   peakConcurrentRequests: number;
+  stopDetail: string | null;
 };
 
 function createValidationCycleMetrics(): ValidationCycleMetrics {
@@ -82,7 +86,7 @@ function createValidationCycleMetrics(): ValidationCycleMetrics {
     cacheLookupMs: 0,
     reservationMs: 0,
     zeroBounceRequestMs: 0,
-    zeroBounceWallMs: 0,
+    providerWaveWallMs: 0,
     resultWriteMs: 0,
     limiterWaitMs: 0,
     leaseReleaseMs: 0,
@@ -90,6 +94,7 @@ function createValidationCycleMetrics(): ValidationCycleMetrics {
     providerEmails: 0,
     cacheHits: 0,
     peakConcurrentRequests: 0,
+    stopDetail: null,
   };
 }
 
@@ -101,7 +106,7 @@ function addElapsed(
     | "cacheLookupMs"
     | "reservationMs"
     | "zeroBounceRequestMs"
-    | "zeroBounceWallMs"
+    | "providerWaveWallMs"
     | "resultWriteMs"
     | "limiterWaitMs"
     | "leaseReleaseMs"
@@ -254,21 +259,22 @@ async function markJob(
   if (error) throw error;
 }
 
-async function advanceJobProgress(
-  job: ValidationJob,
-  completedItems: number,
-): Promise<ValidationJob> {
-  const nextProcessed = Math.min(
+type JobProgressTracker = {
+  advance: (completedItems: number) => Promise<number>;
+};
+
+function createJobProgressTracker(job: ValidationJob): JobProgressTracker {
+  return createSerializedProgressCounter(
+    job.processados,
     job.total_pendentes,
-    job.processados + completedItems,
+    async (previous, next) => {
+      await markJob(job.id, "processando", {
+          processados: next,
+          ...progressTimestampForIncrease(previous, next),
+          erro: null,
+      });
+    },
   );
-  if (nextProcessed <= job.processados) return job;
-  await markJob(job.id, "processando", {
-    processados: nextProcessed,
-    ...progressTimestampForIncrease(job.processados, nextProcessed),
-    erro: null,
-  });
-  return { ...job, processados: nextProcessed };
 }
 
 async function isJobProcessing(jobId: string): Promise<boolean> {
@@ -504,7 +510,12 @@ async function processClaimedValidationBatch(
   batch: ClaimedValidationBatch,
   metrics: ValidationCycleMetrics,
   hasTimeRemaining: () => boolean,
-  activeRequests: { count: number },
+  activeRequests: {
+    count: number;
+    firstStartedAt: number | null;
+    lastCompletedAt: number | null;
+  },
+  progress: JobProgressTracker,
 ): Promise<ValidationRequestOutcome> {
   if (!hasTimeRemaining()) return { kind: "not_started", requestStarted: false };
 
@@ -516,11 +527,17 @@ async function processClaimedValidationBatch(
   metrics.providerCalls += 1;
   metrics.providerEmails += batch.emails.length;
   const requestStartedAt = performance.now();
+  activeRequests.firstStartedAt ??= requestStartedAt;
   let results: Awaited<ReturnType<typeof validateZeroBounceBatch>>;
   try {
     results = await validateZeroBounceBatch(batch.emails);
   } catch (error) {
-    addElapsed(metrics, "zeroBounceRequestMs", requestStartedAt);
+    const requestCompletedAt = performance.now();
+    metrics.zeroBounceRequestMs += requestCompletedAt - requestStartedAt;
+    activeRequests.lastCompletedAt = Math.max(
+      activeRequests.lastCompletedAt ?? requestCompletedAt,
+      requestCompletedAt,
+    );
     activeRequests.count -= 1;
     if (error instanceof ZeroBounceError && error.insufficientCredits) {
       return { kind: "insufficient_credits", requestStarted: true };
@@ -544,7 +561,12 @@ async function processClaimedValidationBatch(
       failedItems: batch.items.length,
     };
   }
-  addElapsed(metrics, "zeroBounceRequestMs", requestStartedAt);
+  const requestCompletedAt = performance.now();
+  metrics.zeroBounceRequestMs += requestCompletedAt - requestStartedAt;
+  activeRequests.lastCompletedAt = Math.max(
+    activeRequests.lastCompletedAt ?? requestCompletedAt,
+    requestCompletedAt,
+  );
   activeRequests.count -= 1;
 
   const writeStartedAt = performance.now();
@@ -584,6 +606,13 @@ async function processClaimedValidationBatch(
   await updateItems(updates);
   addElapsed(metrics, "resultWriteMs", writeStartedAt);
 
+  const processedItems = updates.filter(
+    (update) => update.values.status === "validado",
+  ).length;
+  const progressStartedAt = performance.now();
+  await progress.advance(processedItems);
+  addElapsed(metrics, "resultWriteMs", progressStartedAt);
+
   const insufficientCredits = results.some(
     (item) =>
       item.kind === "global_error" ||
@@ -595,7 +624,7 @@ async function processClaimedValidationBatch(
   return {
     kind: "completed",
     requestStarted: true,
-    processedItems: updates.filter((update) => update.values.status === "validado").length,
+    processedItems,
     hasAddressErrors: results.some((item) => item.kind === "error"),
     insufficientCredits,
   };
@@ -606,8 +635,10 @@ async function processJobBatch(
   requestCapacity: number,
   hasTimeRemaining: () => boolean,
   metrics: ValidationCycleMetrics,
+  progress: JobProgressTracker,
 ): Promise<EmailValidationBatchOutcome> {
   if (!(await isJobProcessing(job.id))) {
+    metrics.stopDetail = "job_no_longer_processing";
     return { requestsStarted: 0, processedItems: 0, continueProcessing: false };
   }
   const searchStartedAt = performance.now();
@@ -616,6 +647,7 @@ async function processJobBatch(
   metrics.pendingRowsFetched += items.length;
   if (items.length === 0) {
     await finishOrRetry(job);
+    metrics.stopDetail = "no_pending_items";
     return { requestsStarted: 0, processedItems: 0, continueProcessing: false };
   }
 
@@ -651,7 +683,7 @@ async function processJobBatch(
   const immediatelyCompleted = malformedCount + cachedCount;
   const cacheMisses = normalizedEmails.filter((email) => !cache.has(email));
   const progressWriteStartedAt = performance.now();
-  const progressedJob = await advanceJobProgress(job, immediatelyCompleted);
+  await progress.advance(immediatelyCompleted);
   addElapsed(metrics, "resultWriteMs", progressWriteStartedAt);
   if (cacheMisses.length === 0) {
     return {
@@ -717,10 +749,11 @@ async function processJobBatch(
     }
     const completedBeforeRequests = immediatelyCompleted + newlyCachedCount;
     const cacheProgressStartedAt = performance.now();
-    const cacheProgressJob = await advanceJobProgress(progressedJob, newlyCachedCount);
+    await progress.advance(newlyCachedCount);
     addElapsed(metrics, "resultWriteMs", cacheProgressStartedAt);
 
     if (!(await isJobProcessing(job.id))) {
+      metrics.stopDetail = "job_no_longer_processing";
       return {
         requestsStarted: 0,
         processedItems: completedBeforeRequests,
@@ -733,8 +766,11 @@ async function processJobBatch(
       emails: result.claim.claimed,
       items: result.claim.claimed.flatMap((email) => itemsByEmail.get(email) ?? []),
     }));
-    const activeRequests = { count: 0 };
-    const requestWaveStartedAt = performance.now();
+    const activeRequests = {
+      count: 0,
+      firstStartedAt: null as number | null,
+      lastCompletedAt: null as number | null,
+    };
     const requestResults = await Promise.allSettled(requestBatches.map((batch) =>
       processClaimedValidationBatch(
         job,
@@ -742,9 +778,16 @@ async function processJobBatch(
         metrics,
         hasTimeRemaining,
         activeRequests,
+        progress,
       ),
     ));
-    addElapsed(metrics, "zeroBounceWallMs", requestWaveStartedAt);
+    if (
+      activeRequests.firstStartedAt !== null &&
+      activeRequests.lastCompletedAt !== null
+    ) {
+      metrics.providerWaveWallMs +=
+        activeRequests.lastCompletedAt - activeRequests.firstStartedAt;
+    }
     const rejectedRequest = requestResults.find(
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
@@ -758,10 +801,6 @@ async function processJobBatch(
         total + (outcome.kind === "completed" ? outcome.processedItems : 0),
       0,
     );
-    const resultProgressStartedAt = performance.now();
-    await advanceJobProgress(cacheProgressJob, externallyCompleted);
-    addElapsed(metrics, "resultWriteMs", resultProgressStartedAt);
-
     const rateLimitedResult = outcomes.find((outcome) => outcome.kind === "rate_limited");
     const insufficientCredits = outcomes.some(
       (outcome) =>
@@ -775,6 +814,7 @@ async function processJobBatch(
     const cancelled = outcomes.some((outcome) => outcome.kind === "cancelled");
 
     if (insufficientCredits) {
+      metrics.stopDetail = "insufficient_credits";
       await markJob(job.id, "sem_creditos", {
         erro: "A ZeroBounce informou saldo insuficiente. Atualize os créditos e retome a validação.",
       });
@@ -785,6 +825,7 @@ async function processJobBatch(
       };
     }
     if (rateLimitedResult?.kind === "rate_limited") {
+      metrics.stopDetail = "provider_http_429";
       await markJob(job.id, "pendente", {
         proxima_tentativa_em: new Date(Date.now() + rateLimitedResult.retryAfterMs).toISOString(),
         erro: "A ZeroBounce limitou temporariamente as solicitações. A fila será retomada depois.",
@@ -796,6 +837,7 @@ async function processJobBatch(
       };
     }
     if (providerErrors.length > 0) {
+      metrics.stopDetail = "provider_error";
       await markJob(job.id, "processando", {
         tentativas: job.tentativas + providerErrors.length,
         erro: "A validação externa falhou; endereços não foram armazenados no cache.",
@@ -807,6 +849,7 @@ async function processJobBatch(
       };
     }
     if (busy) {
+      metrics.stopDetail = "address_lease_busy";
       await markJob(job.id, "pendente", {
         proxima_tentativa_em: new Date(Date.now() + 15_000).toISOString(),
       });
@@ -817,6 +860,7 @@ async function processJobBatch(
       };
     }
     if (cancelled) {
+      metrics.stopDetail = "job_cancelled";
       return {
         requestsStarted,
         processedItems: completedBeforeRequests + externallyCompleted,
@@ -866,18 +910,29 @@ export async function processCampaignEmailValidationJobs(): Promise<number> {
   let stopReason = "no_job";
   try {
     job = await selectJob();
-    if (!job) return 0;
+    if (!job) {
+      metrics.stopDetail = "no_job";
+      return 0;
+    }
     if (!process.env.ZEROBOUNCE_API_KEY?.trim()) {
       await markJob(job.id, "erro", {
         erro: "Configure ZEROBOUNCE_API_KEY no Repl do worker e retome a validação.",
       });
       stopReason = "missing_api_key";
+      metrics.stopDetail = "missing_api_key";
       return 0;
     }
+    const progress = createJobProgressTracker(job);
     const cycle = await runEmailValidationCycle(
       job,
       (currentJob, requestCapacity, hasTimeRemaining) =>
-        processJobBatch(currentJob, requestCapacity, hasTimeRemaining, metrics),
+        processJobBatch(
+          currentJob,
+          requestCapacity,
+          hasTimeRemaining,
+          metrics,
+          progress,
+        ),
       {
         maxRequests: MAX_EMAIL_VALIDATION_REQUESTS_PER_CYCLE,
         maxDurationMs: MAX_EMAIL_VALIDATION_CYCLE_DURATION_MS,
@@ -891,6 +946,7 @@ export async function processCampaignEmailValidationJobs(): Promise<number> {
       },
     );
     stopReason = cycle.stopReason;
+    if (!metrics.stopDetail) metrics.stopDetail = cycle.stopReason;
     if (cycle.stopReason !== "batch") {
       await finishOrRetry(cycle.job);
     }
@@ -898,6 +954,7 @@ export async function processCampaignEmailValidationJobs(): Promise<number> {
       ? 1
       : 0;
   } catch (error) {
+    metrics.stopDetail = job ? "worker_error" : "job_selection_error";
     if (!job) throw error;
     logger.error(
       { jobId: job.id, technicalError: getTechnicalError(error) },
@@ -914,6 +971,7 @@ export async function processCampaignEmailValidationJobs(): Promise<number> {
       {
         jobId: job?.id ?? null,
         stopReason,
+        stopDetail: metrics.stopDetail,
         providerCalls: metrics.providerCalls,
         providerEmails: metrics.providerEmails,
         pendingRowsFetched: metrics.pendingRowsFetched,
@@ -922,7 +980,7 @@ export async function processCampaignEmailValidationJobs(): Promise<number> {
         cacheLookupMs: Math.round(metrics.cacheLookupMs),
         reservationMs: Math.round(metrics.reservationMs),
         zeroBounceRequestMs: Math.round(metrics.zeroBounceRequestMs),
-        zeroBounceWaveWallMs: Math.round(metrics.zeroBounceWallMs),
+        providerWaveWallMs: Math.round(metrics.providerWaveWallMs),
         resultWriteMs: Math.round(metrics.resultWriteMs),
         limiterWaitMs: Math.round(metrics.limiterWaitMs),
         leaseReleaseMs: Math.round(metrics.leaseReleaseMs),

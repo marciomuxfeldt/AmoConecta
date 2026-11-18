@@ -25,7 +25,7 @@ test("caps one validation cycle at 25 provider requests", async () => {
     { now: () => 0 },
   );
 
-  assert.equal(calls, MAX_EMAIL_VALIDATION_REQUESTS_PER_CYCLE);
+  assert.equal(calls, capacities.length);
   assert.equal(result.requestsStarted, MAX_EMAIL_VALIDATION_REQUESTS_PER_CYCLE);
   assert.equal(result.stopReason, "request_limit");
   assert.equal(result.job.processados, 46_500);
@@ -49,6 +49,24 @@ test("does not start another batch after the 50-second budget", async () => {
   assert.equal(result.requestsStarted, 2);
   assert.equal(result.stopReason, "time_limit");
   assert.equal(MAX_EMAIL_VALIDATION_CYCLE_DURATION_MS, 50_000);
+});
+
+test("passes the remaining-time guard to prevent late provider calls", async () => {
+  let clock = 0;
+  let requestGuard: (() => boolean) | undefined;
+  const result = await runEmailValidationCycle(
+    job,
+    async (_job, _capacity, hasTimeRemaining) => {
+      requestGuard = hasTimeRemaining;
+      clock = MAX_EMAIL_VALIDATION_CYCLE_DURATION_MS;
+      return { requestsStarted: 0, processedItems: 0, continueProcessing: true };
+    },
+    { now: () => clock },
+  );
+
+  assert.equal(requestGuard?.(), false);
+  assert.equal(result.requestsStarted, 0);
+  assert.equal(result.stopReason, "time_limit");
 });
 
 test("stops the cycle when a batch signals that it must stop", async () => {

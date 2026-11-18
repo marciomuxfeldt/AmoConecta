@@ -119,6 +119,30 @@ test("credits use the documented GET endpoint and parse the provider balance", a
   }
 });
 
+test("HTTP 429 preserves the existing ten-minute retry delay", async () => {
+  const previous = process.env.ZEROBOUNCE_API_KEY;
+  process.env.ZEROBOUNCE_API_KEY = "test-secret";
+  let calls = 0;
+  try {
+    await assert.rejects(
+      validateZeroBounceBatch(["limited@example.test"], async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ error: "Too many requests" }), { status: 429 });
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof ZeroBounceError);
+        assert.equal(error.status, 429);
+        assert.equal(error.retryAfterMs, 10 * 60_000);
+        return true;
+      },
+    );
+    assert.equal(calls, 1);
+  } finally {
+    if (previous === undefined) delete process.env.ZEROBOUNCE_API_KEY;
+    else process.env.ZEROBOUNCE_API_KEY = previous;
+  }
+});
+
 test("malformed input is filtered by the caller; provider requests enforce the batch limit", async () => {
   const previous = process.env.ZEROBOUNCE_API_KEY;
   process.env.ZEROBOUNCE_API_KEY = "test-secret";

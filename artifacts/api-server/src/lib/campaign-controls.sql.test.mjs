@@ -94,6 +94,9 @@ before(async () => {
     .find((result) => result.fields.some((field) => field.name === "results_match"))
     ?.rows[0];
   assert.equal(quoteVerification?.results_match, true);
+  await db.exec(
+    await sqlFile("migrations/202611180026_email_validation_pending_scan.sql"),
+  );
   const initialWindow = await row(
     "SELECT janela_envio_inicio::text, janela_envio_fim::text FROM campanha WHERE id=$1",
     [campaign],
@@ -866,7 +869,16 @@ test("quote SQL matches queue filters, unique addresses, cache, and invalid-form
   assert.equal(Date.parse(quote.cache_mais_antigo_em), Date.parse("2025-10-01T12:00:00Z"));
 });
 
-test("validation claim ledger enforces the shared 30-per-minute cap and releases leases", async () => {
+test("pending validation scans have a valid job-and-id index", async () => {
+  const index = await row(
+    `SELECT i.indisvalid
+     FROM pg_index i
+     WHERE i.indexrelid='validacao_email_job_item_pending_id_idx'::regclass`,
+  );
+  assert.equal(index.indisvalid, true);
+});
+
+test("validation claim ledger supports parallel leases and enforces the shared 30-per-minute cap", async () => {
   await db.query("DELETE FROM verificacao_email_api_chamada");
   await db.query("DELETE FROM verificacao_email_lease");
   const rateCampaign = "a0000000-0000-0000-0000-000000000008";
@@ -897,12 +909,36 @@ test("validation claim ledger enforces the shared 30-per-minute cap and releases
   );
   assert.deepEqual((await claim("expired@example.test", 5)).claimed, ["expired@example.test"]);
 
-  for (let index = 0; index < 26; index += 1) {
+  const parallelClaims = await Promise.all(
+    Array.from({ length: 6 }, (_, index) =>
+      claim(`parallel-${index}@example.test`, 40 + index),
+    ),
+  );
+  assert.deepEqual(
+    parallelClaims.map((result) => result.claimed.length),
+    [1, 1, 1, 1, 1, 1],
+  );
+  assert.equal(new Set(parallelClaims.flatMap((result) => result.claimed)).size, 6);
+
+  const duplicateClaims = await Promise.all(
+    Array.from({ length: 6 }, (_, index) => claim("same-address@example.test", 50 + index)),
+  );
+  assert.equal(duplicateClaims.filter((result) => result.claimed.length === 1).length, 1);
+  assert.equal(duplicateClaims.filter((result) => result.busy.length === 1).length, 5);
+  const duplicateWinner = duplicateClaims.findIndex((result) => result.claimed.length === 1);
+  assert.equal((await row(
+    "SELECT liberar_verificacao_email_batch($1::uuid) AS released",
+    [token(50 + duplicateWinner)],
+  )).released, 1);
+
+  await db.query("DELETE FROM verificacao_email_api_chamada");
+  await db.query("DELETE FROM verificacao_email_lease");
+  for (let index = 0; index < 30; index += 1) {
     const result = await claim(`rate-${index}@example.test`, 6 + index);
     assert.equal(result.rate_limited, false);
     assert.equal(result.claimed.length, 1);
   }
-  const limited = await claim("rate-limit-final@example.test", 32);
+  const limited = await claim("rate-limit-final@example.test", 100);
   assert.equal(limited.rate_limited, true);
   assert.equal(limited.claimed.length, 0);
   assert.equal((await row(

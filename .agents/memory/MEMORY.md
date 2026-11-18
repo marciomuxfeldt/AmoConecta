@@ -19,3 +19,4 @@
 - [Email validation retry budget](email-validation-retry-budget.md) — keep three total attempts per address cumulative across resume; exhausted addresses are ignored, not classified.
 - [Campaign pause policy copy](campaign-pause-policy-copy.md) — display pause thresholds from the server policy through the API contract, never as duplicate frontend constants.
 - [Canonical e-mail normalization](email-normalization-policy.md) — the user reinforced that SQL must reuse the canonical normalizer, including webhook event keys.
+- [Concurrent index tests](pglite-concurrent-index.md) — run `CREATE INDEX CONCURRENTLY` as a standalone PGlite statement; multi-statement scripts run in a transaction.
